@@ -27,12 +27,9 @@ android {
       keyAlias = "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
     }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
-    }
+    // The AI Studio "debugConfig" keystore is not checked in, so debug builds
+    // use the standard auto-generated one instead. Restore this block, and the
+    // signingConfig line in buildTypes.debug, if you add debug.keystore back.
   }
 
   buildTypes {
@@ -43,7 +40,7 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
+      // Signed with the default debug keystore Android Studio generates.
     }
   }
   compileOptions {
