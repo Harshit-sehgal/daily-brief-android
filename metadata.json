@@ -1,0 +1,6 @@
+{
+  "name": "Daily Brief",
+  "description": "Pulls your day together from your device calendars and Notion, flags what overlaps, and asks Gemini for a short read on it.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
