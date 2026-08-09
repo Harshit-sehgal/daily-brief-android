@@ -68,7 +68,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api-level: [24, 37]
+        # GitHub-hosted runners have no API 37 emulator image yet, so the
+        # emulator step fails before any test runs. 24 is minSdk and 36 is the
+        # newest image the runners actually carry; API 37 is covered locally.
+        api-level: [24, 36]
 
     steps:
       - name: Check out repository
