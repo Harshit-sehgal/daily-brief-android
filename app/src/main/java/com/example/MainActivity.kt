@@ -19,8 +19,11 @@ import com.example.data.prefs.SettingKeys
 import com.example.receiver.BriefingAndReminderReceiver
 import com.example.ui.DailyBriefApp
 import com.example.ui.theme.DailyBriefTheme
+import com.example.ui.theme.LocalDensityTokens
+import com.example.ui.theme.LocalUiDensity
 import com.example.ui.theme.LocalWindowWidth
 import com.example.ui.theme.currentWindowWidth
+import com.example.ui.theme.tokensFor
 import com.example.ui.viewmodel.BriefingViewModel
 
 class MainActivity : ComponentActivity() {
@@ -33,6 +36,7 @@ class MainActivity : ComponentActivity() {
       val viewModel: BriefingViewModel = viewModel()
       val accentKey by viewModel.themeAccent.collectAsStateWithLifecycle()
       val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+      val density by viewModel.uiDensity.collectAsStateWithLifecycle()
 
       val systemDark = isSystemInDarkTheme()
       val darkTheme =
@@ -52,7 +56,11 @@ class MainActivity : ComponentActivity() {
       }
 
       DailyBriefTheme(accentKey = accentKey, darkTheme = darkTheme) {
-        CompositionLocalProvider(LocalWindowWidth provides currentWindowWidth()) {
+        CompositionLocalProvider(
+          LocalWindowWidth provides currentWindowWidth(),
+          LocalUiDensity provides density,
+          LocalDensityTokens provides tokensFor(density),
+        ) {
           Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,

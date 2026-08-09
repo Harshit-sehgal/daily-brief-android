@@ -34,16 +34,21 @@ class ScheduleAnalysisTest {
     endMs: Long,
     urgent: Boolean = false,
     deadline: Boolean = false,
+    allDay: Boolean = false,
+    source: String = "Manual",
+    location: String? = null,
   ) =
     BriefingEvent(
       id = id,
       title = id,
       startTime = startMs,
       endTime = endMs,
-      source = "Manual",
+      source = source,
       description = null,
       isDeadline = deadline,
       isUrgent = urgent,
+      isAllDay = allDay,
+      location = location,
     )
 
   @Test
@@ -83,7 +88,7 @@ class ScheduleAnalysisTest {
   @Test
   fun `all-day entries never count as clashes`() {
     val dayStart = instant(2026, 3, 5)
-    val allDay = event("all-day", dayStart, dayStart + 24 * HOUR)
+    val allDay = event("all-day", dayStart, dayStart + 24 * HOUR, allDay = true)
     val meeting = event("meeting", dayStart + 9 * HOUR, dayStart + 10 * HOUR)
 
     assertTrue(ScheduleAnalysis.isAllDay(allDay))
@@ -105,7 +110,7 @@ class ScheduleAnalysisTest {
     val stats =
       ScheduleAnalysis.statsFor(
         listOf(
-          event("all-day", dayStart, dayStart + 24 * HOUR),
+          event("all-day", dayStart, dayStart + 24 * HOUR, allDay = true),
           event("a", dayStart + 9 * HOUR, dayStart + 10 * HOUR),
           event("b", dayStart + 11 * HOUR, dayStart + 11 * HOUR + 30 * MINUTE, urgent = true),
         )
@@ -115,6 +120,23 @@ class ScheduleAnalysisTest {
     assertEquals(90, stats.bookedMinutes)
     assertEquals(1, stats.urgent)
     assertEquals(0, stats.conflicts)
+  }
+
+  @Test
+  fun `booked time can be clipped to the visible day`() {
+    val dayStart = instant(2026, 3, 5)
+    val stats =
+      ScheduleAnalysis.statsFor(
+        events =
+          listOf(
+            event("overnight", dayStart - HOUR, dayStart + HOUR),
+            event("evening", dayStart + 23 * HOUR, dayStart + 26 * HOUR),
+          ),
+        startInclusive = dayStart,
+        endExclusive = dayStart + 24 * HOUR,
+      )
+
+    assertEquals(120, stats.bookedMinutes)
   }
 
   @Test
@@ -176,6 +198,42 @@ class ScheduleAnalysisTest {
       ScheduleAnalysis.signature(listOf(a, b)),
       ScheduleAnalysis.signature(listOf(a.copy(startTime = a.startTime + HOUR), b)),
     )
+    assertEquals(64, ScheduleAnalysis.signature(listOf(a, b)).length)
+  }
+
+  @Test
+  fun `signature covers every field sent to the brief model`() {
+    val base = event("a", instant(2026, 3, 5, 9), instant(2026, 3, 5, 10))
+    val signature = ScheduleAnalysis.signature(listOf(base))
+
+    assertNotEquals(signature, ScheduleAnalysis.signature(listOf(base.copy(source = "Notion"))))
+    assertNotEquals(signature, ScheduleAnalysis.signature(listOf(base.copy(location = "Studio"))))
+    assertNotEquals(signature, ScheduleAnalysis.signature(listOf(base.copy(isAllDay = true))))
+    // Blank locations are omitted from the prompt and intentionally canonicalized.
+    assertEquals(signature, ScheduleAnalysis.signature(listOf(base.copy(location = ""))))
+  }
+
+  @Test
+  fun `long timed events are not inferred to be all day`() {
+    val start = instant(2026, 3, 5)
+    val longTimed = event("travel", start, start + 21 * HOUR)
+
+    assertFalse(ScheduleAnalysis.isAllDay(longTimed))
+  }
+
+  @Test
+  fun `UTC all-day dates are rebuilt at local DST-aware midnights`() {
+    val losAngeles = TimeZone.getTimeZone("America/Los_Angeles")
+    val utcStart = instant(2026, 3, 8)
+    val utcEnd = instant(2026, 3, 9)
+
+    val (localStart, localEnd) =
+      ScheduleAnalysis.normalizeAllDayUtcRange(utcStart, utcEnd, losAngeles)
+
+    assertEquals(8, dayOfMonth(localStart, losAngeles))
+    assertEquals(9, dayOfMonth(localEnd, losAngeles))
+    assertEquals(0, ScheduleAnalysis.hourOf(localStart, losAngeles))
+    assertEquals(23 * HOUR, localEnd - localStart)
   }
 
   @Test

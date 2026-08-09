@@ -2,19 +2,20 @@ package com.example.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,11 +26,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.example.core.TimeFormatter
+import com.example.ui.theme.LocalDensityTokens
 import com.example.ui.theme.Space
 
 /**
@@ -87,6 +91,7 @@ private fun DayCell(
   onClick: () -> Unit,
 ) {
   val scheme = MaterialTheme.colorScheme
+  val cell = LocalDensityTokens.current.dayCell
   val background by
     animateColorAsState(
       targetValue = if (isSelected) scheme.primary else scheme.surfaceContainer,
@@ -102,19 +107,29 @@ private fun DayCell(
         },
       label = "day_cell_content",
     )
+  val accessibilityState =
+    buildList {
+        if (isToday) add("Today")
+        add(if (hasEvents) "Has events" else "No events")
+      }
+      .joinToString(", ")
 
   Column(
     modifier =
-      Modifier.width(46.dp)
+      Modifier.width(cell)
+        .heightIn(min = 48.dp)
         .clip(MaterialTheme.shapes.medium)
         .background(background)
-        .clickable(onClick = onClick)
-        .padding(vertical = Space.sm)
-        .semantics { contentDescription = formatter.fullDay(dayStart) },
+        .selectable(selected = isSelected, onClick = onClick, role = Role.Tab)
+        .padding(vertical = Space.xs)
+        .semantics {
+          contentDescription = formatter.fullDay(dayStart)
+          stateDescription = accessibilityState
+        },
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     Text(
-      text = formatter.weekday(dayStart).take(3),
+      text = formatter.weekday(dayStart),
       style = MaterialTheme.typography.labelSmall,
       color = if (isSelected) content else scheme.onSurfaceVariant,
     )

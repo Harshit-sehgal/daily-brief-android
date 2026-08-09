@@ -12,8 +12,11 @@ object EventSource {
   const val DEVICE = "Device Calendar"
   const val SAMPLE = "Sample"
 
-  /** Everything that a sync replaces wholesale; [MANUAL] and [SAMPLE] are user-owned. */
+  /** Externally synced sources; [MANUAL] and [SAMPLE] are user-owned. */
   val SYNCED = listOf(NOTION, GOOGLE, SAMSUNG, DEVICE)
+
+  /** Device-calendar sources whose provider rows we may write back to. */
+  val DEVICE_WRITABLE = listOf(GOOGLE, SAMSUNG, DEVICE)
 }
 
 @Entity(tableName = "briefing_events")
@@ -26,6 +29,8 @@ data class BriefingEvent(
   val description: String?,
   val isDeadline: Boolean,
   val isUrgent: Boolean,
+  /** Source-of-truth all-day state; never infer this from a long duration. */
+  val isAllDay: Boolean = false,
   val location: String? = null,
   val kanbanStatus: String = "To Do",
   val kanbanBoard: String = "Default",

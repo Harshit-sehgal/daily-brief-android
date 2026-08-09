@@ -28,7 +28,7 @@ val AppShapes =
  */
 @Composable
 fun DailyBriefTheme(
-  accentKey: String = Accents.Violet.key,
+  accentKey: String = Accents.Default.key,
   darkTheme: Boolean = isSystemInDarkTheme(),
   content: @Composable () -> Unit,
 ) {

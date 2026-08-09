@@ -18,19 +18,22 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface EventDao {
   /**
-   * Everything that *overlaps* the window, not just everything that starts in
-   * it — otherwise an event running from last night into this morning is
-   * missing from today.
+   * Everything that overlaps the half-open [startInclusive, endExclusive)
+   * window, not just everything that starts in it. Strict end comparisons keep
+   * an event ending at midnight out of the following day.
    */
   @Query(
-    "SELECT * FROM briefing_events WHERE startTime <= :end AND endTime >= :start ORDER BY startTime ASC"
+    "SELECT * FROM briefing_events WHERE startTime < :endExclusive AND endTime > :startInclusive ORDER BY startTime ASC"
   )
-  fun getEventsInRange(start: Long, end: Long): Flow<List<BriefingEvent>>
+  fun getEventsInRange(startInclusive: Long, endExclusive: Long): Flow<List<BriefingEvent>>
 
   @Query(
-    "SELECT * FROM briefing_events WHERE startTime <= :end AND endTime >= :start ORDER BY startTime ASC"
+    "SELECT * FROM briefing_events WHERE startTime < :endExclusive AND endTime > :startInclusive ORDER BY startTime ASC"
   )
-  suspend fun getEventsInRangeSync(start: Long, end: Long): List<BriefingEvent>
+  suspend fun getEventsInRangeSync(
+    startInclusive: Long,
+    endExclusive: Long,
+  ): List<BriefingEvent>
 
   @Query("SELECT * FROM briefing_events WHERE id = :id") suspend fun getEventById(id: String): BriefingEvent?
 
@@ -40,10 +43,28 @@ interface EventDao {
   @Query("SELECT * FROM briefing_events WHERE source IN (:sources)")
   suspend fun getEventsBySources(sources: List<String>): List<BriefingEvent>
 
+  @Query(
+    "SELECT * FROM briefing_events WHERE source IN (:sources) AND startTime < :endExclusive AND endTime > :startInclusive"
+  )
+  suspend fun getEventsBySourcesInRange(
+    sources: List<String>,
+    startInclusive: Long,
+    endExclusive: Long,
+  ): List<BriefingEvent>
+
   @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertEvents(events: List<BriefingEvent>)
 
   @Query("DELETE FROM briefing_events WHERE source IN (:sources)")
   suspend fun clearEventsBySources(sources: List<String>)
+
+  @Query(
+    "DELETE FROM briefing_events WHERE source IN (:sources) AND startTime < :endExclusive AND endTime > :startInclusive"
+  )
+  suspend fun clearEventsBySourcesInRange(
+    sources: List<String>,
+    startInclusive: Long,
+    endExclusive: Long,
+  )
 
   @Query("DELETE FROM briefing_events WHERE id = :id") suspend fun deleteEventById(id: String)
 
@@ -87,8 +108,8 @@ interface SettingDao {
 
 @Database(
   entities = [BriefingEvent::class, DailyBriefing::class, SystemSetting::class],
-  version = 4,
-  exportSchema = false,
+  version = 5,
+  exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
   abstract fun eventDao(): EventDao
@@ -113,6 +134,27 @@ abstract class AppDatabase : RoomDatabase() {
         }
       }
 
+    /** Adds real all-day state instead of continuing to infer it at runtime. */
+    private val MIGRATION_4_5 =
+      object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+          db.execSQL(
+            "ALTER TABLE briefing_events ADD COLUMN isAllDay INTEGER NOT NULL DEFAULT 0"
+          )
+          // Pre-v5 device all-day instances were stored as whole UTC-day spans.
+          // Restrict the one-time inference to those provider rows so a 21-hour
+          // manual event is never promoted to all-day.
+          db.execSQL(
+            "UPDATE briefing_events SET isAllDay = 1 " +
+              "WHERE source IN ('Google Calendar', 'Samsung Calendar', 'Device Calendar') " +
+              "AND endTime - startTime >= 86400000 " +
+              "AND (endTime - startTime) % 86400000 = 0 " +
+              "AND startTime % 86400000 = 0 " +
+              "AND endTime % 86400000 = 0"
+          )
+        }
+      }
+
     @Volatile private var INSTANCE: AppDatabase? = null
 
     fun getDatabase(context: Context): AppDatabase {
@@ -124,8 +166,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 "daily_brief_database",
               )
-              .addMigrations(MIGRATION_3_4)
-              .fallbackToDestructiveMigration(dropAllTables = true)
+              .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
               .build()
               .also { INSTANCE = it }
         }

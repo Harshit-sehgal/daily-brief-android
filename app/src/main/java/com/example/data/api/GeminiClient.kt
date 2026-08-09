@@ -1,7 +1,6 @@
 package com.example.data.api
 
 import android.util.Log
-import com.example.BuildConfig
 import com.example.core.ScheduleAnalysis
 import com.example.data.model.BriefingEvent
 import java.text.SimpleDateFormat
@@ -32,7 +31,8 @@ object GeminiClient {
    * the next one instead of surfacing an error, so the app keeps working when
    * model names are rotated. A specific model can be pinned from Settings.
    */
-  private val MODEL_CANDIDATES = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest")
+  private val MODEL_CANDIDATES =
+    listOf("gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash")
 
   private val client =
     OkHttpClient.Builder()
@@ -67,11 +67,11 @@ Do not restate the timeline; the app already shows it. Do not invent events.
     apiKeyOverride: String? = null,
     modelOverride: String? = null,
   ): BriefOutcome {
-    val apiKey = apiKeyOverride?.takeIf { it.isNotBlank() } ?: BuildConfig.GEMINI_API_KEY
-    if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
+    val apiKey = apiKeyOverride?.takeIf { it.isNotBlank() }
+    if (apiKey == null) {
       return BriefOutcome.LocalFallback(
-        localBrief(events),
-        "No Gemini API key configured. Add one in Settings to get an AI brief.",
+        localBrief(events, targetDate.time),
+        "No Gemini API key configured. Add your own key in Settings to get an AI brief.",
       )
     }
 
@@ -89,10 +89,11 @@ Do not restate the timeline; the app already shows it. Do not invent events.
           Log.w(TAG, "Model $model unavailable, trying next candidate")
           lastProblem = attempt.reason
         }
-        is Attempt.Failed -> return BriefOutcome.LocalFallback(localBrief(events), attempt.reason)
+        is Attempt.Failed ->
+          return BriefOutcome.LocalFallback(localBrief(events, targetDate.time), attempt.reason)
       }
     }
-    return BriefOutcome.LocalFallback(localBrief(events), lastProblem)
+    return BriefOutcome.LocalFallback(localBrief(events, targetDate.time), lastProblem)
   }
 
   private sealed interface Attempt {
@@ -115,7 +116,7 @@ Do not restate the timeline; the app already shows it. Do not invent events.
 
     return try {
       client.newCall(request).execute().use { response ->
-        val body = response.body?.string()
+        val body = response.body.string()
         if (!response.isSuccessful) {
           val detail = errorMessage(body)
           Log.e(TAG, "Gemini ${response.code} for $model: $body")
@@ -132,8 +133,6 @@ Do not restate the timeline; the app already shows it. Do not invent events.
             else -> Attempt.Failed(detail)
           }
         }
-        if (body == null) return Attempt.Failed("Gemini returned an empty response")
-
         val json = JSONObject(body)
         json.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotBlank() }
           ?.let {
@@ -180,8 +179,12 @@ Do not restate the timeline; the app already shows it. Do not invent events.
       events
         .sortedBy { it.startTime }
         .forEach { event ->
-          lines.append("- ${timeFormat.format(Date(event.startTime))}")
-          lines.append("–${timeFormat.format(Date(event.endTime))} ")
+          if (event.isAllDay) {
+            lines.append("- All day ")
+          } else {
+            lines.append("- ${timeFormat.format(Date(event.startTime))}")
+            lines.append("–${timeFormat.format(Date(event.endTime))} ")
+          }
           lines.append(event.title)
           val tags = buildList {
             if (event.isUrgent) add("urgent")
@@ -214,10 +217,9 @@ Do not restate the timeline; the app already shows it. Do not invent events.
           JSONObject()
             .put("parts", JSONArray().put(JSONObject().put("text", SYSTEM_INSTRUCTION.trimIndent()))),
         )
-        put(
-          "generationConfig",
-          JSONObject().put("temperature", 0.4).put("maxOutputTokens", 512),
-        )
+        // Newer Gemini models choose their own sampling behavior; pinning
+        // temperature is deprecated and can make future models reject a request.
+        put("generationConfig", JSONObject().put("maxOutputTokens", 512))
       }
       .toString()
   }
@@ -226,8 +228,14 @@ Do not restate the timeline; the app already shows it. Do not invent events.
    * Deterministic brief built from the same analysis the UI uses. Shown whenever
    * the model is unreachable so the screen is never empty.
    */
-  fun localBrief(events: List<BriefingEvent>): String {
-    val stats = ScheduleAnalysis.statsFor(events)
+  fun localBrief(events: List<BriefingEvent>, dayMs: Long? = null): String {
+    val stats =
+      if (dayMs == null) {
+        ScheduleAnalysis.statsFor(events)
+      } else {
+        val bounds = ScheduleAnalysis.dayBounds(dayMs)
+        ScheduleAnalysis.statsFor(events, bounds.first, bounds.last + 1)
+      }
     val conflicts = ScheduleAnalysis.findConflicts(events)
     val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
     val sb = StringBuilder()

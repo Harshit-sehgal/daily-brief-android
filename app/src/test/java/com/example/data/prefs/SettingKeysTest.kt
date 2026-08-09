@@ -13,6 +13,13 @@ class SettingKeysTest {
   }
 
   @Test
+  fun `versioned lists preserve delimiters and unicode`() {
+    val values = listOf("Sales, APAC", "Line one\nLine two", "Launch 🚀")
+
+    assertEquals(values, SettingKeys.decodeList(SettingKeys.encodeList(values)))
+  }
+
+  @Test
   fun `comma separated lists from older versions still load`() {
     assertEquals(
       listOf("To Do", "In Progress", "Done"),
@@ -25,6 +32,7 @@ class SettingKeysTest {
     assertNull(SettingKeys.decodeList(null))
     assertNull(SettingKeys.decodeList(""))
     assertNull(SettingKeys.decodeList("  \n , "))
+    assertNull(SettingKeys.decodeList(SettingKeys.encodeList(emptyList())))
   }
 
   @Test
@@ -36,5 +44,11 @@ class SettingKeysTest {
   fun `column keys are scoped per board`() {
     assertEquals("kanban_columns_Work", SettingKeys.columnsForBoard("Work"))
     assertEquals("kanban_columns_Default", SettingKeys.columnsForBoard(SettingKeys.DEFAULT_BOARD))
+  }
+
+  @Test
+  fun `malformed versioned values fail closed`() {
+    assertNull(SettingKeys.decodeList("dailybrief:list:v2|1|20:short"))
+    assertNull(SettingKeys.decodeList("dailybrief:list:v2|not-a-count|"))
   }
 }

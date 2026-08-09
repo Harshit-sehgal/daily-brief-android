@@ -10,6 +10,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.example.BuildConfig
 import com.example.MainActivity
 import com.example.R
 import com.example.core.ScheduleAnalysis
@@ -29,14 +30,17 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
     const val CHANNEL_ID_BRIEF = "daily_brief_channel"
     const val CHANNEL_ID_REMINDER = "meeting_reminder_channel"
 
-    const val ACTION_DAILY_BRIEF = "com.example.ACTION_DAILY_BRIEF"
-    const val ACTION_MEETING_REMINDER = "com.example.ACTION_MEETING_REMINDER"
+    val ACTION_DAILY_BRIEF = "${BuildConfig.APPLICATION_ID}.action.DAILY_BRIEF"
+    val ACTION_MEETING_REMINDER = "${BuildConfig.APPLICATION_ID}.action.EVENT_REMINDER"
+    val ACTION_REMINDER_MAINTENANCE =
+      "${BuildConfig.APPLICATION_ID}.action.REMINDER_MAINTENANCE"
 
     const val EXTRA_EVENT_ID = "extra_event_id"
     const val EXTRA_EVENT_TITLE = "extra_event_title"
     const val EXTRA_EVENT_TIME = "extra_event_time"
 
     private const val DAILY_BRIEF_NOTIFICATION_ID = 1001
+    private const val EVENT_REMINDER_NOTIFICATION_ID = 1002
 
     fun createNotificationChannels(context: Context) {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -63,6 +67,16 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
           }
       )
     }
+
+    fun canPostToChannel(context: Context, channelId: String): Boolean {
+      if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
+      val manager =
+        context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+          ?: return false
+      val channel = manager.getNotificationChannel(channelId) ?: return true
+      return channel.importance != NotificationManager.IMPORTANCE_NONE
+    }
   }
 
   override fun onReceive(context: Context, intent: Intent) {
@@ -78,6 +92,8 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
       try {
         when (action) {
           ACTION_DAILY_BRIEF -> handleDailyBrief(appContext)
+          ACTION_REMINDER_MAINTENANCE ->
+            refreshEventReminders(appContext, refreshCalendar = true)
           ACTION_MEETING_REMINDER ->
             showReminder(
               appContext,
@@ -85,8 +101,7 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
               intent.getStringExtra(EXTRA_EVENT_TITLE).orEmpty(),
               intent.getStringExtra(EXTRA_EVENT_TIME).orEmpty(),
             )
-          Intent.ACTION_BOOT_COMPLETED,
-          Intent.ACTION_MY_PACKAGE_REPLACED -> restoreAlarms(appContext)
+          else -> Log.w(TAG, "Ignoring unexpected action $action")
         }
       } catch (e: Exception) {
         Log.e(TAG, "Failed handling $action", e)
@@ -98,38 +113,61 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
 
   private suspend fun handleDailyBrief(context: Context) {
     val repository = BriefingRepository(context)
-    val bounds = ScheduleAnalysis.dayBounds(System.currentTimeMillis())
-    val events = repository.eventsInRangeOnce(bounds.first, bounds.last)
-    val stats = ScheduleAnalysis.statsFor(events)
+    try {
+      val bounds = ScheduleAnalysis.dayBounds(System.currentTimeMillis())
+      // Device-calendar I/O is local and bounded to today, so the notification
+      // does not summarize a stale Room snapshot. Notion/network refresh stays
+      // in the foreground sync path to keep BroadcastReceiver work short.
+      val refresh = repository.refreshDeviceCalendar(bounds.first, bounds.last + 1)
+      AlarmScheduler.cancelEventReminders(context, refresh.removedEvents)
+      refreshEventReminders(context, repository)
+      val events = repository.eventsInRangeOnce(bounds.first, bounds.last + 1)
+      val stats = ScheduleAnalysis.statsFor(events, bounds.first, bounds.last + 1)
 
-    val body =
-      when {
-        stats.total == 0 -> "Nothing scheduled today."
-        else ->
-          buildString {
-            append("${stats.total} ${if (stats.total == 1) "entry" else "entries"}")
-            if (stats.urgent > 0) append(" · ${stats.urgent} priority")
-            if (stats.conflicts > 0)
-              append(" · ${stats.conflicts} ${if (stats.conflicts == 1) "clash" else "clashes"}")
-          }
-      }
+      val body =
+        when {
+          stats.total == 0 -> "Nothing scheduled today."
+          else ->
+            buildString {
+              append("${stats.total} ${if (stats.total == 1) "entry" else "entries"}")
+              if (stats.urgent > 0) append(" · ${stats.urgent} priority")
+              if (stats.conflicts > 0)
+                append(
+                  " · ${stats.conflicts} ${if (stats.conflicts == 1) "clash" else "clashes"}"
+                )
+            }
+        }
 
-    val title =
-      "Today · ${SimpleDateFormat("EEEE d MMM", Locale.getDefault()).format(Date())}"
-    notify(
-      context,
-      DAILY_BRIEF_NOTIFICATION_ID,
-      CHANNEL_ID_BRIEF,
-      title,
-      body,
-      NotificationCompat.PRIORITY_DEFAULT,
-    )
+      val title =
+        "Today · ${SimpleDateFormat("EEEE d MMM", Locale.getDefault()).format(Date())}"
+      notify(
+        context,
+        DAILY_BRIEF_NOTIFICATION_ID,
+        CHANNEL_ID_BRIEF,
+        title,
+        body,
+        NotificationCompat.PRIORITY_DEFAULT,
+      )
+    } finally {
+      // The alarm is one-shot. Re-arm even when a database or notification
+      // operation fails, otherwise one transient error disables it forever.
+      scheduleNextDailyBriefIfEnabled(context, repository)
+    }
+  }
 
-    // Re-arm for tomorrow; a one-shot alarm would otherwise never fire again.
+  private suspend fun scheduleNextDailyBriefIfEnabled(
+    context: Context,
+    repository: BriefingRepository,
+  ) {
+    val enabled =
+      repository.readSetting(SettingKeys.DAILY_BRIEF_ENABLED)?.toBooleanStrictOrNull() ?: false
+    if (!enabled || !canPostToChannel(context, CHANNEL_ID_BRIEF)) {
+      AlarmScheduler.cancelDailyBrief(context)
+      return
+    }
     val hour = repository.readSetting(SettingKeys.BRIEF_HOUR)?.toIntOrNull() ?: 8
     val minute = repository.readSetting(SettingKeys.BRIEF_MINUTE)?.toIntOrNull() ?: 0
-    val enabled = repository.readSetting(SettingKeys.DAILY_BRIEF_ENABLED)?.toBooleanStrictOrNull() ?: true
-    if (enabled) AlarmScheduler.scheduleDailyBrief(context, hour, minute)
+    AlarmScheduler.scheduleDailyBrief(context, hour, minute)
   }
 
   private fun showReminder(context: Context, id: String, title: String, timeLabel: String) {
@@ -137,38 +175,63 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
     val body = if (timeLabel.isBlank()) "Starting soon." else "Starts at $timeLabel."
     notify(
       context,
-      if (id.isBlank()) title.hashCode() else id.hashCode(),
+      EVENT_REMINDER_NOTIFICATION_ID,
       CHANNEL_ID_REMINDER,
       title,
       body,
       NotificationCompat.PRIORITY_HIGH,
+      tag = "event-reminder:${id.ifBlank { title }}",
     )
   }
 
   /** After a reboot or an app update every alarm has to be laid down again. */
-  private suspend fun restoreAlarms(context: Context) {
+  internal suspend fun restoreAlarms(context: Context) {
     val repository = BriefingRepository(context)
     val briefEnabled =
-      repository.readSetting(SettingKeys.DAILY_BRIEF_ENABLED)?.toBooleanStrictOrNull() ?: true
-    if (briefEnabled) {
+      repository.readSetting(SettingKeys.DAILY_BRIEF_ENABLED)?.toBooleanStrictOrNull() ?: false
+    if (briefEnabled && canPostToChannel(context, CHANNEL_ID_BRIEF)) {
       AlarmScheduler.scheduleDailyBrief(
         context,
         repository.readSetting(SettingKeys.BRIEF_HOUR)?.toIntOrNull() ?: 8,
         repository.readSetting(SettingKeys.BRIEF_MINUTE)?.toIntOrNull() ?: 0,
       )
+    } else {
+      AlarmScheduler.cancelDailyBrief(context)
     }
 
+    refreshEventReminders(context, repository, refreshCalendar = true)
+  }
+
+  private suspend fun refreshEventReminders(
+    context: Context,
+    repository: BriefingRepository = BriefingRepository(context),
+    refreshCalendar: Boolean = false,
+  ) {
+    val now = System.currentTimeMillis()
+    val horizonEnd = ScheduleAnalysis.startOfDayOffset(now, 15)
     val remindersEnabled =
-      repository.readSetting(SettingKeys.REMINDERS_ENABLED)?.toBooleanStrictOrNull() ?: true
-    if (remindersEnabled) {
-      val now = System.currentTimeMillis()
-      val upcoming = repository.eventsInRangeOnce(now, now + 14 * ScheduleAnalysis.DAY_MS)
+      repository.readSetting(SettingKeys.REMINDERS_ENABLED)?.toBooleanStrictOrNull() ?: false
+    val canPost = canPostToChannel(context, CHANNEL_ID_REMINDER)
+    if (remindersEnabled && canPost && refreshCalendar) {
+      val refresh = repository.refreshDeviceCalendar(now, horizonEnd)
+      AlarmScheduler.cancelEventReminders(context, refresh.removedEvents)
+    }
+    if (remindersEnabled && canPost) {
+      val upcoming = repository.eventsInRangeOnce(now, horizonEnd)
       AlarmScheduler.replaceEventReminders(
         context = context,
         previous = emptyList(),
         events = upcoming,
         leadMinutes = repository.readSetting(SettingKeys.REMINDER_LEAD_MINUTES)?.toIntOrNull() ?: 30,
         enabled = true,
+      )
+    } else {
+      AlarmScheduler.replaceEventReminders(
+        context = context,
+        previous = emptyList(),
+        events = emptyList(),
+        leadMinutes = 30,
+        enabled = false,
       )
     }
   }
@@ -181,6 +244,7 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
     title: String,
     body: String,
     priority: Int,
+    tag: String? = null,
   ) {
     val contentIntent =
       PendingIntent.getActivity(
@@ -194,7 +258,7 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
 
     val notification =
       NotificationCompat.Builder(context, channelId)
-        .setSmallIcon(R.mipmap.ic_launcher)
+        .setSmallIcon(R.drawable.ic_stat_daily_brief)
         .setContentTitle(title)
         .setContentText(body)
         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -206,12 +270,12 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
     val manager = NotificationManagerCompat.from(context)
     // On Android 13+ posting without the runtime permission throws; the app
     // asks for it from Settings, and a refusal must not crash an alarm.
-    if (!manager.areNotificationsEnabled()) {
+    if (!canPostToChannel(context, channelId)) {
       Log.d(TAG, "Notifications disabled; skipping $channelId")
       return
     }
     try {
-      manager.notify(id, notification)
+      if (tag == null) manager.notify(id, notification) else manager.notify(tag, id, notification)
     } catch (e: SecurityException) {
       Log.w(TAG, "Missing POST_NOTIFICATIONS permission", e)
     }

@@ -49,49 +49,13 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
   )
 }
 
-/** The single surface treatment used for every panel in the app. */
-@Composable
-fun AppCard(
-  modifier: Modifier = Modifier,
-  onClick: (() -> Unit)? = null,
-  outlined: Boolean = false,
-  contentPadding: PaddingValues =
-    PaddingValues(Space.lg),
-  content: @Composable ColumnScope.() -> Unit,
-) {
-  val shape = MaterialTheme.shapes.large
-  val color = MaterialTheme.colorScheme.surfaceContainer
-  val border =
-    if (outlined) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null
-
-  if (onClick == null) {
-    Surface(modifier = modifier, shape = shape, color = color, border = border) {
-      Column(Modifier.padding(contentPadding), content = content)
-    }
-  } else {
-    Surface(onClick = onClick, modifier = modifier, shape = shape, color = color, border = border) {
-      Column(Modifier.padding(contentPadding), content = content)
-    }
-  }
-}
-
-/** One number with its label. Three of these make the day summary. */
-@Composable
-fun StatTile(label: String, value: String, tone: Color, modifier: Modifier = Modifier) {
-  AppCard(modifier = modifier, contentPadding = PaddingValues(Space.md)) {
-    Text(text = value, style = MaterialTheme.typography.headlineSmall, color = tone)
-    Spacer(Modifier.height(2.dp))
-    Text(
-      text = label,
-      style = MaterialTheme.typography.labelSmall,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-  }
-}
-
 /** Small status pill, e.g. the source of an event or a priority flag. */
 @Composable
-fun Tag(text: String, tone: Color = MaterialTheme.colorScheme.onSurfaceVariant, modifier: Modifier = Modifier) {
+fun Tag(
+  text: String,
+  modifier: Modifier = Modifier,
+  tone: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
   Box(
     modifier =
       modifier
@@ -104,83 +68,8 @@ fun Tag(text: String, tone: Color = MaterialTheme.colorScheme.onSurfaceVariant, 
 
 /** A coloured dot. Used instead of icons where a single pixel of meaning is enough. */
 @Composable
-fun Dot(tone: Color, size: Dp = 6.dp, modifier: Modifier = Modifier) {
+fun Dot(tone: Color, modifier: Modifier = Modifier, size: Dp = 6.dp) {
   Box(modifier = modifier.size(size).background(tone, CircleShape).clearAndSetSemantics {})
-}
-
-/**
- * Inline message strip for things the user may want to act on — a missing
- * permission, a failed integration, an out-of-date brief.
- */
-@Composable
-fun InlineNotice(
-  text: String,
-  modifier: Modifier = Modifier,
-  tone: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-  icon: ImageVector? = null,
-  actionLabel: String? = null,
-  onAction: (() -> Unit)? = null,
-) {
-  Surface(
-    modifier = modifier.fillMaxWidth(),
-    shape = MaterialTheme.shapes.medium,
-    color = tone.copy(alpha = 0.10f),
-  ) {
-    Row(
-      modifier = Modifier.padding(start = Space.md, end = Space.sm, top = Space.sm, bottom = Space.sm),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      if (icon != null) {
-        Icon(imageVector = icon, contentDescription = null, tint = tone, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(Space.sm))
-      }
-      Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.weight(1f),
-      )
-      if (actionLabel != null && onAction != null) {
-        Spacer(Modifier.width(Space.sm))
-        TextButton(onClick = onAction, contentPadding = PaddingValues(horizontal = Space.sm)) {
-          Text(text = actionLabel, style = MaterialTheme.typography.labelLarge, color = tone)
-        }
-      }
-    }
-  }
-}
-
-/** Shown wherever a list has nothing in it, always with a way forward. */
-@Composable
-fun EmptyState(
-  title: String,
-  message: String,
-  modifier: Modifier = Modifier,
-  actionLabel: String? = null,
-  onAction: (() -> Unit)? = null,
-) {
-  Column(
-    modifier = modifier.fillMaxWidth().padding(vertical = Space.xxl, horizontal = Space.lg),
-    horizontalAlignment = Alignment.CenterHorizontally,
-  ) {
-    Text(
-      text = title,
-      style = MaterialTheme.typography.titleMedium,
-      color = MaterialTheme.colorScheme.onSurface,
-      textAlign = TextAlign.Center,
-    )
-    Spacer(Modifier.height(Space.xs))
-    Text(
-      text = message,
-      style = MaterialTheme.typography.bodyMedium,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-      textAlign = TextAlign.Center,
-    )
-    if (actionLabel != null && onAction != null) {
-      Spacer(Modifier.height(Space.sm))
-      TextButton(onClick = onAction) { Text(actionLabel) }
-    }
-  }
 }
 
 /** Renders the brief. Headings, bullets, paragraphs and inline bold — nothing else. */

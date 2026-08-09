@@ -8,55 +8,66 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 /*
- * A single, flat palette. Neutrals carry the layout; one accent carries meaning.
- * Nothing here is mutated at runtime — the active accent is chosen when the
- * ColorScheme is built, so every colour reaching a composable is theme-scoped.
+ * Warm palette.
+ *
+ * The neutrals are not grey. Every one carries a low-chroma warm bias around
+ * 30-40° hue, so light mode reads as unbleached paper rather than a lab coat,
+ * and dark mode as warm charcoal rather than blue-black. That single decision
+ * does most of the work; the accents then sit on it without fighting.
+ *
+ * The six accents are three complementary pairs — terracotta/teal,
+ * sage/plum, honey/indigo. Any accent therefore has a natural counterpart, and
+ * because the status colours are drawn from the same family (brick, honey,
+ * sage) they never clash with whichever accent the user picked.
+ *
+ * Every foreground here clears WCAG AA (4.5:1) against the surface it sits on.
  */
 
-// ---- Neutrals -------------------------------------------------------------
+// ---- Warm neutrals --------------------------------------------------------
 
-private val InkBlack = Color(0xFF0B0B0C)
-private val InkSurface = Color(0xFF121214)
-private val InkSurfaceHigh = Color(0xFF1A1A1D)
-private val InkSurfaceHighest = Color(0xFF212125)
-private val InkOutline = Color(0xFF2E2E33)
-private val InkOutlineSoft = Color(0xFF1F1F23)
-private val InkOn = Color(0xFFECECEF)
-private val InkOnMuted = Color(0xFF97979F)
+/** Warm charcoal, not blue-black. */
+private val InkBase = Color(0xFF14110E)
+private val InkSurface = Color(0xFF1A1713)
+private val InkSurfaceHigh = Color(0xFF221E18)
+private val InkSurfaceHighest = Color(0xFF2B251E)
+private val InkOutline = Color(0xFF3B342B)
+private val InkOutlineSoft = Color(0xFF241F1A)
+private val InkOn = Color(0xFFF2EBE1)
+private val InkOnMuted = Color(0xFFABA093)
 
-private val PaperWhite = Color(0xFFFFFFFF)
-private val PaperSurface = Color(0xFFF7F7F8)
-private val PaperSurfaceHigh = Color(0xFFF1F1F3)
-private val PaperSurfaceHighest = Color(0xFFE9E9ED)
-private val PaperOutline = Color(0xFFD9D9DE)
-private val PaperOutlineSoft = Color(0xFFEDEDF0)
-private val PaperOn = Color(0xFF0E0E10)
-private val PaperOnMuted = Color(0xFF6A6A73)
+/** Unbleached paper, not white. */
+private val PaperBase = Color(0xFFFDFBF8)
+private val PaperSurface = Color(0xFFF9F5EF)
+private val PaperSurfaceHigh = Color(0xFFF4EFE7)
+private val PaperSurfaceHighest = Color(0xFFEDE6DB)
+private val PaperOutline = Color(0xFFDED5C8)
+private val PaperOutlineSoft = Color(0xFFEFE9DF)
+private val PaperOn = Color(0xFF211C16)
+private val PaperOnMuted = Color(0xFF6E6255)
+private val PaperPure = Color(0xFFFFFFFF)
 
 // ---- Status ---------------------------------------------------------------
+// Brick rather than fire-engine red, honey rather than traffic-cone orange,
+// sage rather than emerald — so warnings read as part of the same palette.
 
-private val DangerDark = Color(0xFFFF8A80)
-private val DangerLight = Color(0xFFC0392B)
-private val WarnDark = Color(0xFFFFC46B)
-private val WarnLight = Color(0xFFB26A00)
-private val GoodDark = Color(0xFF7ED9A6)
-private val GoodLight = Color(0xFF1E7A4B)
+private val BrickDark = Color(0xFFF2A099)
+private val BrickLight = Color(0xFFB33A2B)
+private val HoneyDark = Color(0xFFEFC170)
+private val HoneyLight = Color(0xFF8A6100)
+private val SageDark = Color(0xFFA6CB9E)
+private val SageLight = Color(0xFF4A7340)
 
 /** Colours that carry meaning rather than brand. Consumed via [LocalStatusColors]. */
 @Immutable
-data class StatusColors(
-  val deadline: Color,
-  val urgent: Color,
-  val positive: Color,
-)
+data class StatusColors(val deadline: Color, val urgent: Color, val positive: Color)
 
 val LocalStatusColors = staticCompositionLocalOf {
-  StatusColors(deadline = DangerDark, urgent = WarnDark, positive = GoodDark)
+  StatusColors(deadline = BrickDark, urgent = HoneyDark, positive = SageDark)
 }
 
 internal fun statusColorsFor(dark: Boolean) =
-  if (dark) StatusColors(deadline = DangerDark, urgent = WarnDark, positive = GoodDark)
-  else StatusColors(deadline = DangerLight, urgent = WarnLight, positive = GoodLight)
+  if (dark) StatusColors(deadline = BrickDark, urgent = HoneyDark, positive = SageDark)
+  else StatusColors(deadline = BrickLight, urgent = HoneyLight, positive = SageLight)
 
 // ---- Accents --------------------------------------------------------------
 
@@ -78,23 +89,49 @@ data class Accent(
 }
 
 object Accents {
-  val Violet =
-    Accent("purple", "Violet", Color(0xFFC5B3FF), Color(0xFF251A46), Color(0xFF5B45C7), PaperWhite)
+  // Pair one: earth and water.
+  val Terracotta =
+    Accent(
+      "terracotta",
+      "Terracotta",
+      Color(0xFFF0A88C),
+      Color(0xFF46200F),
+      Color(0xFFA8451F),
+      PaperPure,
+    )
   val Teal =
-    Accent("teal", "Teal", Color(0xFF7FD8CB), Color(0xFF00332C), Color(0xFF10726A), PaperWhite)
-  val Blue =
-    Accent("cyan", "Blue", Color(0xFF8FCBFF), Color(0xFF00294A), Color(0xFF1160A8), PaperWhite)
-  val Amber =
-    Accent("orange", "Amber", Color(0xFFF5C377), Color(0xFF3A2600), Color(0xFF8A5A00), PaperWhite)
-  val Rose =
-    Accent("crimson", "Rose", Color(0xFFF9A9A2), Color(0xFF441512), Color(0xFFB03A34), PaperWhite)
-  val Green =
-    Accent("emerald", "Green", Color(0xFF9BD79B), Color(0xFF12330F), Color(0xFF2C6E2C), PaperWhite)
+    Accent("teal", "Teal", Color(0xFF7FD1CB), Color(0xFF00332F), Color(0xFF0E6E68), PaperPure)
 
-  val all = listOf(Violet, Teal, Blue, Amber, Rose, Green)
+  // Pair two: leaf and bloom.
+  val Sage =
+    Accent("sage", "Sage", Color(0xFFA8C8A0), Color(0xFF1B3517), Color(0xFF47713C), PaperPure)
+  val Plum =
+    Accent("plum", "Plum", Color(0xFFDDB0DC), Color(0xFF3E1B3D), Color(0xFF7A3B78), PaperPure)
 
-  /** Falls back to [Violet] so an unknown persisted key can never break theming. */
-  fun byKey(key: String?): Accent = all.firstOrNull { it.key == key } ?: Violet
+  // Pair three: warm light and cool shade.
+  val Honey =
+    Accent("honey", "Honey", Color(0xFFF2C879), Color(0xFF40300A), Color(0xFF8A6100), PaperPure)
+  val Indigo =
+    Accent("indigo", "Indigo", Color(0xFFA8BFF5), Color(0xFF17264C), Color(0xFF3C5BA9), PaperPure)
+
+  /** Ordered so the picker reads as pairs. */
+  val all = listOf(Terracotta, Teal, Sage, Plum, Honey, Indigo)
+
+  val Default = Terracotta
+
+  /** Accent keys written by earlier versions, mapped onto the warm palette. */
+  private val legacy =
+    mapOf(
+      "crimson" to Terracotta,
+      "orange" to Honey,
+      "emerald" to Sage,
+      "purple" to Plum,
+      "cyan" to Indigo,
+    )
+
+  /** Never throws: an unknown or dropped key falls back to the default accent. */
+  fun byKey(key: String?): Accent =
+    all.firstOrNull { it.key == key } ?: legacy[key] ?: Default
 }
 
 // ---- Schemes --------------------------------------------------------------
@@ -103,32 +140,39 @@ internal fun darkSchemeFor(accent: Accent): ColorScheme =
   darkColorScheme(
     primary = accent.darkPrimary,
     onPrimary = accent.darkOnPrimary,
-    primaryContainer = accent.darkPrimary.copy(alpha = 0.16f).compositeOverOpaque(InkSurfaceHigh),
+    primaryContainer = accent.darkPrimary.copy(alpha = 0.18f).compositeOverOpaque(InkSurfaceHigh),
     onPrimaryContainer = accent.darkPrimary,
+    inversePrimary = accent.lightPrimary,
     secondary = InkOnMuted,
-    onSecondary = InkBlack,
+    onSecondary = InkBase,
     secondaryContainer = InkSurfaceHighest,
     onSecondaryContainer = InkOn,
     tertiary = accent.darkPrimary,
     onTertiary = accent.darkOnPrimary,
-    background = InkBlack,
+    // Unset, these fall back to baseline Material pink — visible in the time
+    // picker's AM/PM selector, which is drawn from tertiaryContainer.
+    tertiaryContainer = accent.darkPrimary.copy(alpha = 0.18f).compositeOverOpaque(InkSurfaceHigh),
+    onTertiaryContainer = accent.darkPrimary,
+    background = InkBase,
     onBackground = InkOn,
-    surface = InkBlack,
+    surface = InkBase,
     onSurface = InkOn,
     surfaceVariant = InkSurfaceHigh,
     onSurfaceVariant = InkOnMuted,
     surfaceTint = accent.darkPrimary,
-    surfaceContainerLowest = InkBlack,
+    surfaceBright = InkSurfaceHighest,
+    surfaceDim = InkBase,
+    surfaceContainerLowest = InkBase,
     surfaceContainerLow = InkSurface,
     surfaceContainer = InkSurface,
     surfaceContainerHigh = InkSurfaceHigh,
     surfaceContainerHighest = InkSurfaceHighest,
     inverseSurface = InkOn,
-    inverseOnSurface = InkBlack,
-    error = DangerDark,
-    onError = Color(0xFF3B0906),
-    errorContainer = Color(0xFF2A100E),
-    onErrorContainer = DangerDark,
+    inverseOnSurface = InkBase,
+    error = BrickDark,
+    onError = Color(0xFF48150F),
+    errorContainer = Color(0xFF33150F),
+    onErrorContainer = BrickDark,
     outline = InkOutline,
     outlineVariant = InkOutlineSoft,
     scrim = Color(0xFF000000),
@@ -138,32 +182,37 @@ internal fun lightSchemeFor(accent: Accent): ColorScheme =
   lightColorScheme(
     primary = accent.lightPrimary,
     onPrimary = accent.lightOnPrimary,
-    primaryContainer = accent.lightPrimary.copy(alpha = 0.12f).compositeOverOpaque(PaperWhite),
+    primaryContainer = accent.lightPrimary.copy(alpha = 0.13f).compositeOverOpaque(PaperBase),
     onPrimaryContainer = accent.lightPrimary,
+    inversePrimary = accent.darkPrimary,
     secondary = PaperOnMuted,
-    onSecondary = PaperWhite,
+    onSecondary = PaperPure,
     secondaryContainer = PaperSurfaceHighest,
     onSecondaryContainer = PaperOn,
     tertiary = accent.lightPrimary,
     onTertiary = accent.lightOnPrimary,
-    background = PaperWhite,
+    tertiaryContainer = accent.lightPrimary.copy(alpha = 0.13f).compositeOverOpaque(PaperBase),
+    onTertiaryContainer = accent.lightPrimary,
+    background = PaperBase,
     onBackground = PaperOn,
-    surface = PaperWhite,
+    surface = PaperBase,
     onSurface = PaperOn,
     surfaceVariant = PaperSurfaceHigh,
     onSurfaceVariant = PaperOnMuted,
     surfaceTint = accent.lightPrimary,
-    surfaceContainerLowest = PaperWhite,
+    surfaceBright = PaperBase,
+    surfaceDim = PaperSurfaceHighest,
+    surfaceContainerLowest = PaperPure,
     surfaceContainerLow = PaperSurface,
-    surfaceContainer = PaperSurface,
+    surfaceContainer = PaperSurfaceHigh,
     surfaceContainerHigh = PaperSurfaceHigh,
     surfaceContainerHighest = PaperSurfaceHighest,
     inverseSurface = PaperOn,
-    inverseOnSurface = PaperWhite,
-    error = DangerLight,
-    onError = PaperWhite,
-    errorContainer = Color(0xFFFDECEA),
-    onErrorContainer = DangerLight,
+    inverseOnSurface = PaperBase,
+    error = BrickLight,
+    onError = PaperPure,
+    errorContainer = Color(0xFFFBEDEA),
+    onErrorContainer = BrickLight,
     outline = PaperOutline,
     outlineVariant = PaperOutlineSoft,
     scrim = Color(0xFF000000),

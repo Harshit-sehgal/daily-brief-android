@@ -4,10 +4,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Only used to push edits made in this app back to the calendar they came from. -->
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -18,7 +20,6 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
             android:theme="@style/Theme.DailyBrief"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -28,17 +29,21 @@
             </intent-filter>
         </activity>
 
-        <!--
-            Alarms target this receiver with an explicit component, so it only needs
-            to be exported for the system broadcasts it listens for.
-        -->
         <receiver
             android:name=".receiver.BriefingAndReminderReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- Only this narrow receiver is exposed for system lifecycle broadcasts. -->
+        <receiver
+            android:name=".receiver.BootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
     </application>

@@ -4,9 +4,8 @@ import android.text.format.DateFormat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.os.ConfigurationCompat
+import androidx.compose.ui.platform.LocalLocale
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -21,12 +20,15 @@ import java.util.Locale
  */
 @Stable
 class TimeFormatter(val is24Hour: Boolean, private val locale: Locale) {
-  private val timeFmt = SimpleDateFormat(if (is24Hour) "HH:mm" else "h:mm a", locale)
-  private val weekdayShortFmt = SimpleDateFormat("EEE", locale)
-  private val dayOfMonthFmt = SimpleDateFormat("d", locale)
-  private val monthShortFmt = SimpleDateFormat("MMM", locale)
-  private val fullDayFmt = SimpleDateFormat("EEEE d MMMM", locale)
-  private val mediumDayFmt = SimpleDateFormat("EEE d MMM", locale)
+  private fun localized(skeleton: String) =
+    SimpleDateFormat(DateFormat.getBestDateTimePattern(locale, skeleton), locale)
+
+  private val timeFmt = localized(if (is24Hour) "Hm" else "hma")
+  private val weekdayShortFmt = localized("EEE")
+  private val dayOfMonthFmt = localized("d")
+  private val monthShortFmt = localized("MMM")
+  private val fullDayFmt = localized("EEEEdMMMM")
+  private val mediumDayFmt = localized("EEEdMMM")
 
   fun time(ms: Long): String = timeFmt.format(Date(ms))
 
@@ -44,14 +46,12 @@ class TimeFormatter(val is24Hour: Boolean, private val locale: Locale) {
 
   /** "Today" / "Tomorrow" / "Yesterday", falling back to a written date. */
   fun relativeDay(ms: Long, nowMs: Long = System.currentTimeMillis()): String {
-    val diffDays =
-      ((ScheduleAnalysis.startOfDay(ms) - ScheduleAnalysis.startOfDay(nowMs)).toDouble() /
-          ScheduleAnalysis.DAY_MS)
-        .let { Math.round(it).toInt() }
-    return when (diffDays) {
-      0 -> "Today"
-      1 -> "Tomorrow"
-      -1 -> "Yesterday"
+    val day = ScheduleAnalysis.startOfDay(ms)
+    val today = ScheduleAnalysis.startOfDay(nowMs)
+    return when (day) {
+      today -> "Today"
+      ScheduleAnalysis.startOfDayOffset(today, 1) -> "Tomorrow"
+      ScheduleAnalysis.startOfDayOffset(today, -1) -> "Yesterday"
       else -> fullDay(ms)
     }
   }
@@ -72,9 +72,8 @@ class TimeFormatter(val is24Hour: Boolean, private val locale: Locale) {
 @Composable
 fun rememberTimeFormatter(): TimeFormatter {
   val context = LocalContext.current
-  val configuration = LocalConfiguration.current
   val is24Hour = DateFormat.is24HourFormat(context)
-  val locale = ConfigurationCompat.getLocales(configuration).get(0) ?: Locale.getDefault()
+  val locale = LocalLocale.current.platformLocale
   return remember(is24Hour, locale) { TimeFormatter(is24Hour, locale) }
 }
 

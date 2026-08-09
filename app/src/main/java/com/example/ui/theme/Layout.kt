@@ -3,7 +3,8 @@ package com.example.ui.theme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -43,10 +44,10 @@ val LocalWindowWidth = staticCompositionLocalOf { WindowWidth.Compact }
 @Composable
 @ReadOnlyComposable
 fun currentWindowWidth(): WindowWidth {
-  val widthDp = LocalConfiguration.current.screenWidthDp
+  val width = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
   return when {
-    widthDp < 600 -> WindowWidth.Compact
-    widthDp < 840 -> WindowWidth.Medium
+    width < 600.dp -> WindowWidth.Compact
+    width < 840.dp -> WindowWidth.Medium
     else -> WindowWidth.Expanded
   }
 }

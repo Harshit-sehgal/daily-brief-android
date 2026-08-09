@@ -1,6 +1,8 @@
 package com.example.core
 
 import com.example.data.model.BriefingEvent
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.util.Calendar
 import java.util.TimeZone
 
@@ -11,9 +13,6 @@ import java.util.TimeZone
  */
 object ScheduleAnalysis {
 
-  /** Anything spanning most of a day behaves as a banner, not a booked slot. */
-  const val ALL_DAY_THRESHOLD_MS: Long = 20L * 60 * 60 * 1000
-
   data class Conflict(val first: BriefingEvent, val second: BriefingEvent) {
     /** Milliseconds the two events actually share. */
     val overlapMs: Long
@@ -22,8 +21,7 @@ object ScheduleAnalysis {
 
   data class DayStats(val total: Int, val conflicts: Int, val urgent: Int, val bookedMinutes: Int)
 
-  fun isAllDay(event: BriefingEvent): Boolean =
-    event.endTime - event.startTime >= ALL_DAY_THRESHOLD_MS
+  fun isAllDay(event: BriefingEvent): Boolean = event.isAllDay
 
   /**
    * Pairs of events whose times genuinely overlap, ordered by start time.
@@ -52,11 +50,19 @@ object ScheduleAnalysis {
     return conflicts
   }
 
-  fun statsFor(events: List<BriefingEvent>): DayStats {
+  fun statsFor(
+    events: List<BriefingEvent>,
+    startInclusive: Long? = null,
+    endExclusive: Long? = null,
+  ): DayStats {
     val conflicts = findConflicts(events)
     val urgent = events.count { it.isUrgent || it.isDeadline }
     val booked =
-      events.filterNot { isAllDay(it) }.sumOf { maxOf(0L, it.endTime - it.startTime) } /
+      events.filterNot { isAllDay(it) }.sumOf { event ->
+        val start = startInclusive?.let { maxOf(event.startTime, it) } ?: event.startTime
+        val end = endExclusive?.let { minOf(event.endTime, it) } ?: event.endTime
+        maxOf(0L, end - start)
+      } /
         (60L * 1000L)
     return DayStats(
       total = events.size,
@@ -70,14 +76,23 @@ object ScheduleAnalysis {
    * Fingerprint of everything a brief depends on. Two schedules with the same
    * signature produce the same brief, so a cached one can be reused.
    */
-  fun signature(events: List<BriefingEvent>): String =
-    events
-      .sortedBy { it.id }
-      .joinToString("|") {
-        "${it.id}:${it.startTime}:${it.endTime}:${it.title}:${it.isUrgent}:${it.isDeadline}"
-      }
-      .hashCode()
-      .toString()
+  fun signature(events: List<BriefingEvent>): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    digest.putInt(events.size)
+    events.sortedBy { it.id }.forEach { event ->
+      digest.putString(event.id)
+      digest.putLong(event.startTime)
+      digest.putLong(event.endTime)
+      digest.putString(event.title)
+      digest.putBoolean(event.isUrgent)
+      digest.putBoolean(event.isDeadline)
+      digest.putBoolean(event.isAllDay)
+      digest.putString(event.source)
+      // The Gemini prompt omits blank locations, so canonicalize them alike.
+      digest.putString(event.location?.takeIf { it.isNotBlank() }.orEmpty())
+    }
+    return digest.digest().toHex()
+  }
 
   /** Inclusive millisecond bounds of the local calendar day containing [timeMs]. */
   fun dayBounds(timeMs: Long, timeZone: TimeZone = TimeZone.getDefault()): LongRange =
@@ -133,6 +148,26 @@ object ScheduleAnalysis {
         )
       }
       .timeInMillis
+  }
+
+  /**
+   * Calendar providers store all-day boundaries as UTC midnights representing
+   * calendar dates, not instants that should be shifted into the device zone.
+   * Rebuild those dates at local midnight and keep the end exclusive.
+   */
+  fun normalizeAllDayUtcRange(
+    startUtcMs: Long,
+    endUtcExclusiveMs: Long,
+    timeZone: TimeZone = TimeZone.getDefault(),
+  ): Pair<Long, Long> {
+    val localStart = localDayFromUtcMillis(startUtcMs, timeZone)
+    val candidateEnd =
+      if (endUtcExclusiveMs > startUtcMs) localDayFromUtcMillis(endUtcExclusiveMs, timeZone)
+      else localStart
+    val localEnd =
+      if (candidateEnd > localStart) candidateEnd
+      else startOfDayOffset(localStart, 1, timeZone)
+    return localStart to localEnd
   }
 
   /**
@@ -193,4 +228,33 @@ object ScheduleAnalysis {
       .map { (day, items) -> day to items.sortedWith(compareBy({ it.startTime }, { it.title })) }
 
   const val DAY_MS: Long = 24L * 60 * 60 * 1000
+
+  private fun MessageDigest.putBoolean(value: Boolean) {
+    update((if (value) 1 else 0).toByte())
+  }
+
+  private fun MessageDigest.putInt(value: Int) {
+    update(ByteBuffer.allocate(Int.SIZE_BYTES).putInt(value).array())
+  }
+
+  private fun MessageDigest.putLong(value: Long) {
+    update(ByteBuffer.allocate(Long.SIZE_BYTES).putLong(value).array())
+  }
+
+  private fun MessageDigest.putString(value: String) {
+    val bytes = value.toByteArray(Charsets.UTF_8)
+    putInt(bytes.size)
+    update(bytes)
+  }
+
+  private fun ByteArray.toHex(): String {
+    val alphabet = "0123456789abcdef"
+    return buildString(size * 2) {
+      for (byte in this@toHex) {
+        val value = byte.toInt() and 0xff
+        append(alphabet[value ushr 4])
+        append(alphabet[value and 0x0f])
+      }
+    }
+  }
 }

@@ -2,10 +2,12 @@ package com.example.data.repository
 
 import android.content.Context
 import android.util.Log
+import androidx.room.withTransaction
 import com.example.core.ScheduleAnalysis
 import com.example.core.isoDate
 import com.example.data.api.BriefOutcome
 import com.example.data.api.DeviceCalendarSync
+import com.example.data.api.WriteBack
 import com.example.data.api.GeminiClient
 import com.example.data.api.NotionClient
 import com.example.data.database.AppDatabase
@@ -14,9 +16,16 @@ import com.example.data.model.DailyBriefing
 import com.example.data.model.EventSource
 import com.example.data.model.SystemSetting
 import com.example.data.prefs.SettingKeys
+import com.example.data.security.SecretStore
 import java.util.Date
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,9 +35,13 @@ data class SyncOutcome(
   val eventCount: Int,
   val calendarPermissionMissing: Boolean = false,
   val warnings: List<String> = emptyList(),
+  /** Exact old rows removed by reconciliation; callers must cancel their alarms. */
+  val removedEvents: List<BriefingEvent> = emptyList(),
+  /** False when any enabled provider failed or returned an incomplete snapshot. */
+  val completed: Boolean = true,
 ) {
   val hasProblems: Boolean
-    get() = calendarPermissionMissing || warnings.isNotEmpty()
+    get() = !completed || calendarPermissionMissing || warnings.isNotEmpty()
 }
 
 /** A brief plus the provenance the UI needs to be honest about it. */
@@ -42,16 +55,22 @@ data class BriefSnapshot(
   val fromCache: Boolean = false,
 )
 
+private data class ReconcileResult(
+  val writtenCount: Int = 0,
+  val removedEvents: List<BriefingEvent> = emptyList(),
+)
+
 class BriefingRepository(private val context: Context) {
   private val database = AppDatabase.getDatabase(context)
   private val eventDao = database.eventDao()
   private val briefingDao = database.briefingDao()
   private val settingDao = database.settingDao()
+  private val secretStore = SecretStore(context)
 
   // ---- Events -------------------------------------------------------------
 
-  fun eventsInRange(start: Long, end: Long): Flow<List<BriefingEvent>> =
-    eventDao.getEventsInRange(start, end)
+  fun eventsInRange(startInclusive: Long, endExclusive: Long): Flow<List<BriefingEvent>> =
+    eventDao.getEventsInRange(startInclusive, endExclusive)
 
   fun eventsForBoard(board: String): Flow<List<BriefingEvent>> = eventDao.getEventsForBoard(board)
 
@@ -62,14 +81,32 @@ class BriefingRepository(private val context: Context) {
 
   suspend fun deleteEvent(id: String) = withContext(Dispatchers.IO) { eventDao.deleteEventById(id) }
 
-  suspend fun moveEventsBetweenBoards(oldBoard: String, newBoard: String) =
-    withContext(Dispatchers.IO) { eventDao.moveEventsToBoard(oldBoard, newBoard) }
+  /**
+   * Pushes a hand edit back to the calendar the event came from, when the user
+   * has that switched on. Local storage is already updated by this point, so a
+   * refusal here degrades to "saved locally" rather than losing the edit.
+   */
+  suspend fun writeEventBack(event: BriefingEvent): WriteBack =
+    withContext(Dispatchers.IO) {
+      if (!readBoolean(SettingKeys.CALENDAR_WRITE_BACK, true)) {
+        return@withContext WriteBack.NotApplicable
+      }
+      DeviceCalendarSync.writeBack(context, event)
+    }
 
-  suspend fun moveEventsBetweenColumns(board: String, oldColumn: String, newColumn: String) =
-    withContext(Dispatchers.IO) { eventDao.moveEventsToColumn(board, oldColumn, newColumn) }
+  suspend fun deleteEventFromCalendar(event: BriefingEvent): WriteBack =
+    withContext(Dispatchers.IO) {
+      if (event.source !in EventSource.DEVICE_WRITABLE) return@withContext WriteBack.NotApplicable
+      if (!readBoolean(SettingKeys.CALENDAR_WRITE_BACK, true)) {
+        return@withContext WriteBack.NotApplicable
+      }
+      DeviceCalendarSync.deleteFromProvider(context, event.id)
+    }
 
-  suspend fun eventsInRangeOnce(start: Long, end: Long): List<BriefingEvent> =
-    withContext(Dispatchers.IO) { eventDao.getEventsInRangeSync(start, end) }
+  suspend fun eventsInRangeOnce(startInclusive: Long, endExclusive: Long): List<BriefingEvent> =
+    withContext(Dispatchers.IO) {
+      eventDao.getEventsInRangeSync(startInclusive, endExclusive)
+    }
 
   suspend fun eventById(id: String): BriefingEvent? =
     withContext(Dispatchers.IO) { eventDao.getEventById(id) }
@@ -85,65 +122,155 @@ class BriefingRepository(private val context: Context) {
    * user-owned fields (board, column, hand edits) survive the round trip.
    */
   suspend fun syncSchedules(startMs: Long, endMs: Long): SyncOutcome =
+    syncSchedulesInternal(startMs, endMs, includeNotion = true)
+
+  /** Fast local-only refresh used by the morning receiver before summarising Room. */
+  suspend fun refreshDeviceCalendar(startMs: Long, endMs: Long): SyncOutcome =
+    syncSchedulesInternal(startMs, endMs, includeNotion = false)
+
+  private suspend fun syncSchedulesInternal(
+    startMs: Long,
+    endMs: Long,
+    includeNotion: Boolean,
+  ): SyncOutcome =
     withContext(Dispatchers.IO) {
+      SYNC_MUTEX.withLock {
       val warnings = mutableListOf<String>()
-      val incoming = mutableListOf<BriefingEvent>()
-      val replaceable = mutableListOf<String>()
-      var permissionMissing = false
-
       val calendarEnabled = readBoolean(SettingKeys.DEVICE_CALENDAR_ENABLED, true)
-      if (calendarEnabled) {
-        val fetch = DeviceCalendarSync.fetchDeviceCalendars(context, startMs, endMs)
-        if (!fetch.permissionGranted) {
-          permissionMissing = true
-        } else if (fetch.error == null) {
-          replaceable += DEVICE_SOURCES
-          incoming += fetch.events
-        } else {
-          warnings += fetch.error
-        }
-      } else {
-        replaceable += DEVICE_SOURCES
-      }
+      // Provider I/O deliberately happens before opening the Room transaction.
+      val calendarFetch =
+        if (calendarEnabled) DeviceCalendarSync.fetchDeviceCalendars(context, startMs, endMs)
+        else null
+      val permissionMissing = calendarEnabled && calendarFetch?.permissionGranted == false
+      calendarFetch?.error?.let(warnings::add)
 
-      val notionEnabled = readBoolean(SettingKeys.NOTION_ENABLED, false)
-      val token = readSetting(SettingKeys.NOTION_TOKEN).orEmpty()
-      val databaseId = readSetting(SettingKeys.NOTION_DB_ID).orEmpty()
-      if (notionEnabled && token.isNotBlank() && databaseId.isNotBlank()) {
-        val fetch = NotionClient.fetchNotionEvents(token, databaseId)
-        if (fetch.error == null) {
-          replaceable += EventSource.NOTION
-          incoming += fetch.events
-        } else {
-          warnings += fetch.error
-          // Partial pages are still better than nothing.
-          if (fetch.events.isNotEmpty()) {
-            replaceable += EventSource.NOTION
-            incoming += fetch.events
+      val savedNotionEnabled = readBoolean(SettingKeys.NOTION_ENABLED, false)
+      val notionEnabled = includeNotion && savedNotionEnabled
+      val token = if (notionEnabled) readSetting(SettingKeys.NOTION_TOKEN).orEmpty() else ""
+      val databaseId = if (notionEnabled) readSetting(SettingKeys.NOTION_DB_ID).orEmpty() else ""
+      val notionConfigured = token.isNotBlank() && databaseId.isNotBlank()
+      val notionFetch =
+        if (notionEnabled && notionConfigured) NotionClient.fetchNotionEvents(token, databaseId)
+        else null
+      if (notionEnabled && !notionConfigured) {
+        warnings += "Add your Notion token and database/data-source ID to sync it"
+      }
+      notionFetch?.warnings?.let(warnings::addAll)
+      notionFetch?.error?.let(warnings::add)
+
+      val calendarCompleted =
+        !calendarEnabled || (calendarFetch?.let { it.permissionGranted && it.error == null } == true)
+      val notionCompleted =
+        !includeNotion || !savedNotionEnabled || (notionConfigured && notionFetch?.complete == true)
+      val completed = calendarCompleted && notionCompleted
+
+      val reconciliation =
+        database.withTransaction {
+          val pieces = mutableListOf<ReconcileResult>()
+
+          when {
+            !calendarEnabled -> pieces += replaceSourcesGlobally(DEVICE_SOURCES, emptyList())
+            calendarCompleted ->
+              pieces +=
+                replaceSourcesInRange(
+                  sources = DEVICE_SOURCES,
+                  incoming = calendarFetch?.events.orEmpty(),
+                  startInclusive = startMs,
+                  endExclusive = endMs,
+                )
           }
+
+          when {
+            !includeNotion -> Unit
+            !savedNotionEnabled ->
+              pieces += replaceSourcesGlobally(listOf(EventSource.NOTION), emptyList())
+            notionFetch?.complete == true ->
+              pieces +=
+                replaceSourcesGlobally(listOf(EventSource.NOTION), notionFetch.events)
+            !notionFetch?.events.isNullOrEmpty() ->
+              // Incomplete pagination may refresh rows we did receive, but it
+              // must never imply that absent rows were deleted upstream.
+              pieces += upsertPartial(listOf(EventSource.NOTION), notionFetch.events)
+          }
+
+          if (completed && includeNotion) {
+            settingDao.insertSetting(
+              SystemSetting(SettingKeys.LAST_SYNC_AT, System.currentTimeMillis().toString())
+            )
+          }
+          briefingDao.deleteBriefingsOlderThan(System.currentTimeMillis() - BRIEF_RETENTION_MS)
+
+          ReconcileResult(
+            writtenCount = pieces.sumOf { it.writtenCount },
+            removedEvents = pieces.flatMap { it.removedEvents }.distinctBy { it.id },
+          )
         }
-      } else {
-        if (notionEnabled) warnings += "Add your Notion token and database ID to sync it"
-        replaceable += EventSource.NOTION
-      }
-
-      val merged = mergeWithLocalEdits(incoming)
-      if (replaceable.isNotEmpty()) eventDao.clearEventsBySources(replaceable)
-      if (merged.isNotEmpty()) eventDao.insertEvents(merged)
-
-      writeSetting(SettingKeys.LAST_SYNC_AT, System.currentTimeMillis().toString())
-      briefingDao.deleteBriefingsOlderThan(System.currentTimeMillis() - BRIEF_RETENTION_MS)
 
       SyncOutcome(
-        eventCount = merged.size,
+        eventCount = reconciliation.writtenCount,
         calendarPermissionMissing = permissionMissing,
         warnings = warnings.distinct(),
+        removedEvents = reconciliation.removedEvents,
+        completed = completed,
       )
+      }
     }
 
-  private suspend fun mergeWithLocalEdits(incoming: List<BriefingEvent>): List<BriefingEvent> {
-    if (incoming.isEmpty()) return emptyList()
-    val existing = eventDao.getEventsBySources(EventSource.SYNCED).associateBy { it.id }
+  private suspend fun replaceSourcesGlobally(
+    sources: List<String>,
+    incoming: List<BriefingEvent>,
+  ): ReconcileResult {
+    val existing = eventDao.getEventsBySources(sources)
+    val merged = mergeWithLocalEdits(incomingForSources(incoming, sources), existing)
+    val incomingIds = merged.mapTo(mutableSetOf()) { it.id }
+    eventDao.clearEventsBySources(sources)
+    if (merged.isNotEmpty()) eventDao.insertEvents(merged)
+    return ReconcileResult(
+      writtenCount = merged.size,
+      removedEvents = existing.filterNot { it.id in incomingIds },
+    )
+  }
+
+  private suspend fun replaceSourcesInRange(
+    sources: List<String>,
+    incoming: List<BriefingEvent>,
+    startInclusive: Long,
+    endExclusive: Long,
+  ): ReconcileResult {
+    val existing = eventDao.getEventsBySourcesInRange(sources, startInclusive, endExclusive)
+    val scopedIncoming =
+      incoming.filter { it.startTime < endExclusive && it.endTime > startInclusive }
+    val merged = mergeWithLocalEdits(incomingForSources(scopedIncoming, sources), existing)
+    val incomingIds = merged.mapTo(mutableSetOf()) { it.id }
+    eventDao.clearEventsBySourcesInRange(sources, startInclusive, endExclusive)
+    if (merged.isNotEmpty()) eventDao.insertEvents(merged)
+    return ReconcileResult(
+      writtenCount = merged.size,
+      removedEvents = existing.filterNot { it.id in incomingIds },
+    )
+  }
+
+  private suspend fun upsertPartial(
+    sources: List<String>,
+    incoming: List<BriefingEvent>,
+  ): ReconcileResult {
+    val existing = eventDao.getEventsBySources(sources)
+    val merged = mergeWithLocalEdits(incomingForSources(incoming, sources), existing)
+    if (merged.isNotEmpty()) eventDao.insertEvents(merged)
+    return ReconcileResult(writtenCount = merged.size)
+  }
+
+  private fun incomingForSources(
+    incoming: List<BriefingEvent>,
+    sources: List<String>,
+  ): List<BriefingEvent> =
+    incoming.filter { it.source in sources }.associateBy { it.id }.values.toList()
+
+  private fun mergeWithLocalEdits(
+    incoming: List<BriefingEvent>,
+    existingEvents: List<BriefingEvent>,
+  ): List<BriefingEvent> {
+    val existing = existingEvents.associateBy { it.id }
     return incoming.map { fresh ->
       val prior = existing[fresh.id] ?: return@map fresh
       if (prior.userEdited) {
@@ -251,22 +378,205 @@ class BriefingRepository(private val context: Context) {
 
   // ---- Settings -----------------------------------------------------------
 
-  fun settingFlow(key: String): Flow<SystemSetting?> = settingDao.getSetting(key)
+  fun settingFlow(key: String): Flow<SystemSetting?> =
+    if (key in SECRET_SETTING_KEYS) {
+      flow {
+        migrateLegacySecret(key)
+        emitAll(secretStore.flow(key).map { value -> value?.let { SystemSetting(key, it) } })
+      }.flowOn(Dispatchers.IO)
+    } else {
+      settingDao.getSetting(key)
+    }
 
   suspend fun readSetting(key: String): String? =
-    withContext(Dispatchers.IO) { settingDao.getSettingSync(key)?.value }
+    withContext(Dispatchers.IO) {
+      if (key in SECRET_SETTING_KEYS) {
+        SECRET_MUTEX.withLock {
+          migrateLegacySecretUnlocked(key)
+          secretStore.read(key)
+        }
+      } else {
+        settingDao.getSettingSync(key)?.value
+      }
+    }
 
   suspend fun writeSetting(key: String, value: String) =
-    withContext(Dispatchers.IO) { settingDao.insertSetting(SystemSetting(key, value)) }
+    withContext(Dispatchers.IO) {
+      if (key in SECRET_SETTING_KEYS) {
+        SECRET_MUTEX.withLock {
+          secretStore.write(key, value)
+          settingDao.deleteSetting(key)
+        }
+      } else {
+        settingDao.insertSetting(SystemSetting(key, value))
+      }
+    }
 
   suspend fun deleteSetting(key: String) =
-    withContext(Dispatchers.IO) { settingDao.deleteSetting(key) }
+    withContext(Dispatchers.IO) {
+      if (key in SECRET_SETTING_KEYS) {
+        SECRET_MUTEX.withLock {
+          secretStore.delete(key)
+          settingDao.deleteSetting(key)
+        }
+      } else {
+        settingDao.deleteSetting(key)
+      }
+    }
+
+  // ---- Atomic board settings --------------------------------------------
+
+  suspend fun createBoard(name: String): Boolean =
+    withContext(Dispatchers.IO) {
+      database.withTransaction {
+        val boards = storedBoards()
+        if (boards.any { it.equals(name, ignoreCase = true) }) return@withTransaction false
+        settingDao.insertSetting(
+          SystemSetting(SettingKeys.BOARDS, SettingKeys.encodeList(boards + name))
+        )
+        settingDao.insertSetting(
+          SystemSetting(
+            SettingKeys.columnsForBoard(name),
+            SettingKeys.encodeList(SettingKeys.DEFAULT_COLUMNS),
+          )
+        )
+        settingDao.insertSetting(SystemSetting(SettingKeys.ACTIVE_BOARD, name))
+        true
+      }
+    }
+
+  suspend fun renameBoard(oldName: String, newName: String): Boolean =
+    withContext(Dispatchers.IO) {
+      database.withTransaction {
+        val boards = storedBoards()
+        if (oldName !in boards ||
+          oldName == SettingKeys.DEFAULT_BOARD ||
+          boards.any { it.equals(newName, ignoreCase = true) }
+        ) {
+          return@withTransaction false
+        }
+        settingDao.insertSetting(
+          SystemSetting(
+            SettingKeys.BOARDS,
+            SettingKeys.encodeList(boards.map { if (it == oldName) newName else it }),
+          )
+        )
+        val columns =
+          settingDao.getSettingSync(SettingKeys.columnsForBoard(oldName))?.value
+            ?: SettingKeys.encodeList(SettingKeys.DEFAULT_COLUMNS)
+        settingDao.insertSetting(SystemSetting(SettingKeys.columnsForBoard(newName), columns))
+        settingDao.deleteSetting(SettingKeys.columnsForBoard(oldName))
+        eventDao.moveEventsToBoard(oldName, newName)
+        if (storedActiveBoard(boards) == oldName) {
+          settingDao.insertSetting(SystemSetting(SettingKeys.ACTIVE_BOARD, newName))
+        }
+        true
+      }
+    }
+
+  /** Returns the fallback board on success, or null when deletion is invalid. */
+  suspend fun deleteBoard(name: String): String? =
+    withContext(Dispatchers.IO) {
+      database.withTransaction {
+        val boards = storedBoards()
+        if (name == SettingKeys.DEFAULT_BOARD || name !in boards) return@withTransaction null
+        val remaining = boards.filterNot { it == name }.ifEmpty { listOf(SettingKeys.DEFAULT_BOARD) }
+        val fallback = remaining.first()
+        settingDao.insertSetting(
+          SystemSetting(SettingKeys.BOARDS, SettingKeys.encodeList(remaining))
+        )
+        settingDao.deleteSetting(SettingKeys.columnsForBoard(name))
+        eventDao.moveEventsToBoard(name, fallback)
+        settingDao.insertSetting(SystemSetting(SettingKeys.ACTIVE_BOARD, fallback))
+        fallback
+      }
+    }
+
+  suspend fun createColumn(name: String): Boolean =
+    withContext(Dispatchers.IO) {
+      database.withTransaction {
+        val board = storedActiveBoard(storedBoards())
+        val columns = storedColumns(board)
+        if (columns.any { it.equals(name, ignoreCase = true) }) return@withTransaction false
+        settingDao.insertSetting(
+          SystemSetting(SettingKeys.columnsForBoard(board), SettingKeys.encodeList(columns + name))
+        )
+        true
+      }
+    }
+
+  suspend fun renameColumn(oldName: String, newName: String): Boolean =
+    withContext(Dispatchers.IO) {
+      database.withTransaction {
+        val board = storedActiveBoard(storedBoards())
+        val columns = storedColumns(board)
+        if (oldName !in columns || columns.any { it.equals(newName, ignoreCase = true) }) {
+          return@withTransaction false
+        }
+        settingDao.insertSetting(
+          SystemSetting(
+            SettingKeys.columnsForBoard(board),
+            SettingKeys.encodeList(columns.map { if (it == oldName) newName else it }),
+          )
+        )
+        eventDao.moveEventsToColumn(board, oldName, newName)
+        true
+      }
+    }
+
+  suspend fun deleteColumn(name: String): Boolean =
+    withContext(Dispatchers.IO) {
+      database.withTransaction {
+        val board = storedActiveBoard(storedBoards())
+        val columns = storedColumns(board)
+        val remaining = columns.filterNot { it == name }
+        if (name !in columns || remaining.isEmpty()) return@withTransaction false
+        settingDao.insertSetting(
+          SystemSetting(SettingKeys.columnsForBoard(board), SettingKeys.encodeList(remaining))
+        )
+        eventDao.moveEventsToColumn(board, name, remaining.first())
+        true
+      }
+    }
+
+  private suspend fun storedBoards(): List<String> =
+    SettingKeys.decodeList(settingDao.getSettingSync(SettingKeys.BOARDS)?.value)
+      ?: listOf(SettingKeys.DEFAULT_BOARD)
+
+  private suspend fun storedActiveBoard(boards: List<String>): String =
+    settingDao
+      .getSettingSync(SettingKeys.ACTIVE_BOARD)
+      ?.value
+      ?.takeIf { it in boards }
+      ?: boards.firstOrNull()
+      ?: SettingKeys.DEFAULT_BOARD
+
+  private suspend fun storedColumns(board: String): List<String> =
+    SettingKeys.decodeList(settingDao.getSettingSync(SettingKeys.columnsForBoard(board))?.value)
+      ?: SettingKeys.DEFAULT_COLUMNS
+
+  /** Moves plaintext values written by earlier builds into Android Keystore once. */
+  private suspend fun migrateLegacySecret(key: String) =
+    withContext(Dispatchers.IO) {
+      SECRET_MUTEX.withLock { migrateLegacySecretUnlocked(key) }
+    }
+
+  private suspend fun migrateLegacySecretUnlocked(key: String) {
+    val legacy = settingDao.getSettingSync(key)?.value
+    if (secretStore.read(key) == null && !legacy.isNullOrBlank()) {
+      secretStore.write(key, legacy)
+    }
+    if (legacy != null) settingDao.deleteSetting(key)
+  }
 
   private suspend fun readBoolean(key: String, default: Boolean): Boolean =
     readSetting(key)?.toBooleanStrictOrNull() ?: default
 
   companion object {
     private const val TAG = "BriefingRepository"
+    private val SECRET_SETTING_KEYS = setOf(SettingKeys.NOTION_TOKEN, SettingKeys.GEMINI_KEYS)
+    private val SECRET_MUTEX = Mutex()
+    private val SYNC_MUTEX = Mutex()
     private val DEVICE_SOURCES =
       listOf(EventSource.GOOGLE, EventSource.SAMSUNG, EventSource.DEVICE)
     private const val BRIEF_RETENTION_MS = 60L * 24 * 60 * 60 * 1000
