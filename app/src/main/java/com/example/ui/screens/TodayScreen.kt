@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -419,6 +420,7 @@ private fun AgendaLine(
     backgroundContent = { SwipeBackdrop(dismiss.dismissDirection) },
   ) {
     WorkspaceRow(
+      modifier = Modifier.testTag("agenda_item"),
       title = event.title,
       gutterText = if (allDay) "All day" else formatter.time(event.startTime),
       gutterSubtext = if (allDay) null else formatter.duration(event.startTime, event.endTime),

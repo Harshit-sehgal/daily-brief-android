@@ -20,6 +20,10 @@ class AppJourneyInstrumentedTest {
   fun createEditAndDeleteJourneyPersistsThroughRoom() {
     val title = "Emulator journey ${System.nanoTime()}"
 
+    // The app opens on Home, which summarises the day rather than listing it.
+    // The agenda rows this journey asserts on live on Today.
+    composeRule.onNodeWithTag("tab_Today").performClick()
+
     composeRule.onNodeWithTag("add_event").performClick()
     composeRule.onNodeWithTag("editor_title").performTextInput(title)
     composeRule.onNodeWithTag("editor_save").performScrollTo().performClick()
