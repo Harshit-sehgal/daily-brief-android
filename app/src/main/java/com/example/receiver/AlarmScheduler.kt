@@ -9,6 +9,8 @@ import android.util.Log
 import androidx.core.content.edit
 import com.example.data.model.BriefingEvent
 import java.util.Calendar
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Alarm plumbing for the daily brief and per-event reminders.
@@ -16,6 +18,10 @@ import java.util.Calendar
  * Everything here uses inexact, doze-friendly alarms — a schedule summary does
  * not justify the exact-alarm permission — and the daily brief re-arms itself
  * from the receiver so it keeps firing beyond the first day.
+ *
+ * Every entry point suspends and does its work off the main thread: laying down
+ * a horizon of reminders is a ledger read, one binder call per event and a
+ * ledger write, which is far too much to run while the UI is drawing.
  */
 object AlarmScheduler {
   private const val TAG = "AlarmScheduler"
@@ -37,37 +43,39 @@ object AlarmScheduler {
   }
 
   /** Arms the next occurrence of the daily brief. Called again after each fire. */
-  fun scheduleDailyBrief(context: Context, hour: Int, minute: Int) {
-    val manager = alarmManager(context) ?: return
-    val pendingIntent =
-      dailyBriefIntent(context, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        ?: return
+  suspend fun scheduleDailyBrief(context: Context, hour: Int, minute: Int) =
+    withContext(Dispatchers.IO) {
+      val manager = alarmManager(context) ?: return@withContext
+      val pendingIntent =
+        dailyBriefIntent(context, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+          ?: return@withContext
 
-    val target =
-      Calendar.getInstance().apply {
-        timeInMillis = System.currentTimeMillis()
-        set(Calendar.HOUR_OF_DAY, hour.coerceIn(0, 23))
-        set(Calendar.MINUTE, minute.coerceIn(0, 59))
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-        if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
+      val target =
+        Calendar.getInstance().apply {
+          timeInMillis = System.currentTimeMillis()
+          set(Calendar.HOUR_OF_DAY, hour.coerceIn(0, 23))
+          set(Calendar.MINUTE, minute.coerceIn(0, 59))
+          set(Calendar.SECOND, 0)
+          set(Calendar.MILLISECOND, 0)
+          if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
+        }
+
+      try {
+        setInexact(manager, target.timeInMillis, pendingIntent)
+        Log.d(TAG, "Daily brief armed for ${target.time}")
+      } catch (e: Exception) {
+        Log.e(TAG, "Could not schedule the daily brief", e)
       }
-
-    try {
-      setInexact(manager, target.timeInMillis, pendingIntent)
-      Log.d(TAG, "Daily brief armed for ${target.time}")
-    } catch (e: Exception) {
-      Log.e(TAG, "Could not schedule the daily brief", e)
     }
-  }
 
-  fun cancelDailyBrief(context: Context) {
-    val manager = alarmManager(context) ?: return
-    dailyBriefIntent(context, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)?.let {
-      manager.cancel(it)
-      it.cancel()
+  suspend fun cancelDailyBrief(context: Context) =
+    withContext(Dispatchers.IO) {
+      val manager = alarmManager(context) ?: return@withContext
+      dailyBriefIntent(context, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)?.let {
+        manager.cancel(it)
+        it.cancel()
+      }
     }
-  }
 
   private fun reminderMaintenanceIntent(context: Context, flags: Int): PendingIntent? =
     PendingIntent.getBroadcast(
@@ -144,13 +152,13 @@ object AlarmScheduler {
    * Replaces every reminder with one derived from [events]. Cancelling first
    * means edited or deleted events never fire a stale notification.
    */
-  fun replaceEventReminders(
+  suspend fun replaceEventReminders(
     context: Context,
     previous: List<BriefingEvent>,
     events: List<BriefingEvent>,
     leadMinutes: Int,
     enabled: Boolean,
-  ) {
+  ) = withContext(Dispatchers.IO) {
     // The durable ledger includes reminders that no longer have a database row,
     // so source deletions and disabling reminders cannot leave stale alarms live.
     val idsToCancel = scheduledReminderIds(context) + previous.map { it.id }
@@ -158,11 +166,11 @@ object AlarmScheduler {
     writeScheduledReminderIds(context, emptySet())
     if (!enabled) {
       cancelReminderMaintenance(context)
-      return
+      return@withContext
     }
     scheduleReminderMaintenance(context)
 
-    val manager = alarmManager(context) ?: return
+    val manager = alarmManager(context) ?: return@withContext
     val now = System.currentTimeMillis()
     val leadMs = leadMinutes.coerceIn(0, 24 * 60) * 60_000L
     val scheduled = mutableSetOf<String>()
@@ -188,14 +196,14 @@ object AlarmScheduler {
     writeScheduledReminderIds(context, scheduled)
   }
 
-  fun cancelEventReminders(context: Context, events: List<BriefingEvent>) {
-    val manager = alarmManager(context) ?: return
-    events.forEach { cancelEventReminder(manager, context, it.id) }
-  }
+  suspend fun cancelEventReminders(context: Context, events: List<BriefingEvent>) =
+    withContext(Dispatchers.IO) {
+      val manager = alarmManager(context) ?: return@withContext
+      events.forEach { cancelEventReminder(manager, context, it.id) }
+    }
 
-  fun cancelEventReminder(context: Context, eventId: String) {
-    cancelEventReminder(context, eventId, updateLedger = true)
-  }
+  suspend fun cancelEventReminder(context: Context, eventId: String) =
+    withContext(Dispatchers.IO) { cancelEventReminder(context, eventId, updateLedger = true) }
 
   private fun cancelEventReminder(context: Context, eventId: String, updateLedger: Boolean) {
     alarmManager(context)?.let { cancelEventReminder(it, context, eventId) }

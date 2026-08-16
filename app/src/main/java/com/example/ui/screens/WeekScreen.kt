@@ -18,7 +18,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -60,7 +63,7 @@ fun WeekScreen(
   val selectedDay by viewModel.selectedDay.collectAsStateWithLifecycle()
   val events by viewModel.weekEvents.collectAsStateWithLifecycle()
   val span by viewModel.weekSpanDays.collectAsStateWithLifecycle()
-  val collapsed by viewModel.collapsedSections.collectAsStateWithLifecycle()
+  var collapsedDays by rememberSaveable { mutableStateOf(longArrayOf()) }
 
   val window = LocalWindowWidth.current
   val gutter = window.gutter
@@ -106,7 +109,7 @@ fun WeekScreen(
       items(days.size, key = { days[it].first }) { index ->
         val day = days[index].first
         val dayEvents = days[index].second
-        val sectionKey = "week_$day"
+        val isCollapsed = day in collapsedDays
         val conflicts = remember(dayEvents) { ScheduleAnalysis.findConflicts(dayEvents).size }
 
         Column(modifier = Modifier.padding(start = gutter, end = gutter, top = d.sectionGap / 2)) {
@@ -133,9 +136,13 @@ fun WeekScreen(
           } else {
             SectionToggle(
               title = formatter.relativeDay(day),
-              expanded = !collapsed.contains(sectionKey),
+              expanded = !isCollapsed,
               count = dayEvents.size,
-              onToggle = { viewModel.toggleSection(sectionKey) },
+              onToggle = {
+                collapsedDays =
+                  if (isCollapsed) collapsedDays.filterNot { it == day }.toLongArray()
+                  else collapsedDays + day
+              },
               action = {
                 if (conflicts > 0) {
                   PropertyChip(

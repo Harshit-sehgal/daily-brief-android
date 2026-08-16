@@ -6,12 +6,18 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -38,23 +44,30 @@ fun DaySwipeBox(
   onNext: () -> Unit,
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
+  fillViewport: Boolean = true,
   content: @Composable BoxScope.() -> Unit,
 ) {
   val scope = rememberCoroutineScope()
   val haptics = LocalHapticFeedback.current
   val density = LocalDensity.current
   val offsetX = remember { Animatable(0f) }
+  val previous by rememberUpdatedState(onPrevious)
+  val next by rememberUpdatedState(onNext)
+  var containerWidthPx by remember { mutableIntStateOf(0) }
 
   val commitPx = with(density) { CommitDistance.toPx() }
-  val exitPx = with(density) { ExitDistance.toPx() }
+  val exitPx = maxOf(containerWidthPx.toFloat(), with(density) { MinimumExitDistance.toPx() })
+
+  val sizing = if (fillViewport) Modifier.fillMaxSize() else Modifier.fillMaxWidth()
 
   Box(
     modifier =
       modifier
+        .onSizeChanged { containerWidthPx = it.width }
         .then(
           if (!enabled) Modifier
           else
-            Modifier.pointerInput(Unit) {
+            Modifier.pointerInput(commitPx, exitPx) {
               detectHorizontalDragGestures(
                 onDragStart = { scope.launch { offsetX.stop() } },
                 onHorizontalDrag = { change, delta ->
@@ -79,7 +92,7 @@ fun DaySwipeBox(
                       // Carry the page out the way it was heading...
                       offsetX.animateTo(sign(travelled) * exitPx, ExitSpec)
                       // ...swap the day while nothing is on screen...
-                      if (travelled > 0) onPrevious() else onNext()
+                      if (travelled > 0) previous() else next()
                       // ...and bring the new one in from the opposite edge.
                       offsetX.snapTo(-sign(travelled) * exitPx)
                       offsetX.animateTo(0f, EnterSpec)
@@ -91,14 +104,14 @@ fun DaySwipeBox(
               )
             }
         )
-        .fillMaxSize()
+        .then(sizing)
   ) {
     Box(
       modifier =
-        Modifier.fillMaxSize().graphicsLayer {
+        sizing.graphicsLayer {
           translationX = offsetX.value
           // Fading on the way out hides the content swap underneath it.
-          alpha = (1f - (abs(offsetX.value) / exitPx) * 0.9f).coerceIn(0.1f, 1f)
+          alpha = (1f - abs(offsetX.value) / exitPx).coerceIn(0f, 1f)
         },
       content = content,
     )
@@ -108,8 +121,8 @@ fun DaySwipeBox(
 /** How far you have to travel before letting go changes the day. */
 private val CommitDistance = 72.dp
 
-/** How far the outgoing page carries on before the swap happens. */
-private val ExitDistance = 220.dp
+/** Fallback while the container is being measured; measured width normally wins. */
+private val MinimumExitDistance = 220.dp
 
 private const val Resistance = 0.35f
 

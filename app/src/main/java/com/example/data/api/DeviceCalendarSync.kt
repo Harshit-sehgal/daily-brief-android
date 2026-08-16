@@ -106,6 +106,7 @@ object DeviceCalendarSync {
     }
 
     val events = mutableListOf<BriefingEvent>()
+    val recurrenceByEvent = mutableMapOf<Long, Boolean>()
     cursor.use { c ->
       try {
         val idIdx = c.getColumnIndex(CalendarContract.Instances.EVENT_ID)
@@ -135,11 +136,13 @@ object DeviceCalendarSync {
           val location = (if (locIdx >= 0) c.getString(locIdx) else null)?.trim().orEmpty()
           val calendarName = (if (calNameIdx >= 0) c.getString(calNameIdx) else null).orEmpty()
           val haystack = "$title $description".lowercase()
+          val recurring = recurrenceByEvent.getOrPut(eventId) { isRecurring(context, eventId) }
           events.add(
             BriefingEvent(
-              // Keep the provider's UTC boundary in the ID so a timezone change
-              // does not create a second copy of the same all-day instance.
-              id = "device_${eventId}_$rawBegin",
+              // A normal event keeps one identity when DTSTART changes. A
+              // repeating series still needs the UTC instance boundary to keep
+              // its occurrences distinct (and timezone-stable for all-day rows).
+              id = localId(eventId, rawBegin, recurring),
               title = title.ifEmpty { "Untitled event" },
               startTime = begin,
               endTime = end,
@@ -166,16 +169,18 @@ object DeviceCalendarSync {
       PackageManager.PERMISSION_GRANTED
 
   /**
-   * Provider row id encoded in our event id (`device_<eventId>_<begin>`).
-   * The begin time is part of the id so recurring instances stay distinct.
+   * Provider row id encoded in either a stable non-recurring id
+   * (`device_<eventId>`) or a recurring instance id
+   * (`device_<eventId>_<begin>`).
    */
   internal fun providerEventId(id: String): Long? {
     if (!id.startsWith("device_")) return null
     val rest = id.removePrefix("device_")
-    val split = rest.lastIndexOf('_')
-    if (split <= 0) return null
-    return rest.substring(0, split).toLongOrNull()
+    return rest.substringBefore('_').toLongOrNull()
   }
+
+  internal fun localId(eventId: Long, rawBegin: Long, recurring: Boolean): String =
+    if (recurring) "device_${eventId}_$rawBegin" else "device_$eventId"
 
   /**
    * Pushes a hand edit back to the calendar the event came from.
@@ -223,7 +228,10 @@ object DeviceCalendarSync {
   fun deleteFromProvider(context: Context, eventId: String): WriteBack {
     val rowId = providerEventId(eventId) ?: return WriteBack.NotApplicable
     if (!hasWritePermission(context)) {
-      return WriteBack.Skipped("Calendar write access is off — removed here only")
+      return WriteBack.Skipped("Calendar write access is off — delete it in your calendar app")
+    }
+    if (isRecurring(context, rowId)) {
+      return WriteBack.Skipped("Repeating events must be deleted in your calendar app")
     }
     return try {
       val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, rowId)

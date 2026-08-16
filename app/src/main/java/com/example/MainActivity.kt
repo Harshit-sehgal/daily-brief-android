@@ -22,7 +22,11 @@ import com.example.ui.theme.DailyBriefTheme
 import com.example.ui.theme.LocalDensityTokens
 import com.example.ui.theme.LocalUiDensity
 import com.example.ui.theme.LocalWindowWidth
+import com.example.ui.theme.LocalWindowWidthDp
+import com.example.ui.theme.currentWindowHeightDp
+import com.example.ui.theme.LocalWindowHeightDp
 import com.example.ui.theme.currentWindowWidth
+import com.example.ui.theme.currentWindowWidthDp
 import com.example.ui.theme.tokensFor
 import com.example.ui.viewmodel.BriefingViewModel
 
@@ -58,6 +62,8 @@ class MainActivity : ComponentActivity() {
       DailyBriefTheme(accentKey = accentKey, darkTheme = darkTheme) {
         CompositionLocalProvider(
           LocalWindowWidth provides currentWindowWidth(),
+          LocalWindowWidthDp provides currentWindowWidthDp(),
+          LocalWindowHeightDp provides currentWindowHeightDp(),
           LocalUiDensity provides density,
           LocalDensityTokens provides tokensFor(density),
         ) {

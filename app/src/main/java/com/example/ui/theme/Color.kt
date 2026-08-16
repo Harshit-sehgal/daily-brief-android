@@ -182,7 +182,10 @@ internal fun lightSchemeFor(accent: Accent): ColorScheme =
   lightColorScheme(
     primary = accent.lightPrimary,
     onPrimary = accent.lightOnPrimary,
-    primaryContainer = accent.lightPrimary.copy(alpha = 0.13f).compositeOverOpaque(PaperBase),
+    // 0.12 rather than 0.13: Material draws onPrimaryContainer — the accent
+    // itself — on this tint, and at 0.13 the honey accent lands on exactly
+    // 4.50:1. A shade paler is invisible and clears AA for all six.
+    primaryContainer = accent.lightPrimary.copy(alpha = LIGHT_CONTAINER_TINT).compositeOverOpaque(PaperBase),
     onPrimaryContainer = accent.lightPrimary,
     inversePrimary = accent.darkPrimary,
     secondary = PaperOnMuted,
@@ -191,7 +194,7 @@ internal fun lightSchemeFor(accent: Accent): ColorScheme =
     onSecondaryContainer = PaperOn,
     tertiary = accent.lightPrimary,
     onTertiary = accent.lightOnPrimary,
-    tertiaryContainer = accent.lightPrimary.copy(alpha = 0.13f).compositeOverOpaque(PaperBase),
+    tertiaryContainer = accent.lightPrimary.copy(alpha = LIGHT_CONTAINER_TINT).compositeOverOpaque(PaperBase),
     onTertiaryContainer = accent.lightPrimary,
     background = PaperBase,
     onBackground = PaperOn,
@@ -217,6 +220,9 @@ internal fun lightSchemeFor(accent: Accent): ColorScheme =
     outlineVariant = PaperOutlineSoft,
     scrim = Color(0xFF000000),
   )
+
+/** How strongly a light-theme container carries its accent. See [lightSchemeFor]. */
+private const val LIGHT_CONTAINER_TINT = 0.12f
 
 /**
  * Flattens a translucent colour onto an opaque one. Container colours have to be

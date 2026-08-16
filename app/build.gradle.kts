@@ -37,6 +37,9 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    // The preview capture harness publishes screenshots; it seeds rows and changes settings,
+    // so it must never join the gate. scripts/capture-preview.sh drives the runner directly.
+    testInstrumentationRunnerArguments["notAnnotation"] = "com.example.CaptureOnly"
   }
 
   signingConfigs {

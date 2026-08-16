@@ -1,5 +1,10 @@
 package com.example.ui.components
 
+import com.example.ui.theme.InlineIconSize
+import com.example.ui.theme.Radius
+import com.example.ui.viewmodel.SaveBlocker
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -13,6 +18,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -22,29 +29,40 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.LocalDensityTokens
+import com.example.ui.theme.MinimumTouchTarget
 import com.example.ui.theme.Space
 
 /*
@@ -79,8 +97,9 @@ fun SectionToggle(
     Row(
       modifier =
         Modifier.fillMaxWidth()
-          .heightIn(min = d.sectionHeaderHeight)
-          .clip(RoundedCornerShape(6.dp))
+          .heightIn(min = maxOf(d.sectionHeaderHeight, MinimumTouchTarget))
+          .clip(RoundedCornerShape(Radius.control))
+          .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
           .clickable(onClickLabel = if (expanded) "Collapse" else "Expand", role = Role.Button) {
             onToggle()
           }
@@ -91,7 +110,7 @@ fun SectionToggle(
         imageVector = Icons.Default.KeyboardArrowDown,
         contentDescription = null,
         tint = scheme.onSurfaceVariant,
-        modifier = Modifier.size(18.dp).rotate(rotation),
+        modifier = Modifier.size(InlineIconSize).rotate(rotation),
       )
       Spacer(Modifier.width(2.dp))
       Text(
@@ -128,9 +147,60 @@ fun SectionToggle(
 }
 
 /**
+ * How wide a gutter has to be to hold a time at the current text size.
+ *
+ * The density tokens are dp measurements but the text inside them is sp, so a
+ * user who scales text up outgrows the designed width and the time gets clipped
+ * — and a clipped time reads as a different time, not a near miss. Density
+ * decides how much fits on screen; the font-size setting is not negotiable.
+ *
+ * The widest possible time is measured rather than estimated from a character
+ * count, because glyph widths vary by font and weight. Every row measures the
+ * same sample, so the column still aligns down the page — which is the only
+ * reason the gutter has a fixed width in the first place.
+ */
+@Composable
+internal fun gutterWidthFor(
+  designed: Dp,
+  textSize: TextUnit,
+  samples: List<String> = TimeSamples,
+  fontWeight: FontWeight = FontWeight.Medium,
+): Dp {
+  val measurer = rememberTextMeasurer()
+  // Merged the same way Text does it: the theme's letter spacing and font family
+  // are part of how wide the string actually lands, and measuring a bare
+  // TextStyle silently under-reserves by a pixel per character.
+  val style =
+    LocalTextStyle.current.merge(TextStyle(fontSize = textSize, fontWeight = fontWeight))
+  val width =
+    remember(measurer, style, samples, LocalDensity.current) {
+      samples.maxOf { measurer.measure(it, style, maxLines = 1).size.width }
+    }
+  // The measured width is in pixels and the constraint is in dp, so the round
+  // trip can land a pixel short of what the text needs. Two dp of slack costs
+  // nothing and keeps the last glyph off the edge.
+  return maxOf(designed, with(LocalDensity.current) { width.toDp() } + MeasurementSlack)
+}
+
+private val MeasurementSlack = 2.dp
+
+/*
+ * Which meridiem is wider is a property of the font, not of the alphabet — in
+ * Roboto "PM" beats "AM" — so both are measured rather than reasoned about.
+ * 24-hour locales ("23:59") are narrower than either and need no sample.
+ */
+
+/** What a row gutter has to hold. */
+internal val TimeSamples = listOf("00:00 AM", "00:00 PM")
+
+/** The timeline labels whole hours only. */
+internal val HourLabelSamples = listOf("12 AM", "12 PM")
+
+/**
  * One dense row. A fixed left gutter keeps times, markers and titles aligned down
  * the whole page, which is what makes a long list scannable rather than ragged.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun WorkspaceRow(
   title: String,
@@ -159,17 +229,22 @@ fun WorkspaceRow(
 
   Column(modifier = base.fillMaxWidth()) {
     Row(
-      modifier = Modifier.fillMaxWidth().heightIn(min = d.rowHeight).padding(vertical = d.rowPaddingV),
+      modifier =
+        Modifier.fillMaxWidth()
+          .heightIn(min = maxOf(d.rowHeight, MinimumTouchTarget))
+          .padding(vertical = d.rowPaddingV),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       if (gutterText != null) {
-        Column(modifier = Modifier.width(d.gutter)) {
+        Column(modifier = Modifier.width(gutterWidthFor(d.gutter, d.body))) {
           Text(
             text = gutterText,
             fontSize = d.body,
             fontWeight = FontWeight.Medium,
             color = scheme.onSurface,
             maxLines = 1,
+            // A clipped time reads as a different time — "11:0" is not 11:00.
+            overflow = TextOverflow.Ellipsis,
           )
           if (gutterSubtext != null) {
             Text(
@@ -177,6 +252,7 @@ fun WorkspaceRow(
               fontSize = d.label,
               color = scheme.onSurfaceVariant,
               maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
             )
           }
         }
@@ -209,7 +285,10 @@ fun WorkspaceRow(
         }
         if (tags.isNotEmpty()) {
           Spacer(Modifier.height(3.dp))
-          Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+          FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(Space.xs),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+          ) {
             tags.forEach { PropertyChip(it.label, it.tone) }
           }
         }
@@ -250,14 +329,25 @@ fun priorityState(isDeadline: Boolean, isUrgent: Boolean): String? =
 
 /** Inline tag. Deliberately small — it annotates a row, it does not compete with it. */
 @Composable
-fun PropertyChip(text: String, tone: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
+fun PropertyChip(
+  text: String,
+  tone: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
   val d = LocalDensityTokens.current
   Box(
     modifier =
-      Modifier.background(tone.copy(alpha = 0.13f), RoundedCornerShape(4.dp))
+      Modifier.widthIn(max = 200.dp)
+        .background(tone.copy(alpha = 0.13f), RoundedCornerShape(Radius.mark))
         .padding(horizontal = 5.dp, vertical = 1.dp)
   ) {
-    Text(text = text, fontSize = d.label, color = tone, fontWeight = FontWeight.Medium, maxLines = 1)
+    Text(
+      text = text,
+      fontSize = d.label,
+      color = tone,
+      fontWeight = FontWeight.Medium,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
   }
 }
 
@@ -270,8 +360,8 @@ fun InlineAddRow(label: String, onClick: () -> Unit, modifier: Modifier = Modifi
     modifier =
       modifier
         .fillMaxWidth()
-        .heightIn(min = d.rowHeight)
-        .clip(RoundedCornerShape(6.dp))
+        .heightIn(min = maxOf(d.rowHeight, MinimumTouchTarget))
+        .clip(RoundedCornerShape(Radius.control))
         .clickable(role = Role.Button, onClick = onClick)
         .padding(vertical = d.rowPaddingV),
     verticalAlignment = Alignment.CenterVertically,
@@ -300,18 +390,21 @@ fun ViewSwitcher(
   Row(
     modifier =
       modifier
-        .clip(RoundedCornerShape(7.dp))
+        .clip(RoundedCornerShape(Radius.control))
         .background(scheme.surfaceContainerHigh)
-        .padding(2.dp),
+        .padding(2.dp)
+        .selectableGroup(),
     horizontalArrangement = Arrangement.spacedBy(2.dp),
   ) {
     options.forEachIndexed { index, option ->
       val selected = index == selectedIndex
       Box(
         modifier =
-          Modifier.clip(RoundedCornerShape(5.dp))
+          Modifier.clip(RoundedCornerShape(Radius.control))
+            .widthIn(min = MinimumTouchTarget)
+            .heightIn(min = MinimumTouchTarget)
             .background(if (selected) scheme.surface else Color.Transparent)
-            .clickable(role = Role.Tab) { onSelect(index) }
+            .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(index) })
             .padding(horizontal = 9.dp, vertical = 4.dp)
       ) {
         Text(
@@ -325,7 +418,7 @@ fun ViewSwitcher(
   }
 }
 
-/** Small square icon button sized to the current density. */
+/** Accessible square button whose icon still follows the current visual density. */
 @Composable
 fun RowIconButton(
   icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -339,8 +432,8 @@ fun RowIconButton(
   Box(
     modifier =
       modifier
-        .size(32.dp)
-        .clip(RoundedCornerShape(6.dp))
+        .size(MinimumTouchTarget)
+        .clip(RoundedCornerShape(Radius.control))
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
     contentAlignment = Alignment.Center,
   ) {
@@ -351,4 +444,23 @@ fun RowIconButton(
       modifier = Modifier.size(d.icon),
     )
   }
+}
+
+/**
+ * The visible reason a Save button is disabled.
+ *
+ * Prevention is the right default for an invalid draft, but a dead control with no diagnosis is
+ * only half of it. The sentence names the field and the fix, and announces itself when it appears
+ * so it reaches someone who is not looking at the button.
+ */
+@Composable
+fun SaveBlockerNotice(blocker: SaveBlocker?, modifier: Modifier = Modifier) {
+  if (blocker == null) return
+  Text(
+    text = blocker.summary,
+    style = MaterialTheme.typography.bodySmall,
+    color = MaterialTheme.colorScheme.error,
+    modifier =
+      modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+  )
 }

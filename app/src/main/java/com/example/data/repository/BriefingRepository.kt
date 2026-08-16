@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import com.example.data.prefs.UndoWindowPolicy
 import android.content.Context
 import android.util.Log
 import androidx.room.withTransaction
@@ -11,13 +12,21 @@ import com.example.data.api.WriteBack
 import com.example.data.api.GeminiClient
 import com.example.data.api.NotionClient
 import com.example.data.database.AppDatabase
+import com.example.data.database.LegacyPlanCatalogBuilder
 import com.example.data.model.BriefingEvent
 import com.example.data.model.DailyBriefing
 import com.example.data.model.EventSource
+import com.example.data.model.PlanBoard
+import com.example.data.model.PlanColumn
+import com.example.data.model.PlanItem
+import com.example.data.model.PlanMutation
+import com.example.data.model.PlanMutationOrigin
+import com.example.data.model.PlanMutationStatus
 import com.example.data.model.SystemSetting
 import com.example.data.prefs.SettingKeys
 import com.example.data.security.SecretStore
 import java.util.Date
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
@@ -55,9 +64,26 @@ data class BriefSnapshot(
   val fromCache: Boolean = false,
 )
 
+/** Result of a fail-closed delete attempt against the event's real source. */
+data class EventDeleteOutcome(val writeBack: WriteBack, val deleted: Boolean)
+
+/** Detailed board deletion result so Plan tasks can block destructive legacy actions. */
+sealed interface BoardDeleteOutcome {
+  data class Deleted(val fallbackBoard: String) : BoardDeleteOutcome
+
+  data object ContainsPlanItems : BoardDeleteOutcome
+
+  data object Invalid : BoardDeleteOutcome
+}
+
 private data class ReconcileResult(
   val writtenCount: Int = 0,
   val removedEvents: List<BriefingEvent> = emptyList(),
+)
+
+private data class PlanCatalogRows(
+  val boards: Map<String, PlanBoard>,
+  val columns: Map<String, PlanColumn>,
 )
 
 class BriefingRepository(private val context: Context) {
@@ -65,6 +91,7 @@ class BriefingRepository(private val context: Context) {
   private val eventDao = database.eventDao()
   private val briefingDao = database.briefingDao()
   private val settingDao = database.settingDao()
+  private val planDao = database.planDao()
   private val secretStore = SecretStore(context)
 
   // ---- Events -------------------------------------------------------------
@@ -76,31 +103,101 @@ class BriefingRepository(private val context: Context) {
 
   suspend fun upsertEvent(event: BriefingEvent, markUserEdited: Boolean = true) =
     withContext(Dispatchers.IO) {
-      eventDao.insertEvents(listOf(event.copy(userEdited = event.userEdited || markUserEdited)))
+      SCHEDULE_MUTEX.withLock {
+        eventDao.insertEvents(listOf(event.copy(userEdited = event.userEdited || markUserEdited)))
+      }
     }
 
-  suspend fun deleteEvent(id: String) = withContext(Dispatchers.IO) { eventDao.deleteEventById(id) }
+  suspend fun deleteEvent(id: String) =
+    withContext(Dispatchers.IO) { SCHEDULE_MUTEX.withLock { eventDao.deleteEventById(id) } }
+
+  /** Exact compare-and-restore used by event Undo; sync or a newer edit always wins. */
+  suspend fun restoreEventSnapshotIfUnchanged(
+    before: BriefingEvent,
+    expectedCurrent: BriefingEvent?,
+  ): Boolean =
+    withContext(Dispatchers.IO) {
+      SCHEDULE_MUTEX.withLock {
+        val current = eventDao.getEventById(before.id)
+        val unchanged =
+          if (expectedCurrent == null) current == null else current == expectedCurrent
+        if (!unchanged) return@withLock false
+        eventDao.insertEvents(listOf(before))
+        true
+      }
+    }
 
   /**
-   * Pushes a hand edit back to the calendar the event came from, when the user
-   * has that switched on. Local storage is already updated by this point, so a
-   * refusal here degrades to "saved locally" rather than losing the edit.
+   * Commits a previewed Timeline move only when the exact event used to build the preview is
+   * still current. Timeline manipulation is deliberately limited to app-owned rows, so this
+   * transaction never performs a provider write or overwrites a provider refresh.
+   *
+   * The returned row is the exact stored snapshot callers must use as the expected state for
+   * Undo. `null` means the source is not app-owned or the preview became stale; neither case
+   * writes anything.
    */
-  suspend fun writeEventBack(event: BriefingEvent): WriteBack =
+  suspend fun moveAppOwnedEventIfUnchanged(
+    before: BriefingEvent,
+    newStartMs: Long,
+    newEndMs: Long,
+  ): BriefingEvent? =
     withContext(Dispatchers.IO) {
-      if (!readBoolean(SettingKeys.CALENDAR_WRITE_BACK, true)) {
-        return@withContext WriteBack.NotApplicable
+      SCHEDULE_MUTEX.withLock {
+        if (before.source != EventSource.MANUAL && before.source != EventSource.SAMPLE) {
+          return@withLock null
+        }
+        if (newEndMs <= newStartMs) return@withLock null
+        val current = eventDao.getEventById(before.id)
+        if (current != before) return@withLock null
+        val moved = current.copy(startTime = newStartMs, endTime = newEndMs, userEdited = true)
+        eventDao.insertEvents(listOf(moved))
+        moved
       }
-      DeviceCalendarSync.writeBack(context, event)
     }
 
-  suspend fun deleteEventFromCalendar(event: BriefingEvent): WriteBack =
+  /**
+   * Saves locally and completes any provider write-back in the same schedule
+   * lane as sync. A fetched old timestamp can therefore never commit after this
+   * edit and silently undo it.
+   */
+  suspend fun saveEventAndWriteBack(event: BriefingEvent): WriteBack =
     withContext(Dispatchers.IO) {
-      if (event.source !in EventSource.DEVICE_WRITABLE) return@withContext WriteBack.NotApplicable
-      if (!readBoolean(SettingKeys.CALENDAR_WRITE_BACK, true)) {
-        return@withContext WriteBack.NotApplicable
+      SCHEDULE_MUTEX.withLock {
+        eventDao.insertEvents(listOf(event.copy(userEdited = true)))
+        when {
+          event.source == EventSource.NOTION ->
+            WriteBack.Skipped(
+              "Notion stays read-only here — local labels were saved; source times refresh on sync"
+            )
+          event.source !in EventSource.DEVICE_WRITABLE -> WriteBack.NotApplicable
+          !readBoolean(SettingKeys.CALENDAR_WRITE_BACK, true) ->
+            WriteBack.Skipped("Calendar write-back is off — saved here only")
+          else -> DeviceCalendarSync.writeBack(context, event)
+        }
       }
-      DeviceCalendarSync.deleteFromProvider(context, event.id)
+    }
+
+  /** Deletes only when the real source accepts it; read-only providers fail closed. */
+  suspend fun deleteEventAndProvider(event: BriefingEvent): EventDeleteOutcome =
+    withContext(Dispatchers.IO) {
+      SCHEDULE_MUTEX.withLock {
+        val writeBack =
+          when {
+            event.source == EventSource.NOTION ->
+              WriteBack.Skipped("Notion events are read-only here — delete it in Notion")
+            event.source !in EventSource.DEVICE_WRITABLE -> WriteBack.NotApplicable
+            !readBoolean(SettingKeys.CALENDAR_WRITE_BACK, true) ->
+              WriteBack.Skipped(
+                "Calendar write-back is off — delete it in your calendar app"
+              )
+            else -> DeviceCalendarSync.deleteFromProvider(context, event.id)
+          }
+        val mayDelete =
+          writeBack == WriteBack.Success ||
+            (writeBack == WriteBack.NotApplicable && event.source !in EventSource.SYNCED)
+        if (mayDelete) eventDao.deleteEventById(event.id)
+        EventDeleteOutcome(writeBack = writeBack, deleted = mayDelete)
+      }
     }
 
   suspend fun eventsInRangeOnce(startInclusive: Long, endExclusive: Long): List<BriefingEvent> =
@@ -134,7 +231,7 @@ class BriefingRepository(private val context: Context) {
     includeNotion: Boolean,
   ): SyncOutcome =
     withContext(Dispatchers.IO) {
-      SYNC_MUTEX.withLock {
+      SCHEDULE_MUTEX.withLock {
       val warnings = mutableListOf<String>()
       val calendarEnabled = readBoolean(SettingKeys.DEVICE_CALENDAR_ENABLED, true)
       // Provider I/O deliberately happens before opening the Room transaction.
@@ -221,7 +318,8 @@ class BriefingRepository(private val context: Context) {
     incoming: List<BriefingEvent>,
   ): ReconcileResult {
     val existing = eventDao.getEventsBySources(sources)
-    val merged = mergeWithLocalEdits(incomingForSources(incoming, sources), existing)
+    val merged =
+      SyncMergePolicy.merge(SyncMergePolicy.scopedToSources(incoming, sources), existing)
     val incomingIds = merged.mapTo(mutableSetOf()) { it.id }
     eventDao.clearEventsBySources(sources)
     if (merged.isNotEmpty()) eventDao.insertEvents(merged)
@@ -240,7 +338,8 @@ class BriefingRepository(private val context: Context) {
     val existing = eventDao.getEventsBySourcesInRange(sources, startInclusive, endExclusive)
     val scopedIncoming =
       incoming.filter { it.startTime < endExclusive && it.endTime > startInclusive }
-    val merged = mergeWithLocalEdits(incomingForSources(scopedIncoming, sources), existing)
+    val merged =
+      SyncMergePolicy.merge(SyncMergePolicy.scopedToSources(scopedIncoming, sources), existing)
     val incomingIds = merged.mapTo(mutableSetOf()) { it.id }
     eventDao.clearEventsBySourcesInRange(sources, startInclusive, endExclusive)
     if (merged.isNotEmpty()) eventDao.insertEvents(merged)
@@ -255,49 +354,25 @@ class BriefingRepository(private val context: Context) {
     incoming: List<BriefingEvent>,
   ): ReconcileResult {
     val existing = eventDao.getEventsBySources(sources)
-    val merged = mergeWithLocalEdits(incomingForSources(incoming, sources), existing)
+    val merged =
+      SyncMergePolicy.merge(SyncMergePolicy.scopedToSources(incoming, sources), existing)
     if (merged.isNotEmpty()) eventDao.insertEvents(merged)
     return ReconcileResult(writtenCount = merged.size)
   }
 
-  private fun incomingForSources(
-    incoming: List<BriefingEvent>,
-    sources: List<String>,
-  ): List<BriefingEvent> =
-    incoming.filter { it.source in sources }.associateBy { it.id }.values.toList()
-
-  private fun mergeWithLocalEdits(
-    incoming: List<BriefingEvent>,
-    existingEvents: List<BriefingEvent>,
-  ): List<BriefingEvent> {
-    val existing = existingEvents.associateBy { it.id }
-    return incoming.map { fresh ->
-      val prior = existing[fresh.id] ?: return@map fresh
-      if (prior.userEdited) {
-        // Times and location still track the source of truth; wording and flags
-        // belong to whoever last edited them by hand.
-        fresh.copy(
-          title = prior.title,
-          description = prior.description,
-          isUrgent = prior.isUrgent,
-          isDeadline = prior.isDeadline,
-          kanbanStatus = prior.kanbanStatus,
-          kanbanBoard = prior.kanbanBoard,
-          userEdited = true,
-        )
-      } else {
-        fresh.copy(kanbanStatus = prior.kanbanStatus, kanbanBoard = prior.kanbanBoard)
-      }
-    }
-  }
-
   suspend fun loadSampleDay(dayStartMs: Long) =
     withContext(Dispatchers.IO) {
-      eventDao.insertEvents(DeviceCalendarSync.sampleDay(ScheduleAnalysis.startOfDay(dayStartMs)))
+      SCHEDULE_MUTEX.withLock {
+        eventDao.insertEvents(DeviceCalendarSync.sampleDay(ScheduleAnalysis.startOfDay(dayStartMs)))
+      }
     }
 
   suspend fun clearSampleData() =
-    withContext(Dispatchers.IO) { eventDao.clearEventsBySources(listOf(EventSource.SAMPLE)) }
+    withContext(Dispatchers.IO) {
+      SCHEDULE_MUTEX.withLock {
+        eventDao.clearEventsBySources(listOf(EventSource.SAMPLE))
+      }
+    }
 
   // ---- Briefing -----------------------------------------------------------
 
@@ -424,95 +499,309 @@ class BriefingRepository(private val context: Context) {
       }
     }
 
+  /** Commits related, non-secret preferences as one observable Room transaction. */
+  suspend fun writeSettingsAtomically(settings: Map<String, String>) =
+    withContext(Dispatchers.IO) {
+      require(settings.keys.none { it in SECRET_SETTING_KEYS }) {
+        "Secret settings must be written through the encrypted store"
+      }
+      database.withTransaction {
+        settings.forEach { (key, value) -> settingDao.insertSetting(SystemSetting(key, value)) }
+      }
+    }
+
   // ---- Atomic board settings --------------------------------------------
 
-  suspend fun createBoard(name: String): Boolean =
+  /** Keeps the name-based legacy selection and stable Plan selection in one commit. */
+  suspend fun selectBoard(name: String): Boolean =
     withContext(Dispatchers.IO) {
       database.withTransaction {
         val boards = storedBoards()
-        if (boards.any { it.equals(name, ignoreCase = true) }) return@withTransaction false
+        if (name !in boards) return@withTransaction false
+        val planBoard = ensurePlanBoard(name, storedColumns(name))
+        writeActiveBoardSelection(name, planBoard.id)
+        true
+      }
+    }
+
+  suspend fun createBoard(name: String): Boolean = createBoardWithUndo(name).value
+
+  suspend fun createBoardWithUndo(name: String): JournaledPlanResult<Boolean> =
+    withContext(Dispatchers.IO) {
+      database.withTransaction {
+        val boards = storedBoards()
+        if (name.isBlank() || boards.any { it.equals(name, ignoreCase = true) }) {
+          return@withTransaction JournaledPlanResult(false, null)
+        }
+        val scopeId = newCatalogScopeId()
+        val settingKeys = catalogSettingKeys(SettingKeys.columnsForBoard(name))
+        val beforeCatalog = readPlanCatalogRows()
+        val beforeSettings = readSettings(settingKeys)
+        val columns = SettingKeys.DEFAULT_COLUMNS
+        // A Plan-only board with this exact name can safely become visible to the legacy board.
+        // Reuse its identity; never create a second entity or overwrite its tasks.
+        val planBoard = ensurePlanBoard(name, columns)
         settingDao.insertSetting(
           SystemSetting(SettingKeys.BOARDS, SettingKeys.encodeList(boards + name))
         )
         settingDao.insertSetting(
           SystemSetting(
             SettingKeys.columnsForBoard(name),
-            SettingKeys.encodeList(SettingKeys.DEFAULT_COLUMNS),
+            SettingKeys.encodeList(columns),
           )
         )
-        settingDao.insertSetting(SystemSetting(SettingKeys.ACTIVE_BOARD, name))
-        true
+        writeActiveBoardSelection(name, planBoard.id)
+        val (before, after) =
+          catalogMutationStates(
+            scopeId = scopeId,
+            beforeCatalog = beforeCatalog,
+            afterCatalog = readPlanCatalogRows(),
+            beforeSettings = beforeSettings,
+            afterSettings = readSettings(settingKeys),
+          )
+        val mutationId =
+          insertCatalogMutation(
+            mutationType = PlanMutationType.BOARD_CREATE,
+            summary = "Created board \"$name\"",
+            before = before,
+            after = after,
+          )
+        JournaledPlanResult(true, mutationId)
       }
     }
 
   suspend fun renameBoard(oldName: String, newName: String): Boolean =
+    renameBoardWithUndo(oldName, newName).value
+
+  suspend fun renameBoardWithUndo(
+    oldName: String,
+    newName: String,
+  ): JournaledPlanResult<Boolean> =
     withContext(Dispatchers.IO) {
       database.withTransaction {
         val boards = storedBoards()
-        if (oldName !in boards ||
+        if (newName.isBlank() ||
+          oldName !in boards ||
           oldName == SettingKeys.DEFAULT_BOARD ||
           boards.any { it.equals(newName, ignoreCase = true) }
         ) {
-          return@withTransaction false
+          return@withTransaction JournaledPlanResult(false, null)
         }
+        val columns = storedColumns(oldName)
+        val existingPlanBoard = planDao.getBoardByName(oldName)
+        val planNameOwner = planDao.getBoardByName(newName)
+        if (planNameOwner != null && planNameOwner.id != existingPlanBoard?.id) {
+          return@withTransaction JournaledPlanResult(false, null)
+        }
+        val scopeId = newCatalogScopeId()
+        val settingKeys =
+          catalogSettingKeys(
+            SettingKeys.columnsForBoard(oldName),
+            SettingKeys.columnsForBoard(newName),
+          )
+        val beforeCatalog = readPlanCatalogRows()
+        val beforeSettings = readSettings(settingKeys)
+        val beforeEvents = eventDao.getEventsForBoardSync(oldName).associateBy(BriefingEvent::id)
+        val planBoard = ensurePlanBoard(oldName, columns)
+        val now = System.currentTimeMillis()
+        planDao.updateBoard(
+          planBoard.copy(
+            name = newName,
+            nameKey = availableBoardNameKey(newName, excludingBoardId = planBoard.id),
+            updatedAt = now,
+          )
+        )
         settingDao.insertSetting(
           SystemSetting(
             SettingKeys.BOARDS,
             SettingKeys.encodeList(boards.map { if (it == oldName) newName else it }),
           )
         )
-        val columns =
-          settingDao.getSettingSync(SettingKeys.columnsForBoard(oldName))?.value
-            ?: SettingKeys.encodeList(SettingKeys.DEFAULT_COLUMNS)
-        settingDao.insertSetting(SystemSetting(SettingKeys.columnsForBoard(newName), columns))
+        settingDao.insertSetting(
+          SystemSetting(SettingKeys.columnsForBoard(newName), SettingKeys.encodeList(columns))
+        )
         settingDao.deleteSetting(SettingKeys.columnsForBoard(oldName))
         eventDao.moveEventsToBoard(oldName, newName)
-        if (storedActiveBoard(boards) == oldName) {
-          settingDao.insertSetting(SystemSetting(SettingKeys.ACTIVE_BOARD, newName))
-        }
-        true
+        val activeName = storedActiveBoard(boards).let { if (it == oldName) newName else it }
+        val activePlanBoard =
+          if (activeName == newName) planBoard else ensurePlanBoard(activeName, storedColumns(activeName))
+        writeActiveBoardSelection(activeName, activePlanBoard.id)
+        val afterEvents = readEvents(beforeEvents.keys)
+        val (before, after) =
+          catalogMutationStates(
+            scopeId = scopeId,
+            beforeCatalog = beforeCatalog,
+            afterCatalog = readPlanCatalogRows(),
+            beforeEvents = beforeEvents,
+            afterEvents = afterEvents,
+            beforeSettings = beforeSettings,
+            afterSettings = readSettings(settingKeys),
+          )
+        val mutationId =
+          insertCatalogMutation(
+            mutationType = PlanMutationType.BOARD_EDIT,
+            summary = "Renamed board \"$oldName\" to \"$newName\"",
+            before = before,
+            after = after,
+            now = now,
+          )
+        JournaledPlanResult(true, mutationId)
       }
     }
 
-  /** Returns the fallback board on success, or null when deletion is invalid. */
-  suspend fun deleteBoard(name: String): String? =
+  suspend fun deleteBoardWithOutcome(name: String): BoardDeleteOutcome =
+    deleteBoardWithOutcomeAndUndo(name).value
+
+  suspend fun deleteBoardWithOutcomeAndUndo(
+    name: String,
+  ): JournaledPlanResult<BoardDeleteOutcome> =
     withContext(Dispatchers.IO) {
       database.withTransaction {
         val boards = storedBoards()
-        if (name == SettingKeys.DEFAULT_BOARD || name !in boards) return@withTransaction null
+        if (name == SettingKeys.DEFAULT_BOARD || name !in boards) {
+          return@withTransaction JournaledPlanResult(BoardDeleteOutcome.Invalid, null)
+        }
+        val existingPlanBoard = planDao.getBoardByName(name)
+        if (existingPlanBoard != null && planDao.countItemsForBoard(existingPlanBoard.id) > 0) {
+          return@withTransaction JournaledPlanResult(BoardDeleteOutcome.ContainsPlanItems, null)
+        }
         val remaining = boards.filterNot { it == name }.ifEmpty { listOf(SettingKeys.DEFAULT_BOARD) }
         val fallback = remaining.first()
+        val fallbackColumns = storedColumns(fallback)
+        val scopeId = newCatalogScopeId()
+        val settingKeys = catalogSettingKeys(SettingKeys.columnsForBoard(name))
+        val beforeCatalog = readPlanCatalogRows()
+        val beforeSettings = readSettings(settingKeys)
+        val beforeEvents = eventDao.getEventsForBoardSync(name).associateBy(BriefingEvent::id)
+        val planBoard = ensurePlanBoard(name, storedColumns(name))
+        val fallbackPlanBoard = ensurePlanBoard(fallback, fallbackColumns)
         settingDao.insertSetting(
           SystemSetting(SettingKeys.BOARDS, SettingKeys.encodeList(remaining))
         )
         settingDao.deleteSetting(SettingKeys.columnsForBoard(name))
-        eventDao.moveEventsToBoard(name, fallback)
-        settingDao.insertSetting(SystemSetting(SettingKeys.ACTIVE_BOARD, fallback))
-        fallback
+        eventDao.moveEventsToBoardWithColumnFallback(
+          oldBoard = name,
+          newBoard = fallback,
+          validStatuses = fallbackColumns,
+          fallbackStatus = fallbackColumns.first(),
+        )
+        val now = System.currentTimeMillis()
+        planDao.updateBoard(planBoard.copy(archivedAt = now, updatedAt = now))
+        writeActiveBoardSelection(fallback, fallbackPlanBoard.id)
+        val (before, after) =
+          catalogMutationStates(
+            scopeId = scopeId,
+            beforeCatalog = beforeCatalog,
+            afterCatalog = readPlanCatalogRows(),
+            beforeEvents = beforeEvents,
+            afterEvents = readEvents(beforeEvents.keys),
+            beforeSettings = beforeSettings,
+            afterSettings = readSettings(settingKeys),
+          )
+        val mutationId =
+          insertCatalogMutation(
+            mutationType = PlanMutationType.BOARD_DELETE,
+            summary = "Deleted board \"$name\"",
+            before = before,
+            after = after,
+            now = now,
+          )
+        JournaledPlanResult(BoardDeleteOutcome.Deleted(fallback), mutationId)
       }
     }
 
-  suspend fun createColumn(name: String): Boolean =
+  /** Backwards-compatible shape for callers that only need success and fallback. */
+  suspend fun deleteBoard(name: String): String? =
+    when (val outcome = deleteBoardWithOutcome(name)) {
+      is BoardDeleteOutcome.Deleted -> outcome.fallbackBoard
+      BoardDeleteOutcome.ContainsPlanItems,
+      BoardDeleteOutcome.Invalid -> null
+    }
+
+  suspend fun createColumn(name: String): Boolean = createColumnWithUndo(name).value
+
+  suspend fun createColumnWithUndo(name: String): JournaledPlanResult<Boolean> =
     withContext(Dispatchers.IO) {
       database.withTransaction {
         val board = storedActiveBoard(storedBoards())
         val columns = storedColumns(board)
-        if (columns.any { it.equals(name, ignoreCase = true) }) return@withTransaction false
+        if (name.isBlank() || columns.any { it.equals(name, ignoreCase = true) }) {
+          return@withTransaction JournaledPlanResult(false, null)
+        }
+        val scopeId = newCatalogScopeId()
+        val settingKeys = catalogSettingKeys(SettingKeys.columnsForBoard(board))
+        val beforeCatalog = readPlanCatalogRows()
+        val beforeSettings = readSettings(settingKeys)
+        val planBoard = ensurePlanBoard(board, columns)
+        // Reuse an exact Plan-only column instead of splitting one workflow label into two IDs.
+        ensurePlanColumn(planBoard.id, name)
         settingDao.insertSetting(
           SystemSetting(SettingKeys.columnsForBoard(board), SettingKeys.encodeList(columns + name))
         )
-        true
+        writeActiveBoardSelection(board, planBoard.id)
+        val (before, after) =
+          catalogMutationStates(
+            scopeId = scopeId,
+            beforeCatalog = beforeCatalog,
+            afterCatalog = readPlanCatalogRows(),
+            beforeSettings = beforeSettings,
+            afterSettings = readSettings(settingKeys),
+          )
+        val mutationId =
+          insertCatalogMutation(
+            mutationType = PlanMutationType.COLUMN_CREATE,
+            summary = "Created column \"$name\"",
+            before = before,
+            after = after,
+          )
+        JournaledPlanResult(true, mutationId)
       }
     }
 
   suspend fun renameColumn(oldName: String, newName: String): Boolean =
+    renameColumnWithUndo(oldName, newName).value
+
+  suspend fun renameColumnWithUndo(
+    oldName: String,
+    newName: String,
+  ): JournaledPlanResult<Boolean> =
     withContext(Dispatchers.IO) {
       database.withTransaction {
         val board = storedActiveBoard(storedBoards())
         val columns = storedColumns(board)
-        if (oldName !in columns || columns.any { it.equals(newName, ignoreCase = true) }) {
-          return@withTransaction false
+        if (newName.isBlank() ||
+          oldName !in columns ||
+          columns.any { it.equals(newName, ignoreCase = true) }
+        ) {
+          return@withTransaction JournaledPlanResult(false, null)
         }
+        val existingPlanBoard = planDao.getBoardByName(board)
+        val existingPlanColumn = existingPlanBoard?.let { planDao.getColumnByName(it.id, oldName) }
+        val planNameOwner = existingPlanBoard?.let { planDao.getColumnByName(it.id, newName) }
+        if (planNameOwner != null && planNameOwner.id != existingPlanColumn?.id) {
+          return@withTransaction JournaledPlanResult(false, null)
+        }
+        val scopeId = newCatalogScopeId()
+        val settingKeys = catalogSettingKeys(SettingKeys.columnsForBoard(board))
+        val beforeCatalog = readPlanCatalogRows()
+        val beforeSettings = readSettings(settingKeys)
+        val beforeEvents =
+          eventDao.getEventsForBoardColumnSync(board, oldName).associateBy(BriefingEvent::id)
+        val planBoard = ensurePlanBoard(board, columns)
+        val planColumn = ensurePlanColumn(planBoard.id, oldName)
+        val now = System.currentTimeMillis()
+        planDao.updateColumn(
+          planColumn.copy(
+            name = newName,
+            nameKey =
+              availableColumnNameKey(
+                boardId = planBoard.id,
+                name = newName,
+                excludingColumnId = planColumn.id,
+              ),
+            updatedAt = now,
+          )
+        )
         settingDao.insertSetting(
           SystemSetting(
             SettingKeys.columnsForBoard(board),
@@ -520,23 +809,347 @@ class BriefingRepository(private val context: Context) {
           )
         )
         eventDao.moveEventsToColumn(board, oldName, newName)
-        true
+        writeActiveBoardSelection(board, planBoard.id)
+        val (before, after) =
+          catalogMutationStates(
+            scopeId = scopeId,
+            beforeCatalog = beforeCatalog,
+            afterCatalog = readPlanCatalogRows(),
+            beforeEvents = beforeEvents,
+            afterEvents = readEvents(beforeEvents.keys),
+            beforeSettings = beforeSettings,
+            afterSettings = readSettings(settingKeys),
+          )
+        val mutationId =
+          insertCatalogMutation(
+            mutationType = PlanMutationType.COLUMN_EDIT,
+            summary = "Renamed column \"$oldName\" to \"$newName\"",
+            before = before,
+            after = after,
+            now = now,
+          )
+        JournaledPlanResult(true, mutationId)
       }
     }
 
-  suspend fun deleteColumn(name: String): Boolean =
+  suspend fun deleteColumn(name: String): Boolean = deleteColumnWithUndo(name).value
+
+  suspend fun deleteColumnWithUndo(name: String): JournaledPlanResult<Boolean> =
     withContext(Dispatchers.IO) {
       database.withTransaction {
         val board = storedActiveBoard(storedBoards())
         val columns = storedColumns(board)
         val remaining = columns.filterNot { it == name }
-        if (name !in columns || remaining.isEmpty()) return@withTransaction false
+        if (name !in columns || remaining.isEmpty()) {
+          return@withTransaction JournaledPlanResult(false, null)
+        }
+        val scopeId = newCatalogScopeId()
+        val settingKeys = catalogSettingKeys(SettingKeys.columnsForBoard(board))
+        val beforeCatalog = readPlanCatalogRows()
+        val beforeSettings = readSettings(settingKeys)
+        val beforeEvents =
+          eventDao.getEventsForBoardColumnSync(board, name).associateBy(BriefingEvent::id)
+        val existingPlanBoard = planDao.getBoardByName(board)
+        val beforeItems =
+          existingPlanBoard
+            ?.let { planDao.getAllItems(it.id) }
+            .orEmpty()
+            .associateBy(PlanItem::id)
+        val planBoard = ensurePlanBoard(board, columns)
+        val planColumn = ensurePlanColumn(planBoard.id, name)
+        val fallbackColumn = ensurePlanColumn(planBoard.id, remaining.first())
+        val now = System.currentTimeMillis()
+        planDao.moveItemsToColumn(
+          boardId = planBoard.id,
+          deletedColumnId = planColumn.id,
+          fallbackColumnId = fallbackColumn.id,
+          updatedAt = now,
+        )
+        planDao.deleteColumn(planColumn)
         settingDao.insertSetting(
           SystemSetting(SettingKeys.columnsForBoard(board), SettingKeys.encodeList(remaining))
         )
         eventDao.moveEventsToColumn(board, name, remaining.first())
-        true
+        writeActiveBoardSelection(board, planBoard.id)
+        val afterItems = planDao.getAllItems(planBoard.id).associateBy(PlanItem::id)
+        val (before, after) =
+          catalogMutationStates(
+            scopeId = scopeId,
+            beforeCatalog = beforeCatalog,
+            afterCatalog = readPlanCatalogRows(),
+            beforeItems = beforeItems,
+            afterItems = afterItems,
+            beforeEvents = beforeEvents,
+            afterEvents = readEvents(beforeEvents.keys),
+            beforeSettings = beforeSettings,
+            afterSettings = readSettings(settingKeys),
+          )
+        val mutationId =
+          insertCatalogMutation(
+            mutationType = PlanMutationType.COLUMN_DELETE,
+            summary = "Deleted column \"$name\"",
+            before = before,
+            after = after,
+            now = now,
+          )
+        JournaledPlanResult(true, mutationId)
       }
+    }
+
+  private suspend fun readPlanCatalogRows(): PlanCatalogRows {
+    val boards = planDao.getAllBoards()
+    return PlanCatalogRows(
+      boards = boards.associateBy(PlanBoard::id),
+      columns =
+        boards
+          .flatMap { board -> planDao.getAllColumns(board.id) }
+          .associateBy(PlanColumn::id),
+    )
+  }
+
+  private suspend fun readSettings(keys: Set<String>): Map<String, String?> =
+    keys.sorted().associateWith { key -> settingDao.getSettingSync(key)?.value }
+
+  private suspend fun readEvents(ids: Set<String>): Map<String, BriefingEvent> =
+    if (ids.isEmpty()) emptyMap()
+    else eventDao.getEventsByIds(ids.sorted()).associateBy(BriefingEvent::id)
+
+  private fun catalogSettingKeys(vararg additional: String): Set<String> =
+    setOf(
+      SettingKeys.BOARDS,
+      SettingKeys.ACTIVE_BOARD,
+      SettingKeys.ACTIVE_PLAN_BOARD_ID,
+      *additional,
+    )
+
+  private fun newCatalogScopeId(): String = "catalog_scope_${UUID.randomUUID()}"
+
+  private fun catalogMutationStates(
+    scopeId: String,
+    beforeCatalog: PlanCatalogRows,
+    afterCatalog: PlanCatalogRows,
+    beforeItems: Map<String, PlanItem> = emptyMap(),
+    afterItems: Map<String, PlanItem> = emptyMap(),
+    beforeEvents: Map<String, BriefingEvent> = emptyMap(),
+    afterEvents: Map<String, BriefingEvent> = emptyMap(),
+    beforeSettings: Map<String, String?> = emptyMap(),
+    afterSettings: Map<String, String?> = emptyMap(),
+  ): Pair<PlanCatalogState, PlanCatalogState> {
+    val (boardsBefore, boardsAfter) = changedSlots(beforeCatalog.boards, afterCatalog.boards)
+    val (columnsBefore, columnsAfter) = changedSlots(beforeCatalog.columns, afterCatalog.columns)
+    val (itemsBefore, itemsAfter) = changedSlots(beforeItems, afterItems)
+    val (eventsBefore, eventsAfter) = changedSlots(beforeEvents, afterEvents)
+    val (settingsBefore, settingsAfter) = changedSlots(beforeSettings, afterSettings)
+    val before =
+      PlanCatalogState(
+        scopeId = scopeId,
+        boards = boardsBefore,
+        columns = columnsBefore,
+        items = itemsBefore,
+        events = eventsBefore,
+        settings = settingsBefore,
+      )
+    val after =
+      PlanCatalogState(
+        scopeId = scopeId,
+        boards = boardsAfter,
+        columns = columnsAfter,
+        items = itemsAfter,
+        events = eventsAfter,
+        settings = settingsAfter,
+      )
+    require(
+      before.boards.isNotEmpty() ||
+        before.columns.isNotEmpty() ||
+        before.items.isNotEmpty() ||
+        before.events.isNotEmpty() ||
+        before.settings.isNotEmpty()
+    ) {
+      "Catalog command did not change persisted state"
+    }
+    return before to after
+  }
+
+  private fun <T> changedSlots(
+    before: Map<String, T>,
+    after: Map<String, T>,
+  ): Pair<Map<String, T?>, Map<String, T?>> {
+    val keys = (before.keys + after.keys).filter { before[it] != after[it] }.sorted()
+    return keys.associateWith { before[it] } to keys.associateWith { after[it] }
+  }
+
+  private suspend fun insertCatalogMutation(
+    mutationType: String,
+    summary: String,
+    before: PlanCatalogState,
+    after: PlanCatalogState,
+    now: Long = System.currentTimeMillis(),
+  ): String {
+    require(mutationType in PlanMutationType.Catalog) { "Unknown catalog mutation type" }
+    val encodedBefore = PlanMutationCodec.encode(before)
+    val encodedAfter = PlanMutationCodec.encode(after)
+    require(encodedBefore.targetIdsJson == encodedAfter.targetIdsJson) {
+      "Catalog mutation scopes differ"
+    }
+    val cleanSummary = summary.trim()
+    require(cleanSummary.isNotEmpty() && cleanSummary.length <= 240) {
+      "Invalid catalog mutation summary"
+    }
+    val mutationId = "mutation_${UUID.randomUUID()}"
+    planDao.insertPlanMutation(
+      PlanMutation(
+        id = mutationId,
+        // Catalog commands may create/archive their subject board. Keeping this null prevents the
+        // journal's own foreign key from becoming an extra side effect of exact Undo.
+        boardId = null,
+        mutationType = mutationType,
+        targetType = PlanMutationTarget.CATALOG,
+        targetIdsJson = encodedAfter.targetIdsJson,
+        summary = cleanSummary,
+        beforeJson = encodedBefore.stateJson,
+        afterJson = encodedAfter.stateJson,
+        status = PlanMutationStatus.APPLIED,
+        origin = PlanMutationOrigin.USER,
+        schemaVersion = PlanMutationCodec.SCHEMA_VERSION,
+        createdAt = now,
+        updatedAt = now,
+        expiresAt = now + UndoWindowPolicy.windowMs(
+          settingDao.getSettingSync(SettingKeys.UNDO_WINDOW_SECONDS)?.value
+        ),
+      )
+    )
+    return mutationId
+  }
+
+  private suspend fun writeActiveBoardSelection(boardName: String, planBoardId: String) {
+    settingDao.insertSetting(SystemSetting(SettingKeys.ACTIVE_BOARD, boardName))
+    settingDao.insertSetting(SystemSetting(SettingKeys.ACTIVE_PLAN_BOARD_ID, planBoardId))
+  }
+
+  private suspend fun ensurePlanBoard(name: String, columns: List<String>): PlanBoard {
+    val existing = planDao.getBoardByName(name)
+    if (existing != null) {
+      val active =
+        if (existing.archivedAt == null) existing
+        else existing.copy(archivedAt = null, updatedAt = System.currentTimeMillis())
+      if (active !== existing) planDao.updateBoard(active)
+      columns.forEach { ensurePlanColumn(active.id, it) }
+      return active
+    }
+    return insertPlanBoard(name, columns)
+  }
+
+  private suspend fun insertPlanBoard(name: String, columns: List<String>): PlanBoard {
+    val now = System.currentTimeMillis()
+    val nameKey = availableBoardNameKey(name)
+    val board =
+      PlanBoard(
+        id = availableBoardId(name, nameKey),
+        name = name,
+        nameKey = nameKey,
+        rank = planDao.maxBoardRank() + PLAN_RANK_GAP,
+        isDefault = name == SettingKeys.DEFAULT_BOARD,
+        createdAt = now,
+        updatedAt = now,
+      )
+    planDao.insertBoard(board)
+    columns.forEach { insertPlanColumn(board.id, it) }
+    return board
+  }
+
+  private suspend fun ensurePlanColumn(boardId: String, name: String): PlanColumn {
+    val existing = planDao.getColumnByName(boardId, name)
+    if (existing != null) {
+      val active =
+        if (existing.archivedAt == null) existing
+        else existing.copy(archivedAt = null, updatedAt = System.currentTimeMillis())
+      if (active !== existing) planDao.updateColumn(active)
+      return active
+    }
+    return insertPlanColumn(boardId, name)
+  }
+
+  private suspend fun insertPlanColumn(boardId: String, name: String): PlanColumn {
+    val now = System.currentTimeMillis()
+    val nameKey = availableColumnNameKey(boardId, name)
+    val column =
+      PlanColumn(
+        id = availableColumnId(boardId, name, nameKey),
+        boardId = boardId,
+        name = name,
+        nameKey = nameKey,
+        rank = planDao.maxColumnRank(boardId) + PLAN_RANK_GAP,
+        createdAt = now,
+        updatedAt = now,
+      )
+    planDao.insertColumn(column)
+    return column
+  }
+
+  private suspend fun availableBoardNameKey(
+    name: String,
+    excludingBoardId: String? = null,
+  ): String {
+    val base = LegacyPlanCatalogBuilder.nameKey(name)
+    var candidate = base
+    var owner = planDao.getBoardByNameKey(candidate)
+    if (owner == null || owner.id == excludingBoardId) return candidate
+    candidate = "$base#legacy-${utf16Hex(name)}"
+    owner = planDao.getBoardByNameKey(candidate)
+    while (owner != null && owner.id != excludingBoardId) {
+      candidate += "#"
+      owner = planDao.getBoardByNameKey(candidate)
+    }
+    return candidate
+  }
+
+  private suspend fun availableColumnNameKey(
+    boardId: String,
+    name: String,
+    excludingColumnId: String? = null,
+  ): String {
+    val base = LegacyPlanCatalogBuilder.nameKey(name)
+    var candidate = base
+    var owner = planDao.getColumnByNameKey(boardId, candidate)
+    if (owner == null || owner.id == excludingColumnId) return candidate
+    candidate = "$base#legacy-${utf16Hex(name)}"
+    owner = planDao.getColumnByNameKey(boardId, candidate)
+    while (owner != null && owner.id != excludingColumnId) {
+      candidate += "#"
+      owner = planDao.getColumnByNameKey(boardId, candidate)
+    }
+    return candidate
+  }
+
+  private suspend fun availableBoardId(name: String, nameKey: String): String {
+    var salt = ""
+    var candidate = LegacyPlanCatalogBuilder.stableId("legacy-board:$nameKey")
+    while (planDao.getBoard(candidate) != null) {
+      salt += "#"
+      candidate =
+        LegacyPlanCatalogBuilder.stableId(
+          "legacy-board:$nameKey#bridge-${utf16Hex(name)}$salt"
+        )
+    }
+    return candidate
+  }
+
+  private suspend fun availableColumnId(boardId: String, name: String, nameKey: String): String {
+    var salt = ""
+    var candidate = LegacyPlanCatalogBuilder.stableId("legacy-column:$boardId:$nameKey")
+    while (planDao.getColumn(candidate) != null) {
+      salt += "#"
+      candidate =
+        LegacyPlanCatalogBuilder.stableId(
+          "legacy-column:$boardId:$nameKey#bridge-${utf16Hex(name)}$salt"
+        )
+    }
+    return candidate
+  }
+
+  private fun utf16Hex(value: String): String =
+    buildString(value.length * 4) {
+      value.forEach { character -> append(character.code.toString(16).padStart(4, '0')) }
     }
 
   private suspend fun storedBoards(): List<String> =
@@ -576,10 +1189,12 @@ class BriefingRepository(private val context: Context) {
     private const val TAG = "BriefingRepository"
     private val SECRET_SETTING_KEYS = setOf(SettingKeys.NOTION_TOKEN, SettingKeys.GEMINI_KEYS)
     private val SECRET_MUTEX = Mutex()
-    private val SYNC_MUTEX = Mutex()
+    /** Serializes every source reconciliation and direct event mutation process-wide. */
+    private val SCHEDULE_MUTEX = Mutex()
     private val DEVICE_SOURCES =
       listOf(EventSource.GOOGLE, EventSource.SAMSUNG, EventSource.DEVICE)
     private const val BRIEF_RETENTION_MS = 60L * 24 * 60 * 60 * 1000
+    private const val PLAN_RANK_GAP = 1_000_000L
 
     /** Older builds stored a different label for the built-in key. */
     fun isBuiltInKeyName(name: String): Boolean =

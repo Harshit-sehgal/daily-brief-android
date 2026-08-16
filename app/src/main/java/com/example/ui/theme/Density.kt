@@ -7,6 +7,18 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+/** Minimum hit area for every interactive workspace primitive. */
+val MinimumTouchTarget = 48.dp
+
+/**
+ * An icon that sits beside a label, inside a button, field or row.
+ *
+ * These had drifted to 16, 18 and 20 dp for the same job, which makes rows of buttons look
+ * misaligned without anyone being able to say why. An icon that *is* the control keeps the density
+ * token instead, because that one scales with the chosen information density.
+ */
+val InlineIconSize = 18.dp
+
 /**
  * How tightly the workspace packs.
  *
@@ -29,7 +41,7 @@ enum class UiDensity(val key: String, val label: String, val blurb: String) {
 
 @Immutable
 data class DensityTokens(
-  /** Minimum height of a list row — also its touch target. */
+  /** Visual minimum height of a row; interactive rows also honor [MinimumTouchTarget]. */
   val rowHeight: Dp,
   val rowPaddingV: Dp,
   /** Left gutter that markers, times and icons align to. */
@@ -44,7 +56,7 @@ data class DensityTokens(
   val secondary: TextUnit,
   val label: TextUnit,
   val icon: Dp,
-  /** Width of one cell in the date strip. */
+  /** Visual width of one date cell; interactive cells also honor [MinimumTouchTarget]. */
   val dayCell: Dp,
   /** Height of one hour on the day timeline. */
   val hourHeight: Dp,

@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import com.example.ui.theme.InlineIconSize
+import com.example.ui.theme.Radius
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -33,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +65,8 @@ data class PaletteItem(
   val subtitle: String? = null,
   val trailing: String? = null,
   val tone: Color? = null,
+  /** Stable IDs and context that should be searchable without being rendered as the title. */
+  val searchTerms: String = "",
   val action: () -> Unit,
 )
 
@@ -76,12 +81,16 @@ data class PaletteItem(
 fun CommandPalette(items: List<PaletteItem>, onDismiss: () -> Unit) {
   val d = LocalDensityTokens.current
   val scheme = MaterialTheme.colorScheme
-  var query by remember { mutableStateOf("") }
+  // Saveable: a rotation mid-search should not throw away what was typed.
+  var query by rememberSaveable { mutableStateOf("") }
   val focus = remember { FocusRequester() }
 
   val results =
     remember(query, items) {
-      Fuzzy.rank(query, items) { "${it.title} ${it.subtitle.orEmpty()} ${it.group}" }.take(40)
+      Fuzzy.rank(query, items) {
+          "${it.title} ${it.subtitle.orEmpty()} ${it.group} ${it.searchTerms}"
+        }
+        .take(40)
     }
   val grouped = remember(results) { results.groupBy { it.group } }
 
@@ -102,7 +111,7 @@ fun CommandPalette(items: List<PaletteItem>, onDismiss: () -> Unit) {
             .fillMaxWidth()
             .heightIn(max = 460.dp)
             .testTag("command_palette"),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(Radius.container),
         color = scheme.surfaceContainerLow,
         tonalElevation = 6.dp,
         shadowElevation = 18.dp,
@@ -113,9 +122,9 @@ fun CommandPalette(items: List<PaletteItem>, onDismiss: () -> Unit) {
           OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text("Jump to a day, event, board or action…", fontSize = d.body) },
+            placeholder = { Text("Jump to a day, event, task, board or action…", fontSize = d.body) },
             leadingIcon = {
-              Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+              Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(InlineIconSize))
             },
             singleLine = true,
             textStyle = MaterialTheme.typography.bodyLarge,

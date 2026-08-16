@@ -1,15 +1,21 @@
 package com.example.ui.screens
 
+import com.example.ui.theme.Radius
+import android.app.DatePickerDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,10 +24,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.SwipeToDismissBox
@@ -30,13 +41,28 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,29 +70,31 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.core.ScheduleAnalysis
 import com.example.core.TimeFormatter
-import com.example.core.greetingFor
 import com.example.data.model.BriefingEvent
 import com.example.data.model.EventSource
-import com.example.ui.components.DateStrip
-import com.example.ui.components.InlineAddRow
+import com.example.ui.components.EmptyState
+import com.example.ui.components.DaySwipeBox
 import com.example.ui.components.MarkdownText
 import com.example.ui.components.PropertyChip
 import com.example.ui.components.RowIconButton
 import com.example.ui.components.RowTag
 import com.example.ui.components.SectionToggle
-import com.example.ui.components.ViewSwitcher
 import com.example.ui.components.WorkspaceRow
 import com.example.ui.components.priorityState
 import com.example.ui.theme.LocalDensityTokens
 import com.example.ui.theme.LocalStatusColors
 import com.example.ui.theme.LocalWindowWidth
 import com.example.ui.theme.Space
+import com.example.ui.theme.rootTitleSize
 import com.example.ui.theme.gutter
 import com.example.ui.theme.readableMaxWidth
 import com.example.ui.viewmodel.AgendaGrouping
 import com.example.ui.viewmodel.BriefingViewModel
+import com.example.ui.viewmodel.EventOwnership
 import com.example.ui.viewmodel.TodaySection
+import java.util.Calendar
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * The day as a workspace.
@@ -81,19 +109,17 @@ fun TodayScreen(
   formatter: TimeFormatter,
   contentPadding: PaddingValues,
   onEditEvent: (BriefingEvent) -> Unit,
-  onNewEvent: () -> Unit,
   onOpenPalette: () -> Unit,
   onOpenTimeline: () -> Unit,
   onRequestCalendarPermission: () -> Unit,
   onSync: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
+  val context = LocalContext.current
   val selectedDay by viewModel.selectedDay.collectAsStateWithLifecycle()
   val events by viewModel.selectedDayEvents.collectAsStateWithLifecycle()
-  val stripDays by viewModel.stripDays.collectAsStateWithLifecycle()
-  val daysWithEvents by viewModel.daysWithEvents.collectAsStateWithLifecycle()
+  val needsCalendarPermission by viewModel.needsCalendarPermission.collectAsStateWithLifecycle()
   val brief by viewModel.brief.collectAsStateWithLifecycle()
-  val profileName by viewModel.profileName.collectAsStateWithLifecycle()
   val needsPermission by viewModel.needsCalendarPermission.collectAsStateWithLifecycle()
   val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
   val sections by viewModel.todaySections.collectAsStateWithLifecycle()
@@ -119,11 +145,29 @@ fun TodayScreen(
   val todayStart = remember(nowMs) { ScheduleAnalysis.startOfDay(nowMs) }
   val isToday = selectedDay == todayStart
   val groups = remember(events, grouping) { groupAgenda(events, grouping) }
+  val openDatePicker = {
+    val current = Calendar.getInstance().apply { timeInMillis = selectedDay }
+    DatePickerDialog(
+        context,
+        { _, year, month, dayOfMonth ->
+          val chosen =
+            Calendar.getInstance().apply {
+              clear()
+              set(year, month, dayOfMonth, 12, 0, 0)
+            }
+          viewModel.selectDay(ScheduleAnalysis.startOfDay(chosen.timeInMillis))
+        },
+        current.get(Calendar.YEAR),
+        current.get(Calendar.MONTH),
+        current.get(Calendar.DAY_OF_MONTH),
+      )
+      .show()
+  }
 
   PullToRefreshBox(
     isRefreshing = isSyncing,
     onRefresh = onSync,
-    modifier = modifier.fillMaxSize(),
+    modifier = modifier.fillMaxSize().testTag("screen_today"),
   ) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
       LazyColumn(
@@ -131,37 +175,26 @@ fun TodayScreen(
         contentPadding = contentPadding,
       ) {
         item(key = "header") {
-          DayHeader(
-            dateLabel = formatter.relativeDay(selectedDay, nowMs),
-            fullDate = formatter.fullDay(selectedDay),
-            greeting =
-              if (isToday) {
-                val greeting = remember(nowMs) { greetingFor(nowMs) }
-                if (profileName.isBlank()) greeting else "$greeting, $profileName"
-              } else null,
-            isToday = isToday,
-            isSyncing = isSyncing,
+          DaySwipeBox(
             onPrevious = { viewModel.shiftDay(-1) },
             onNext = { viewModel.shiftDay(1) },
-            onToday = viewModel::selectToday,
-            onSync = onSync,
-            onSearch = onOpenPalette,
-            onTimeline = onOpenTimeline,
             modifier = Modifier.padding(horizontal = gutter),
-          )
-        }
-
-        item(key = "strip") {
-          DateStrip(
-            days = stripDays,
-            selectedDay = selectedDay,
-            todayStart = todayStart,
-            daysWithEvents = daysWithEvents,
-            formatter = formatter,
-            onSelect = viewModel::selectDay,
-            contentPadding = PaddingValues(horizontal = gutter),
-            modifier = Modifier.padding(bottom = Space.sm),
-          )
+            fillViewport = false,
+          ) {
+            DayHeader(
+              dateLabel = formatter.relativeDay(selectedDay, nowMs),
+              fullDate = formatter.fullDay(selectedDay),
+              isToday = isToday,
+              isSyncing = isSyncing,
+              onPrevious = { viewModel.shiftDay(-1) },
+              onNext = { viewModel.shiftDay(1) },
+              onChooseDate = openDatePicker,
+              onToday = viewModel::selectToday,
+              onSync = onSync,
+              onSearch = onOpenPalette,
+              onTimeline = onOpenTimeline,
+            )
+          }
         }
 
         if (needsPermission) {
@@ -231,7 +264,16 @@ fun TodayScreen(
                         marker = status.deadline,
                         subtitle = formatter.duration(0L, conflict.overlapMs) + " overlap",
                         onClick = { onEditEvent(conflict.second) },
-                        showDivider = i != shown.lastIndex,
+                        showDivider = i != shown.lastIndex || conflicts.size > shown.size,
+                      )
+                    }
+                    val remaining = conflicts.size - shown.size
+                    if (remaining > 0) {
+                      Text(
+                        "$remaining more ${if (remaining == 1) "conflict" else "conflicts"} in this day",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = Space.sm),
                       )
                     }
                   }
@@ -275,25 +317,31 @@ fun TodayScreen(
                   count = events.size,
                   onToggle = { viewModel.toggleSection(section.key) },
                   action = {
-                    RowIconButton(
-                      icon = Icons.Default.DateRange,
-                      contentDescription = "Open the day timeline",
-                      onClick = onOpenTimeline,
-                    )
-                    ViewSwitcher(
-                      options = AgendaGrouping.entries.map { it.label },
-                      selectedIndex = AgendaGrouping.entries.indexOf(grouping),
-                      onSelect = { viewModel.setAgendaGrouping(AgendaGrouping.entries[it]) },
+                    AgendaGroupingMenu(
+                      selected = grouping,
+                      onSelect = viewModel::setAgendaGrouping,
                     )
                   },
                 ) {
                   if (events.isEmpty()) {
-                    Text(
-                      text = "Nothing scheduled yet.",
-                      fontSize = d.secondary,
-                      color = scheme.onSurfaceVariant,
-                      modifier = Modifier.padding(vertical = Space.xs),
-                    )
+                    // A day with nothing on it is either a free day or an app with no calendar yet,
+                    // and those want opposite things said to them.
+                    if (!needsCalendarPermission) {
+                      EmptyState(
+                        headline = "Nothing scheduled.",
+                        supporting = "The day is yours. Add something with the + button.",
+                        tag = "agenda_empty",
+                      )
+                    } else {
+                      EmptyState(
+                        headline = "No calendar connected yet.",
+                        supporting =
+                          "Connect the calendar already on this phone and your day appears here.",
+                        actionLabel = "Connect a calendar",
+                        onAction = onRequestCalendarPermission,
+                        tag = "agenda_empty",
+                      )
+                    }
                   }
                   groups.forEach { (label, groupEvents) ->
                     if (label != null) {
@@ -306,23 +354,23 @@ fun TodayScreen(
                       )
                     }
                     groupEvents.forEachIndexed { i, event ->
-                      AgendaLine(
-                        event = event,
-                        formatter = formatter,
-                        nowMs = nowMs,
-                        onClick = { onEditEvent(event) },
-                        onPushToTomorrow = {
-                          viewModel.moveEventTo(
-                            event,
-                            event.startTime + ScheduleAnalysis.DAY_MS,
-                          )
-                        },
-                        onDelete = { viewModel.deleteEventById(event.id) },
-                        isLast = i == groupEvents.lastIndex,
-                      )
+                      // Keyed by event: without this the swipe state is positional,
+                      // so removing one row leaves the row beneath it swiped away.
+                      key(event.id) {
+                        AgendaLine(
+                          event = event,
+                          formatter = formatter,
+                          nowMs = nowMs,
+                          onClick = { onEditEvent(event) },
+                          onPushToTomorrow = { viewModel.moveEventByDays(event, 1) },
+                          onDelete = { onOutcome ->
+                            viewModel.deleteEventById(event.id, onOutcome)
+                          },
+                          isLast = i == groupEvents.lastIndex,
+                        )
+                      }
                     }
                   }
-                  InlineAddRow(label = "New event", onClick = onNewEvent)
                 }
             }
           }
@@ -332,15 +380,53 @@ fun TodayScreen(
   }
 }
 
-/** Three numbers on one line — the tiles' information at a third of the height. */
+/** One grouping control instead of three permanent tabs in the section header. */
+@Composable
+private fun AgendaGroupingMenu(
+  selected: AgendaGrouping,
+  onSelect: (AgendaGrouping) -> Unit,
+) {
+  var expanded by rememberSaveable { mutableStateOf(false) }
+  Box {
+    TextButton(
+      onClick = { expanded = true },
+      modifier =
+        Modifier.heightIn(min = 48.dp)
+          .testTag("agenda_grouping")
+          .semantics { stateDescription = "Grouped by ${selected.label}" },
+    ) {
+      Text(selected.label)
+      Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+      AgendaGrouping.entries.forEach { option ->
+        DropdownMenuItem(
+          text = { Text(option.label) },
+          onClick = {
+            onSelect(option)
+            expanded = false
+          },
+          modifier =
+            Modifier.semantics {
+              if (option == selected) stateDescription = "Selected"
+            },
+        )
+      }
+    }
+  }
+}
+
+/** Three compact numbers that wrap cleanly when the screen or type scale is large. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StatStrip(events: Int, booked: String, priorities: Int) {
   val d = LocalDensityTokens.current
   val status = LocalStatusColors.current
   val scheme = MaterialTheme.colorScheme
-  Row(
+  FlowRow(
     modifier = Modifier.fillMaxWidth().padding(vertical = Space.xs),
     horizontalArrangement = Arrangement.spacedBy(Space.xl),
+    verticalArrangement = Arrangement.spacedBy(Space.xs),
   ) {
     listOf(
         Triple(events.toString(), if (events == 1) "event" else "events", scheme.onSurface),
@@ -368,12 +454,15 @@ private fun AgendaLine(
   nowMs: Long,
   onClick: () -> Unit,
   onPushToTomorrow: () -> Unit,
-  onDelete: () -> Unit,
+  /** Requests deletion and reports back whether the row actually went away. */
+  onDelete: (onOutcome: (Boolean) -> Unit) -> Unit,
   isLast: Boolean,
 ) {
+  val scope = rememberCoroutineScope()
   val status = LocalStatusColors.current
   val scheme = MaterialTheme.colorScheme
   val allDay = ScheduleAnalysis.isAllDay(event)
+  val actions = agendaRowActionPolicy(event.source, allDay)
   val running = nowMs in event.startTime until event.endTime
   val tone =
     when {
@@ -386,47 +475,85 @@ private fun AgendaLine(
     if (running) add(RowTag("Now", scheme.primary))
     if (event.isDeadline) add(RowTag("Deadline", status.deadline))
     if (event.isUrgent) add(RowTag("Urgent", status.urgent))
-    if (event.source != EventSource.MANUAL) add(RowTag(event.source, scheme.onSurfaceVariant))
+    // The source is worth a chip only when it changes what you can do here. Repeating
+    // "Device Calendar" down every row of a normal day says nothing and takes the width the title
+    // needs; a row you cannot edit still says so, which is the case that matters.
+    if (EventOwnership.forSource(event.source) == EventOwnership.READ_ONLY_SOURCE) {
+      add(RowTag(event.source, scheme.onSurfaceVariant))
+    }
   }
+  val accessibilityActions =
+    buildList {
+      if (actions.canMoveToTomorrow) {
+        add(
+          CustomAccessibilityAction("Move to tomorrow") {
+            onPushToTomorrow()
+            true
+          }
+        )
+      }
+      actions.deleteLabel?.let { label ->
+        add(
+          CustomAccessibilityAction(label) {
+            onDelete {}
+            true
+          }
+        )
+      }
+    }
 
-  // Push right to defer, pull left to delete — the two things you actually do to
-  // a row you are looking at. Deferring snaps back because the row is not leaving
-  // the app, only the day; deleting lets the row go and offers an undo.
+  // Gestures remain shortcuts, never the only route: the trailing Actions control
+  // exposes the same capability-filtered commands without requiring a swipe.
   val dismiss =
     rememberSwipeToDismissBoxState(
       // Most of the row, not a flick: deleting by accident is not recoverable
       // enough to be cheap, even with an undo.
       positionalThreshold = { width -> width * 0.55f },
-      confirmValueChange = { value ->
-        when (value) {
-          SwipeToDismissBoxValue.StartToEnd -> {
-            onPushToTomorrow()
-            false
-          }
-          SwipeToDismissBoxValue.EndToStart -> {
-            onDelete()
-            true
-          }
-          SwipeToDismissBoxValue.Settled -> false
-        }
-      }
     )
+
+  // React only after the row has settled at an action anchor. This avoids the
+  // deprecated confirm/veto callback and keeps the gesture animation honest.
+  LaunchedEffect(dismiss.settledValue) {
+    when (dismiss.settledValue) {
+      SwipeToDismissBoxValue.StartToEnd -> {
+        onPushToTomorrow()
+        dismiss.reset()
+      }
+      // A read-only source can refuse the delete; put the row back when it does,
+      // rather than leaving an event that still exists swiped off the screen.
+      SwipeToDismissBoxValue.EndToStart ->
+        onDelete { removed -> if (!removed) scope.launch { dismiss.reset() } }
+      SwipeToDismissBoxValue.Settled -> Unit
+    }
+  }
 
   SwipeToDismissBox(
     state = dismiss,
-    enableDismissFromStartToEnd = !allDay,
+    enableDismissFromStartToEnd = actions.canMoveToTomorrow,
+    enableDismissFromEndToStart = actions.deleteLabel != null,
     // dismissDirection, not targetValue: the label has to appear as soon as the
     // row starts moving, not only once the action is already committed.
     backgroundContent = { SwipeBackdrop(dismiss.dismissDirection) },
   ) {
     WorkspaceRow(
-      modifier = Modifier.testTag("agenda_item"),
+      modifier =
+        Modifier.testTag("agenda_item").semantics { customActions = accessibilityActions },
       title = event.title,
       gutterText = if (allDay) "All day" else formatter.time(event.startTime),
       gutterSubtext = if (allDay) null else formatter.duration(event.startTime, event.endTime),
       marker = tone,
       subtitle = event.description?.takeIf { it.isNotBlank() } ?: event.location,
       tags = tags,
+      trailing = {
+        AgendaRowActionMenu(
+          eventId = event.id,
+          eventTitle = event.title,
+          actions = actions,
+          onOpenDetails = onClick,
+          onMoveToTomorrow = onPushToTomorrow,
+          onDelete = { onDelete {} },
+        )
+      },
       onClick = onClick,
       showDivider = !isLast,
       stateDescription =
@@ -438,6 +565,85 @@ private fun AgendaLine(
           .ifEmpty { null },
     )
   }
+}
+
+/**
+ * Visible counterparts for every safe row gesture.
+ *
+ * "Open details" keeps the menu useful for read-only rows while the policy omits
+ * commands Daily Brief cannot perform for their source.
+ */
+@Composable
+private fun AgendaRowActionMenu(
+  eventId: String,
+  eventTitle: String,
+  actions: AgendaRowActionPolicy,
+  onOpenDetails: () -> Unit,
+  onMoveToTomorrow: () -> Unit,
+  onDelete: () -> Unit,
+) {
+  var expanded by rememberSaveable(eventId) { mutableStateOf(false) }
+
+  Box {
+    // An icon, not a labelled button. The word "Actions" was repeated down the whole day, competing
+    // with the titles it belonged to and taking the width they needed; the same menu opens either
+    // way, and the description still names the event it acts on.
+    RowIconButton(
+      icon = Icons.Default.MoreVert,
+      contentDescription = "Actions for $eventTitle",
+      onClick = { expanded = true },
+      modifier = Modifier.testTag("agenda_actions_$eventId"),
+    )
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+      DropdownMenuItem(
+        text = { Text("Open details") },
+        onClick = {
+          expanded = false
+          onOpenDetails()
+        },
+        modifier = Modifier.heightIn(min = 48.dp),
+      )
+      if (actions.canMoveToTomorrow) {
+        DropdownMenuItem(
+          text = { Text("Move to tomorrow") },
+          onClick = {
+            expanded = false
+            onMoveToTomorrow()
+          },
+          modifier = Modifier.heightIn(min = 48.dp),
+        )
+      }
+      actions.deleteLabel?.let { label ->
+        DropdownMenuItem(
+          text = { Text(label) },
+          onClick = {
+            expanded = false
+            onDelete()
+          },
+          modifier = Modifier.heightIn(min = 48.dp),
+        )
+      }
+    }
+  }
+}
+
+internal data class AgendaRowActionPolicy(
+  val canMoveToTomorrow: Boolean,
+  val deleteLabel: String?,
+)
+
+/** Unknown sources fail closed, matching the editor's ownership contract. */
+internal fun agendaRowActionPolicy(source: String, isAllDay: Boolean): AgendaRowActionPolicy {
+  val ownership = EventOwnership.forSource(source)
+  return AgendaRowActionPolicy(
+    canMoveToTomorrow = !isAllDay && ownership == EventOwnership.APP_OWNED,
+    deleteLabel =
+      when (ownership) {
+        EventOwnership.APP_OWNED -> "Delete event"
+        EventOwnership.DEVICE_CALENDAR -> "Delete from calendar"
+        EventOwnership.READ_ONLY_SOURCE -> null
+      },
+  )
 }
 
 /** What shows behind a row while it is being swiped: the action, named. */
@@ -514,11 +720,11 @@ private fun BriefBody(
 private fun DayHeader(
   dateLabel: String,
   fullDate: String,
-  greeting: String?,
   isToday: Boolean,
   isSyncing: Boolean,
   onPrevious: () -> Unit,
   onNext: () -> Unit,
+  onChooseDate: () -> Unit,
   onToday: () -> Unit,
   onSync: () -> Unit,
   onSearch: () -> Unit,
@@ -527,40 +733,85 @@ private fun DayHeader(
 ) {
   val d = LocalDensityTokens.current
   val scheme = MaterialTheme.colorScheme
-  Column(modifier = modifier.fillMaxWidth().padding(top = Space.xs, bottom = Space.xs)) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      Column(modifier = Modifier.weight(1f)) {
-        Text(
-          text = dateLabel,
-          fontSize = 21.sp,
-          fontWeight = FontWeight.SemiBold,
-          color = scheme.onSurface,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-          text = greeting ?: fullDate,
-          fontSize = d.secondary,
-          color = scheme.onSurfaceVariant,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-      }
-      RowIconButton(Icons.Default.DateRange, "Open the day timeline", onTimeline)
-      RowIconButton(Icons.Default.Search, "Search and commands", onSearch)
-      if (isSyncing) {
-        Box(modifier = Modifier.size(32.dp), contentAlignment = Alignment.Center) {
-          CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.6.dp)
-        }
-      } else {
-        RowIconButton(Icons.Default.Refresh, "Sync now", onSync)
-      }
-      RowIconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous day", onPrevious)
-      RowIconButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next day", onNext)
+  var menuOpen by rememberSaveable { mutableStateOf(false) }
+
+  Row(
+    modifier = modifier.fillMaxWidth().padding(top = Space.xs, bottom = Space.xs),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    RowIconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous day", onPrevious)
+    Column(
+      modifier =
+        Modifier.weight(1f)
+          .heightIn(min = 48.dp)
+          .clip(RoundedCornerShape(Radius.block))
+          .clickable(role = Role.Button, onClickLabel = "Choose date", onClick = onChooseDate)
+          // The long form still reaches a screen reader, where reading it costs no height.
+          .semantics { contentDescription = fullDate }
+          .padding(horizontal = Space.sm),
+      verticalArrangement = Arrangement.Center,
+    ) {
+      // One line, not two. "Today" over "Wednesday, August 12" was two sizes of the same fact, and
+      // the pair cost more height than two agenda rows. The short label already identifies the day —
+      // anything that is not today or tomorrow reads as its own date — and the full form is one tap
+      // away in the picker this line opens. Joining them with a dot only truncated at 360 dp.
+      Text(
+        text = dateLabel,
+        fontSize = rootTitleSize(),
+        fontWeight = FontWeight.SemiBold,
+        color = scheme.onSurface,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
     }
-    if (!isToday) {
-      TextButton(onClick = onToday, contentPadding = PaddingValues(0.dp)) {
-        Text("Back to today", fontSize = d.secondary)
+    RowIconButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next day", onNext)
+    Box(
+      modifier =
+        if (isSyncing) Modifier.semantics { stateDescription = "Sync in progress" }
+        else Modifier
+    ) {
+      RowIconButton(Icons.Default.MoreVert, "More day actions", { menuOpen = true })
+      if (isSyncing) {
+        CircularProgressIndicator(
+          modifier = Modifier.align(Alignment.BottomEnd).padding(3.dp).size(12.dp),
+          strokeWidth = 1.6.dp,
+        )
+      }
+      DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        if (!isToday) {
+          DropdownMenuItem(
+            text = { Text("Go to today") },
+            onClick = {
+              menuOpen = false
+              onToday()
+            },
+          )
+        }
+        DropdownMenuItem(
+          text = { Text("Open timeline") },
+          leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null) },
+          onClick = {
+            menuOpen = false
+            onTimeline()
+          },
+        )
+        DropdownMenuItem(
+          text = { Text("Find or run a command") },
+          leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+          onClick = {
+            menuOpen = false
+            onSearch()
+          },
+        )
+        DropdownMenuItem(
+          text = { Text(if (isSyncing) "Syncing…" else "Sync now") },
+          leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+          enabled = !isSyncing,
+          onClick = {
+            menuOpen = false
+            onSync()
+          },
+        )
       }
     }
   }

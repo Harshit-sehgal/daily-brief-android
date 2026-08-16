@@ -40,8 +40,9 @@ jobs:
         run: sdkmanager "build-tools;36.0.0" "platforms;android-36" "platforms;android-37.1"
 
       - name: Run build gates
+        # --continue so one lint finding does not hide the test results.
         run: >-
-          ./gradlew --no-daemon --stacktrace
+          ./gradlew --no-daemon --stacktrace --continue
           testDebugUnitTest
           lintDebug
           assembleDebug

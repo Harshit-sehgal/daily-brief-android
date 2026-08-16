@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import com.example.ui.theme.Radius
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -59,7 +60,7 @@ fun Tag(
   Box(
     modifier =
       modifier
-        .background(tone.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+        .background(tone.copy(alpha = 0.12f), RoundedCornerShape(Radius.control))
         .padding(horizontal = 6.dp, vertical = 2.dp)
   ) {
     Text(text = text, style = MaterialTheme.typography.labelSmall, color = tone)

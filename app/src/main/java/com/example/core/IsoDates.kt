@@ -2,6 +2,7 @@ package com.example.core
 
 import java.text.ParsePosition
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
@@ -31,6 +32,15 @@ object IsoDates {
 
   private val LOCAL_PATTERNS =
     listOf("yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm")
+
+  /** UTC instants for files that leave this device: exports, calendars, anything shared. */
+  fun isoUtc(epochMillis: Long): String = format("yyyy-MM-dd'T'HH:mm:ss'Z'", epochMillis)
+
+  /** The compact form iCalendar requires. */
+  fun icsUtc(epochMillis: Long): String = format("yyyyMMdd'T'HHmmss'Z'", epochMillis)
+
+  private fun format(pattern: String, epochMillis: Long): String =
+    SimpleDateFormat(pattern, Locale.US).apply { timeZone = UTC }.format(Date(epochMillis))
 
   /** Epoch millis, or 0 when nothing matches. */
   fun parse(value: String, timeZone: TimeZone = TimeZone.getDefault()): Long {

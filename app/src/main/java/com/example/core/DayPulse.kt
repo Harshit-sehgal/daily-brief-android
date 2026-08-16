@@ -1,6 +1,7 @@
 package com.example.core
 
 import com.example.data.model.BriefingEvent
+import java.util.TimeZone
 
 /**
  * The state of a day at a moment in time.
@@ -46,9 +47,15 @@ object DayPulse {
    * @param dayStart local midnight of the day being described
    * @param nowMs the current instant; a day that is not [dayStart]'s produces a
    *   snapshot with no live parts, which is what lets the page describe tomorrow
+   * @param timeZone zone whose calendar date [dayStart] represents
    */
-  fun of(events: List<BriefingEvent>, nowMs: Long, dayStart: Long): Snapshot {
-    val dayEnd = dayStart + ScheduleAnalysis.DAY_MS
+  fun of(
+    events: List<BriefingEvent>,
+    nowMs: Long,
+    dayStart: Long,
+    timeZone: TimeZone = TimeZone.getDefault(),
+  ): Snapshot {
+    val dayEnd = ScheduleAnalysis.startOfDayOffset(dayStart, 1, timeZone)
     val live = nowMs in dayStart until dayEnd
 
     val allDay = events.filter { ScheduleAnalysis.isAllDay(it) }.sortedBy { it.title }

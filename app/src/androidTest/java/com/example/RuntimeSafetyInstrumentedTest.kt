@@ -22,7 +22,7 @@ class RuntimeSafetyInstrumentedTest {
 
     database.query("PRAGMA user_version").use { cursor ->
       assertTrue(cursor.moveToFirst())
-      assertEquals(5, cursor.getInt(0))
+      assertEquals(9, cursor.getInt(0))
     }
 
     val columns = mutableSetOf<String>()
@@ -31,6 +31,23 @@ class RuntimeSafetyInstrumentedTest {
       while (cursor.moveToNext()) columns += cursor.getString(nameIndex)
     }
     assertTrue("Room v5 must expose explicit all-day state", "isAllDay" in columns)
+
+    val tables = mutableSetOf<String>()
+    database.query("SELECT name FROM sqlite_master WHERE type = 'table'").use { cursor ->
+      while (cursor.moveToNext()) tables += cursor.getString(0)
+    }
+    assertTrue("Room v6 must expose app-owned plan items", "plan_items" in tables)
+    assertTrue("Room v6 must expose stable plan boards", "plan_boards" in tables)
+    assertTrue("Room v7 must expose reusable work schedules", "work_schedules" in tables)
+    assertTrue(
+      "Room v7 must normalize weekly and date-specific windows",
+      "work_schedule_windows" in tables,
+    )
+    assertTrue(
+      "Room v7 must expose per-item schedule assignments",
+      "plan_item_schedules" in tables,
+    )
+    assertTrue("Room v7 must expose a durable mutation journal", "plan_mutations" in tables)
   }
 
   @Test

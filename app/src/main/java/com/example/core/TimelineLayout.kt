@@ -1,6 +1,8 @@
 package com.example.core
 
 import com.example.data.model.BriefingEvent
+import java.util.Calendar
+import java.util.TimeZone
 
 /**
  * Places events side by side on a day timeline.
@@ -31,10 +33,16 @@ object TimelineLayout {
 
   /**
    * @param dayStart local midnight of the day being drawn
+   * @param timeZone zone whose wall clock labels the timeline
    * @return timed events only; all-day entries are the caller's problem to banner
    */
-  fun layout(events: List<BriefingEvent>, dayStart: Long): List<Slot> {
-    val dayEnd = dayStart + ScheduleAnalysis.DAY_MS
+  @JvmOverloads
+  fun layout(
+    events: List<BriefingEvent>,
+    dayStart: Long,
+    timeZone: TimeZone = TimeZone.getDefault(),
+  ): List<Slot> {
+    val dayEnd = ScheduleAnalysis.startOfDayOffset(dayStart, 1, timeZone)
 
     val placed =
       events
@@ -43,8 +51,10 @@ object TimelineLayout {
         .map { event ->
           // Clamp to the day so an event running past midnight still draws sanely.
           val startMin =
-            (((event.startTime - dayStart) / 60_000L).toInt()).coerceIn(0, MINUTES_PER_DAY)
-          val rawEnd = (((event.endTime - dayStart) / 60_000L).toInt()).coerceIn(0, MINUTES_PER_DAY)
+            if (event.startTime <= dayStart) 0 else wallClockMinute(event.startTime, timeZone)
+          val rawEnd =
+            if (event.endTime >= dayEnd) MINUTES_PER_DAY
+            else wallClockMinute(event.endTime, timeZone)
           val endMin = maxOf(rawEnd, startMin + MIN_VISIBLE_MINUTES).coerceAtMost(MINUTES_PER_DAY)
           Triple(event, startMin, endMin)
         }
@@ -96,15 +106,26 @@ object TimelineLayout {
     events.filter { ScheduleAnalysis.isAllDay(it) }.sortedBy { it.title }
 
   /** Minute of the day, or null when [nowMs] is not inside this day. */
-  fun nowMinute(nowMs: Long, dayStart: Long): Int? {
-    val offset = nowMs - dayStart
-    if (offset < 0 || offset >= ScheduleAnalysis.DAY_MS) return null
-    return (offset / 60_000L).toInt()
+  @JvmOverloads
+  fun nowMinute(
+    nowMs: Long,
+    dayStart: Long,
+    timeZone: TimeZone = TimeZone.getDefault(),
+  ): Int? {
+    val dayEnd = ScheduleAnalysis.startOfDayOffset(dayStart, 1, timeZone)
+    if (nowMs < dayStart || nowMs >= dayEnd) return null
+    return wallClockMinute(nowMs, timeZone)
   }
 
   /** Snaps a dragged minute to the nearest [step], kept inside the day. */
   fun snapMinute(minute: Int, step: Int = 15, durationMinutes: Int = 0): Int {
     val snapped = ((minute + step / 2) / step) * step
     return snapped.coerceIn(0, MINUTES_PER_DAY - durationMinutes.coerceAtLeast(0))
+  }
+
+  /** Position an instant by the clock label people see, not elapsed time since midnight. */
+  private fun wallClockMinute(timeMs: Long, timeZone: TimeZone): Int {
+    val local = Calendar.getInstance(timeZone).apply { timeInMillis = timeMs }
+    return local.get(Calendar.HOUR_OF_DAY) * 60 + local.get(Calendar.MINUTE)
   }
 }

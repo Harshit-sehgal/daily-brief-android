@@ -45,7 +45,7 @@ class DayPulseTest {
 
   @Test
   fun `mid-event reports what you are in and how long is left`() {
-    val pulse = DayPulse.of(day, at(11, 20), dayStart)
+    val pulse = DayPulse.of(day, at(11, 20), dayStart, utc)
 
     assertEquals("review", pulse.current?.id)
     assertEquals(40, pulse.minutesLeft)
@@ -55,7 +55,7 @@ class DayPulseTest {
 
   @Test
   fun `between events reports the gap as free time`() {
-    val pulse = DayPulse.of(day, at(13), dayStart)
+    val pulse = DayPulse.of(day, at(13), dayStart, utc)
 
     assertNull(pulse.current)
     assertEquals("ship", pulse.next?.id)
@@ -65,14 +65,14 @@ class DayPulseTest {
 
   @Test
   fun `time inside an event is not free time`() {
-    val pulse = DayPulse.of(day, at(11, 20), dayStart)
+    val pulse = DayPulse.of(day, at(11, 20), dayStart, utc)
 
     assertEquals(0, pulse.freeMinutes)
   }
 
   @Test
   fun `finished counts only what has actually ended`() {
-    val pulse = DayPulse.of(day, at(11, 20), dayStart)
+    val pulse = DayPulse.of(day, at(11, 20), dayStart, utc)
 
     assertEquals(1, pulse.finished)
     assertEquals(3, pulse.total)
@@ -82,7 +82,7 @@ class DayPulseTest {
   @Test
   fun `progress measures booked minutes behind you, not events`() {
     // 150 minutes booked; by 11:30 the 30-minute standup and 30 of the review are done.
-    val pulse = DayPulse.of(day, at(11, 30), dayStart)
+    val pulse = DayPulse.of(day, at(11, 30), dayStart, utc)
 
     assertEquals(150, pulse.bookedMinutes)
     assertEquals(60f / 150f, pulse.progress, 0.001f)
@@ -90,7 +90,7 @@ class DayPulseTest {
 
   @Test
   fun `after the last event the day reads as done`() {
-    val pulse = DayPulse.of(day, at(18), dayStart)
+    val pulse = DayPulse.of(day, at(18), dayStart, utc)
 
     assertTrue(pulse.isDone)
     assertNull(pulse.next)
@@ -100,7 +100,7 @@ class DayPulseTest {
 
   @Test
   fun `an empty day is clear rather than done`() {
-    val pulse = DayPulse.of(emptyList(), at(12), dayStart)
+    val pulse = DayPulse.of(emptyList(), at(12), dayStart, utc)
 
     assertTrue(pulse.isClear)
     assertFalse(pulse.isDone)
@@ -110,7 +110,7 @@ class DayPulseTest {
   @Test
   fun `a day you are not in is described from its start, with nothing running`() {
     val tomorrow = dayStart + ScheduleAnalysis.DAY_MS
-    val pulse = DayPulse.of(day, tomorrow + 3_600_000L, dayStart)
+    val pulse = DayPulse.of(day, tomorrow + 3_600_000L, dayStart, utc)
 
     assertFalse(pulse.isLive)
     assertNull(pulse.current)
@@ -123,7 +123,7 @@ class DayPulseTest {
   @Test
   fun `all-day entries stay out of the countdown`() {
     val events = day + event("holiday", dayStart, dayStart + ScheduleAnalysis.DAY_MS, allDay = true)
-    val pulse = DayPulse.of(events, at(13), dayStart)
+    val pulse = DayPulse.of(events, at(13), dayStart, utc)
 
     assertEquals(listOf("holiday"), pulse.allDay.map { it.id })
     assertEquals(3, pulse.total)
@@ -133,14 +133,14 @@ class DayPulseTest {
   @Test
   fun `an event running past midnight only counts the part inside the day`() {
     val late = listOf(event("late", at(23), at(23) + 3 * 3_600_000L))
-    val pulse = DayPulse.of(late, at(22), dayStart)
+    val pulse = DayPulse.of(late, at(22), dayStart, utc)
 
     assertEquals(60, pulse.bookedMinutes)
   }
 
   @Test
   fun `remaining time rounds up so the last minute is never reported as zero`() {
-    val pulse = DayPulse.of(day, at(11, 59) + 30_000L, dayStart)
+    val pulse = DayPulse.of(day, at(11, 59) + 30_000L, dayStart, utc)
 
     assertEquals(1, pulse.minutesLeft)
   }
@@ -151,4 +151,72 @@ class DayPulseTest {
     assertEquals("1h", DayPulse.humanDuration(60))
     assertEquals("2h 10m", DayPulse.humanDuration(130))
   }
+
+  @Test
+  fun `spring-forward pulse stops at the next local midnight`() {
+    val zone = TimeZone.getTimeZone("America/New_York")
+    val start = localAt(zone, 2026, Calendar.MARCH, 8, 0, 0)
+    val late =
+      event(
+        "late",
+        localAt(zone, 2026, Calendar.MARCH, 8, 23, 30),
+        localAt(zone, 2026, Calendar.MARCH, 9, 0, 30),
+      )
+    val tomorrow =
+      event(
+        "tomorrow",
+        localAt(zone, 2026, Calendar.MARCH, 9, 0, 15),
+        localAt(zone, 2026, Calendar.MARCH, 9, 1, 0),
+      )
+
+    val pulse =
+      DayPulse.of(
+        listOf(late, tomorrow),
+        localAt(zone, 2026, Calendar.MARCH, 8, 22, 0),
+        start,
+        zone,
+      )
+
+    assertTrue(pulse.isLive)
+    assertEquals(listOf("late"), pulse.upcoming.map { it.id })
+    assertEquals(1, pulse.total)
+    assertEquals(30, pulse.bookedMinutes)
+  }
+
+  @Test
+  fun `fall-back pulse includes the final local hour of the 25 hour day`() {
+    val zone = TimeZone.getTimeZone("America/New_York")
+    val start = localAt(zone, 2026, Calendar.NOVEMBER, 1, 0, 0)
+    val late =
+      event(
+        "late",
+        localAt(zone, 2026, Calendar.NOVEMBER, 1, 23, 15),
+        localAt(zone, 2026, Calendar.NOVEMBER, 1, 23, 45),
+      )
+
+    val pulse =
+      DayPulse.of(
+        listOf(late),
+        localAt(zone, 2026, Calendar.NOVEMBER, 1, 23, 30),
+        start,
+        zone,
+      )
+
+    assertTrue(pulse.isLive)
+    assertEquals("late", pulse.current?.id)
+    assertEquals(30, pulse.bookedMinutes)
+  }
+
+  private fun localAt(
+    zone: TimeZone,
+    year: Int,
+    month: Int,
+    day: Int,
+    hour: Int,
+    minute: Int,
+  ): Long =
+    Calendar.getInstance(zone).apply {
+      clear()
+      set(year, month, day, hour, minute, 0)
+    }.timeInMillis
 }

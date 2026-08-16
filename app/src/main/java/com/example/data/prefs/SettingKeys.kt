@@ -22,6 +22,8 @@ object SettingKeys {
 
   const val ACTIVE_BOARD = "active_kanban_board"
   const val BOARDS = "kanban_boards"
+  /** Stable planning-board identity; legacy event-board names remain untouched during cutover. */
+  const val ACTIVE_PLAN_BOARD_ID = "active_plan_board_id"
 
   const val ACTIVE_GEMINI_KEY = "active_gemini_key_name"
   const val GEMINI_KEYS = "gemini_api_keys_list"
@@ -31,12 +33,30 @@ object SettingKeys {
 
   /** Workspace layout preferences. */
   const val HOME_DESTINATION = "home_destination"
+  const val CALENDAR_VIEW = "calendar_view"
+  const val PLAN_VIEW = "plan_view"
+  const val ACTIVE_SAVED_PLAN_VIEW_ID = "active_saved_plan_view_id"
+  const val GANTT_RANGE_DAYS = "gantt_range_days"
+  const val PLAN_IMPORT_DISCLOSURE_ACKNOWLEDGED = "plan_import_disclosure_acknowledged"
+  const val PLAN_LEGACY_CATALOG_IMPORTED = "plan_legacy_catalog_imported"
   const val UI_DENSITY = "ui_density"
   const val COLLAPSED_SECTIONS = "collapsed_sections"
   const val TODAY_SECTIONS = "today_sections"
   const val HOME_CARDS = "home_cards"
   const val AGENDA_GROUPING = "agenda_grouping"
   const val WEEK_SPAN_DAYS = "week_span_days"
+
+  /** How long a change stays undoable; see [UndoWindowPolicy]. */
+  const val UNDO_WINDOW_SECONDS = "undo_window_seconds"
+
+  /** Plan Outline presentation. Saved views read and write these; they never touch task data. */
+  const val PLAN_OUTLINE_SORT = "plan_outline_sort"
+  const val PLAN_OUTLINE_HIDE_COMPLETED = "plan_outline_hide_completed"
+  const val PLAN_OUTLINE_COLLAPSED = "plan_outline_collapsed"
+  const val PLAN_OUTLINE_GROUPING = "plan_outline_grouping"
+
+  /** Which Board lanes are shown. Empty means every lane, which is the honest default. */
+  const val PLAN_BOARD_COLUMNS = "plan_board_columns"
 
   fun columnsForBoard(board: String) = "kanban_columns_$board"
 

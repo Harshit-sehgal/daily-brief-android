@@ -1,16 +1,59 @@
 package com.example.ui.viewmodel
 
+import com.example.ui.screens.OutlineGrouping
+import com.example.core.AutoPlanResult
+import com.example.core.AutoPlan
+import com.example.core.IsoDates
+import com.example.core.ExportScope
+import com.example.core.PlanExport
+import com.example.data.repository.PlanMutationType
+import com.example.core.WeeklyReviewResult
+import com.example.core.WeeklyReview
+import com.example.ui.screens.OutlineSort
+import com.example.data.prefs.UndoWindowPolicy
 import android.app.Application
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.example.core.ScheduleAnalysis
+import com.example.core.MultiSchedulePlanHealth
+import com.example.core.PlanHealthResult
+import com.example.core.CriticalPathEngine
+import com.example.core.CriticalPathResult
+import com.example.core.WorkingInterval
+import com.example.data.model.PlanBaseline
+import com.example.core.PortfolioRollupResult
+import com.example.core.PortfolioRollup
+import com.example.core.PlanScenarios
+import com.example.core.PlanScenario
+import com.example.core.BaselineVariance
+import com.example.core.BaselineComparison
+import com.example.core.WorkingCalendarSpec
 import com.example.data.api.WriteBack
+import com.example.data.database.PlanItemWithBlocks
 import com.example.data.model.BriefingEvent
 import com.example.data.model.EventSource
+import com.example.data.model.PlanBoard
+import com.example.data.model.PlanBlock
+import com.example.data.model.PlanColumn
+import com.example.data.model.PlanDependency
+import com.example.data.model.PlanItem
+import com.example.data.model.PlanItemSchedule
+import com.example.data.model.PlanMutation
+import com.example.data.model.PlanSurface
 import com.example.data.prefs.SettingKeys
 import com.example.data.repository.BriefingRepository
+import com.example.data.repository.BoardDeleteOutcome
+import com.example.data.repository.EventDeleteOutcome
+import com.example.data.repository.PlanBlockInput
+import com.example.data.repository.PlanItemInput
+import com.example.data.repository.PlanHealthSchedulePolicy
+import com.example.data.repository.PlanRepository
+import com.example.data.repository.PlanUndoStatus
+import com.example.data.repository.PersistedWorkingCalendar
+import com.example.data.repository.SavedPlanView
+import com.example.data.repository.SavedPlanViewState
 import com.example.receiver.AlarmScheduler
 import com.example.ui.theme.Accents
 import com.example.ui.theme.UiDensity
@@ -28,12 +71,15 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -47,6 +93,43 @@ enum class BoardScope(val label: String) {
   All("Everything"),
 }
 
+/** Which system owns an event and therefore which actions are safe in Daily Brief. */
+enum class EventOwnership(
+  val sourceFieldsEditable: Boolean,
+  val deletableFromEditor: Boolean,
+  val movableOnTimeline: Boolean,
+  val deletionUndoable: Boolean,
+) {
+  APP_OWNED(
+    sourceFieldsEditable = true,
+    deletableFromEditor = true,
+    movableOnTimeline = true,
+    deletionUndoable = true,
+  ),
+  DEVICE_CALENDAR(
+    sourceFieldsEditable = true,
+    deletableFromEditor = true,
+    movableOnTimeline = false,
+    deletionUndoable = false,
+  ),
+  READ_ONLY_SOURCE(
+    sourceFieldsEditable = false,
+    deletableFromEditor = false,
+    movableOnTimeline = false,
+    deletionUndoable = false,
+  );
+
+  companion object {
+    /** Unknown integrations fail closed until their write-back contract is explicit. */
+    fun forSource(source: String): EventOwnership =
+      when (source) {
+        EventSource.MANUAL, EventSource.SAMPLE -> APP_OWNED
+        in EventSource.DEVICE_WRITABLE -> DEVICE_CALENDAR
+        else -> READ_ONLY_SOURCE
+      }
+  }
+}
+
 /** A single, complete description of an event the user is creating or editing. */
 data class EventDraft(
   val id: String? = null,
@@ -54,6 +137,8 @@ data class EventDraft(
   val description: String = "",
   val startMs: Long,
   val endMs: Long,
+  val source: String = EventSource.MANUAL,
+  val ownership: EventOwnership = EventOwnership.forSource(source),
   val isAllDay: Boolean = false,
   val isUrgent: Boolean = false,
   val isDeadline: Boolean = false,
@@ -71,8 +156,8 @@ enum class TodaySection(val key: String, val label: String, val blurb: String) {
   companion object {
     fun byKey(key: String?) = entries.firstOrNull { it.key == key }
 
-    /** A deliberately quiet starting point; the brief is opt-in. */
-    val Defaults = listOf(Summary, Conflicts, Agenda)
+    /** Agenda-first by default; every analytical section remains opt-in. */
+    val Defaults = listOf(Agenda)
   }
 }
 
@@ -85,15 +170,23 @@ enum class TodaySection(val key: String, val label: String, val blurb: String) {
 enum class HomeCard(val key: String, val label: String, val blurb: String) {
   Focus("focus", "Now", "What you are in, or what is next"),
   Progress("progress", "Day", "How much of the day is behind you"),
-  Actions("actions", "Quick actions", "New event, timeline, search"),
+  Actions("actions", "Quick actions", "Timeline, search and sync"),
   UpNext("upnext", "Up next", "The next few things"),
-  Attention("attention", "Needs attention", "Clashes and deadlines"),
+  Attention("attention", "Needs attention", "Overlapping events"),
+  Health("health", "Plan health", "Capacity, estimates and deadline risk"),
   Board("board", "Board", "Where your work stands");
 
   companion object {
     fun byKey(key: String?) = entries.firstOrNull { it.key == key }
 
-    val Defaults = listOf(Focus, Progress, UpNext, Attention)
+    /**
+     * What Home opens with: what you are in, what is next, and anything clashing.
+     *
+     * Plan Health, the Board preview and quick actions are all real, and all of them are answers to
+     * questions nobody asked on opening the app. They stay one tap away under Edit rather than
+     * standing on the first screen every morning.
+     */
+    val Defaults = listOf(Focus, UpNext, Attention)
   }
 }
 
@@ -112,6 +205,9 @@ data class UiMessage(
   val text: String,
   val actionLabel: String? = null,
   val undoEvent: BriefingEvent? = null,
+  /** Null means the Undo expects the row to remain deleted; non-null is an exact stale guard. */
+  val undoExpectedEvent: BriefingEvent? = null,
+  val undoPlanMutationId: String? = null,
 )
 
 data class NotionCredentialDraft(val token: String, val databaseId: String)
@@ -131,10 +227,58 @@ data class BriefUiState(
     get() = markdown.isNotBlank()
 }
 
+data class PlanHealthUiState(
+  val result: PlanHealthResult? = null,
+  val rangeStart: Long = 0L,
+  val rangeEnd: Long = 0L,
+  val generatedAt: Long = 0L,
+  val unavailableReason: String? = "Preparing Plan Health…",
+)
+
+data class CriticalPathUiState(
+  val result: CriticalPathResult? = null,
+  val unavailableReason: String? = "Preparing critical path…",
+)
+
+/** A baseline, and how far today's plan has moved from it. */
+data class BaselineComparisonUiState(
+  val baselineId: String,
+  val name: String,
+  val capturedAt: Long,
+  val comparison: BaselineComparison,
+)
+
+data class ActiveWorkingCalendarsState(
+  val calendars: List<PersistedWorkingCalendar> = emptyList(),
+  val loaded: Boolean = false,
+)
+
+data class PlanItemScheduleAssignmentsState(
+  val boardId: String? = null,
+  val assignments: List<PlanItemSchedule> = emptyList(),
+  val loaded: Boolean = false,
+)
+
+private data class PlanHealthScheduleInputs(
+  val defaultCalendar: PersistedWorkingCalendar?,
+  val activeCalendars: ActiveWorkingCalendarsState,
+  val assignments: PlanItemScheduleAssignmentsState,
+)
+
+private data class PlanHealthInputs(
+  val board: PlanBoard?,
+  val items: List<PlanItem>,
+  val relationBoardIds: Set<String>,
+  val blocks: List<com.example.data.model.PlanBlock>,
+  val commitments: List<BriefingEvent>,
+  val schedules: PlanHealthScheduleInputs,
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
-class BriefingViewModel(application: Application, savedStateHandle: SavedStateHandle) :
+class BriefingViewModel(application: Application, private val savedStateHandle: SavedStateHandle) :
   AndroidViewModel(application) {
   private val repository = BriefingRepository(application)
+  private val planRepository = PlanRepository(application)
   private val appContext = application.applicationContext
 
   // ---- Selection ----------------------------------------------------------
@@ -151,6 +295,20 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
 
   private val _messages = MutableSharedFlow<UiMessage>(extraBufferCapacity = 8)
   val messages: SharedFlow<UiMessage> = _messages.asSharedFlow()
+
+  /**
+   * Editor mutations live in the ViewModel so rotation cannot strand a restored
+   * sheet in a locally saved "busy" state. A signed completion token is positive
+   * on success and negative on failure; the UI consumes each absolute token once.
+   */
+  val eventEditorBusy: StateFlow<Boolean> =
+    savedStateHandle.getStateFlow(EVENT_EDITOR_BUSY_KEY, false)
+  val taskEditorBusy: StateFlow<Boolean> =
+    savedStateHandle.getStateFlow(TASK_EDITOR_BUSY_KEY, false)
+  val eventEditorCompletion: StateFlow<Long> =
+    savedStateHandle.getStateFlow(EVENT_EDITOR_COMPLETION_KEY, 0L)
+  val taskEditorCompletion: StateFlow<Long> =
+    savedStateHandle.getStateFlow(TASK_EDITOR_COMPLETION_KEY, 0L)
 
   private val _syncProblem = MutableStateFlow<String?>(null)
   val syncProblem: StateFlow<String?> = _syncProblem.asStateFlow()
@@ -179,8 +337,9 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
   val reminderNotificationsAvailable: StateFlow<Boolean> =
     _reminderNotificationsAvailable.asStateFlow()
 
-  private val syncMutex = Mutex()
-  private val eventMutationMutex = Mutex()
+  /** One foreground schedule lane keeps sync, edits, alarms and cache refreshes ordered. */
+  private val scheduleActionMutex = Mutex()
+  private val workspacePreferencesMutex = Mutex()
   private var briefJob: Job? = null
 
   private val _brief = MutableStateFlow(BriefUiState())
@@ -237,7 +396,7 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
   val todayEvents: StateFlow<List<BriefingEvent>> =
     _dayTick
       .flatMapLatest { today ->
-        repository.eventsInRange(today, today + ScheduleAnalysis.DAY_MS)
+        repository.eventsInRange(today, ScheduleAnalysis.startOfDayOffset(today, 1))
       }
       .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
 
@@ -253,45 +412,6 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
         )
       }
       .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
-
-  /** Days offered by the date strip: a week back, three weeks ahead of today. */
-  val stripDays: StateFlow<List<Long>> =
-    _selectedDay
-      .map { day ->
-        val today = ScheduleAnalysis.startOfDay(System.currentTimeMillis())
-        val aroundToday = (STRIP_BACK..STRIP_FORWARD).map {
-          ScheduleAnalysis.startOfDayOffset(today, it)
-        }
-        // Jumping far out of range re-centres the strip rather than stranding it.
-        if (aroundToday.contains(day)) aroundToday
-        else (STRIP_BACK..STRIP_FORWARD).map { ScheduleAnalysis.startOfDayOffset(day, it) }
-      }
-      .stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(STOP_TIMEOUT),
-        (STRIP_BACK..STRIP_FORWARD).map {
-          ScheduleAnalysis.startOfDayOffset(System.currentTimeMillis(), it)
-        },
-      )
-
-  /** Which of [stripDays] have anything on them, for the dots under each date. */
-  val daysWithEvents: StateFlow<Set<Long>> =
-    stripDays
-      .flatMapLatest { days ->
-        if (days.isEmpty()) flowOf(emptySet())
-        else
-          repository
-            .eventsInRange(days.first(), ScheduleAnalysis.startOfDayOffset(days.last(), 1))
-            .map { events ->
-              days
-                .filter { day ->
-                  val nextDay = ScheduleAnalysis.startOfDayOffset(day, 1)
-                  events.any { event -> event.startTime < nextDay && event.endTime > day }
-                }
-                .toSet()
-            }
-      }
-      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptySet())
 
   // ---- Settings -----------------------------------------------------------
 
@@ -323,11 +443,1547 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
 
   // ---- Workspace layout ---------------------------------------------------
 
-  /** Which screen the app opens on. */
-  val homeDestination = stringSetting(SettingKeys.HOME_DESTINATION, "Home", eager = true)
+  /** Which screen the app opens on; null means Room has not emitted yet. */
+  val homeDestination: StateFlow<String?> =
+    repository
+      .settingFlow(SettingKeys.HOME_DESTINATION)
+      .map { WorkspacePreferencePolicy.homeDestination(it?.value) }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
   fun setHomeDestination(name: String) {
-    viewModelScope.launch { repository.writeSetting(SettingKeys.HOME_DESTINATION, name) }
+    viewModelScope.launch {
+      repository.writeSetting(
+        SettingKeys.HOME_DESTINATION,
+        WorkspacePreferencePolicy.homeDestination(name),
+      )
+    }
+  }
+
+  val calendarView: StateFlow<String> =
+    combine(
+        repository.settingFlow(SettingKeys.CALENDAR_VIEW),
+        repository.settingFlow(SettingKeys.HOME_DESTINATION),
+      ) { storedCalendarView, storedHomeDestination ->
+        WorkspacePreferencePolicy.calendarView(
+          storedCalendarView?.value,
+          storedHomeDestination?.value,
+        )
+      }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_CALENDAR_VIEW)
+
+  fun setCalendarView(name: String) {
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.CALENDAR_VIEW, WorkspacePreferencePolicy.calendarView(name))
+    }
+  }
+
+  val planView: StateFlow<String> =
+    repository
+      .settingFlow(SettingKeys.PLAN_VIEW)
+      .map { WorkspacePreferencePolicy.planView(it?.value) }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_PLAN_VIEW)
+
+  fun setPlanView(name: String) {
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.PLAN_VIEW, WorkspacePreferencePolicy.planView(name))
+      repository.writeSetting(SettingKeys.ACTIVE_SAVED_PLAN_VIEW_ID, "")
+    }
+  }
+
+  // ---- App-owned planning ------------------------------------------------
+
+  val planBoards: StateFlow<List<PlanBoard>> =
+    planRepository
+      .observeBoards()
+      .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+  val activePlanBoardId: StateFlow<String?> =
+    combine(planRepository.observeActiveBoardId(), planBoards) { stored, available ->
+        stored?.takeIf { id -> available.any { it.id == id } }
+          ?: available.firstOrNull { it.isDefault }?.id
+          ?: available.firstOrNull()?.id
+      }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+  val activePlanBoard: StateFlow<PlanBoard?> =
+    combine(activePlanBoardId, planBoards) { activeId, available ->
+        available.firstOrNull { it.id == activeId }
+      }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+  val planColumns: StateFlow<List<PlanColumn>> =
+    activePlanBoardId
+      .flatMapLatest { boardId ->
+        if (boardId == null) flowOf(emptyList()) else planRepository.observeColumns(boardId)
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+  val planItems: StateFlow<List<PlanItem>> =
+    activePlanBoardId
+      .flatMapLatest { boardId ->
+        if (boardId == null) flowOf(emptyList()) else planRepository.observeItems(boardId)
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+  val planGanttItems: StateFlow<List<PlanItemWithBlocks>> =
+    activePlanBoardId
+      .flatMapLatest { boardId ->
+        if (boardId == null) flowOf(emptyList()) else planRepository.observeGanttItems(boardId)
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+  val planDependencies: StateFlow<List<PlanDependency>> =
+    activePlanBoardId
+      .flatMapLatest { boardId ->
+        if (boardId == null) flowOf(emptyList()) else planRepository.observeDependencies(boardId)
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+  val activeWorkingCalendarsState: StateFlow<ActiveWorkingCalendarsState> =
+    planRepository
+      .observeActiveWorkingCalendars()
+      .map { calendars -> ActiveWorkingCalendarsState(calendars = calendars, loaded = true) }
+      .onStart { emit(ActiveWorkingCalendarsState()) }
+      .stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(STOP_TIMEOUT),
+        ActiveWorkingCalendarsState(),
+      )
+
+  val activeWorkingCalendars: StateFlow<List<PersistedWorkingCalendar>> =
+    activeWorkingCalendarsState
+      .map { state -> state.calendars }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+  val planItemScheduleAssignmentsState: StateFlow<PlanItemScheduleAssignmentsState> =
+    activePlanBoardId
+      .flatMapLatest { boardId ->
+        if (boardId == null) {
+          flowOf(PlanItemScheduleAssignmentsState(boardId = null, loaded = true))
+        } else {
+          planRepository
+            .observeItemScheduleAssignments(boardId)
+            .map { assignments ->
+              PlanItemScheduleAssignmentsState(
+                boardId = boardId,
+                assignments = assignments,
+                loaded = true,
+              )
+            }
+            .onStart {
+              emit(PlanItemScheduleAssignmentsState(boardId = boardId, loaded = false))
+            }
+        }
+      }
+      .stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(STOP_TIMEOUT),
+        PlanItemScheduleAssignmentsState(),
+      )
+
+  val planItemScheduleAssignments: StateFlow<List<PlanItemSchedule>> =
+    planItemScheduleAssignmentsState
+      .map { state -> state.assignments }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+  private val _planItemScheduleAssignmentsInFlight = MutableStateFlow<Set<String>>(emptySet())
+  val planItemScheduleAssignmentsInFlight: StateFlow<Set<String>> =
+    _planItemScheduleAssignmentsInFlight.asStateFlow()
+
+  val criticalPath: StateFlow<CriticalPathUiState> =
+    combine(activePlanBoard, planItems, planGanttItems, planDependencies) {
+        board,
+        items,
+        relations,
+        dependencies ->
+        if (board == null) {
+          CriticalPathUiState(unavailableReason = "Choose a Plan board first")
+        } else if (
+          items.any { it.boardId != board.id } ||
+            relations.any { it.item.boardId != board.id } ||
+            dependencies.any { it.boardId != board.id }
+        ) {
+          CriticalPathUiState(unavailableReason = "Critical path is refreshing…")
+        } else {
+          val result =
+            CriticalPathEngine.analyze(
+              items = items,
+              blocks = relations.flatMap(PlanItemWithBlocks::blocks),
+              dependencies = dependencies,
+            )
+          if (result.isComplete) CriticalPathUiState(result = result, unavailableReason = null)
+          else {
+            CriticalPathUiState(
+              result = result,
+              unavailableReason =
+                buildList {
+                    addAll(result.errors.take(2).map { it.explanation })
+                    addAll(result.incompleteItems.take(2).map { it.explanation })
+                  }
+                  .joinToString(" ")
+                  .ifBlank { "Critical path needs complete task durations and dependencies" },
+            )
+          }
+        }
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), CriticalPathUiState())
+
+  val planCommitments: StateFlow<List<BriefingEvent>> =
+    activePlanBoard
+      .flatMapLatest { board ->
+        if (board == null) flowOf(emptyList()) else repository.eventsForBoard(board.name)
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+  val ganttRangeDays: StateFlow<Int> =
+    repository
+      .settingFlow(SettingKeys.GANTT_RANGE_DAYS)
+      .map { setting -> setting?.value?.toIntOrNull()?.takeIf { it in setOf(7, 30, 90) } ?: 30 }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, 30)
+
+  /**
+   * How the Plan Outline is presented. Persisted so a folded branch survives a cold start, and
+   * captured by saved views; none of it changes a task.
+   */
+  val outlineSort: StateFlow<OutlineSort> =
+    repository
+      .settingFlow(SettingKeys.PLAN_OUTLINE_SORT)
+      .map { OutlineSort.byKey(it?.value) }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, OutlineSort.MANUAL)
+
+  val outlineHideCompleted: StateFlow<Boolean> =
+    repository
+      .settingFlow(SettingKeys.PLAN_OUTLINE_HIDE_COMPLETED)
+      .map { it?.value == "true" }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+  val outlineGrouping: StateFlow<OutlineGrouping> =
+    repository
+      .settingFlow(SettingKeys.PLAN_OUTLINE_GROUPING)
+      .map { OutlineGrouping.byKey(it?.value) }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, OutlineGrouping.SECTION)
+
+  /** Empty means every lane; a preset is a filter, never a deletion. */
+  val visibleBoardColumnIds: StateFlow<Set<String>> =
+    repository
+      .settingFlow(SettingKeys.PLAN_BOARD_COLUMNS)
+      .map { setting -> SettingKeys.decodeList(setting?.value)?.toSet().orEmpty() }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+  fun setOutlineGrouping(grouping: OutlineGrouping) {
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.PLAN_OUTLINE_GROUPING, grouping.key)
+      clearActiveSavedView()
+    }
+  }
+
+  fun toggleBoardColumnVisible(columnId: String) {
+    viewModelScope.launch {
+      val all = planColumns.value.map { it.id }
+      val current = visibleBoardColumnIds.value.ifEmpty { all.toSet() }
+      val next = if (columnId in current) current - columnId else current + columnId
+      // Hiding the last lane would leave a Board with nothing on it; that is a bug, not a preset.
+      if (next.isEmpty()) return@launch
+      repository.writeSetting(
+        SettingKeys.PLAN_BOARD_COLUMNS,
+        SettingKeys.encodeList(if (next.toSet() == all.toSet()) emptyList() else next.sorted()),
+      )
+      clearActiveSavedView()
+    }
+  }
+
+  fun showAllBoardColumns() {
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.PLAN_BOARD_COLUMNS, SettingKeys.encodeList(emptyList()))
+      clearActiveSavedView()
+    }
+  }
+
+  val outlineCollapsedIds: StateFlow<Set<String>> =
+    repository
+      .settingFlow(SettingKeys.PLAN_OUTLINE_COLLAPSED)
+      .map { setting -> SettingKeys.decodeList(setting?.value)?.toSet().orEmpty() }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+  fun setOutlineSort(sort: OutlineSort) {
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.PLAN_OUTLINE_SORT, sort.key)
+      clearActiveSavedView()
+    }
+  }
+
+  fun setOutlineHideCompleted(hide: Boolean) {
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.PLAN_OUTLINE_HIDE_COMPLETED, hide.toString())
+      clearActiveSavedView()
+    }
+  }
+
+  fun toggleOutlineCollapsed(itemId: String) {
+    viewModelScope.launch {
+      val current = outlineCollapsedIds.value
+      val next = if (itemId in current) current - itemId else current + itemId
+      repository.writeSetting(
+        SettingKeys.PLAN_OUTLINE_COLLAPSED,
+        SettingKeys.encodeList(next.sorted()),
+      )
+      clearActiveSavedView()
+    }
+  }
+
+  fun expandAllOutlineTasks() {
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.PLAN_OUTLINE_COLLAPSED, SettingKeys.encodeList(emptyList()))
+      clearActiveSavedView()
+    }
+  }
+
+  /** Changing the view by hand means the named view is no longer what is on screen. */
+  private suspend fun clearActiveSavedView() {
+    if (activeSavedPlanViewId.value != null) {
+      repository.writeSetting(SettingKeys.ACTIVE_SAVED_PLAN_VIEW_ID, "")
+    }
+  }
+
+  private val _autoPlan = MutableStateFlow<AutoPlanResult?>(null)
+
+  /** The most recent proposal. Null means nothing has been proposed, not that nothing fits. */
+  val autoPlan: StateFlow<AutoPlanResult?> = _autoPlan.asStateFlow()
+
+  /** Baselines for the active board, newest first. */
+  val planBaselines: StateFlow<List<PlanBaseline>> =
+    activePlanBoardId
+      .flatMapLatest { boardId ->
+        if (boardId == null) flowOf(emptyList()) else planRepository.observeBaselines(boardId)
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+  private val _baselineComparison = MutableStateFlow<BaselineComparisonUiState?>(null)
+
+  /** The comparison currently on screen. Null means none has been asked for. */
+  val baselineComparison: StateFlow<BaselineComparisonUiState?> = _baselineComparison.asStateFlow()
+
+  fun captureBaseline(name: String, onDone: (Boolean) -> Unit = {}) {
+    val boardId = activePlanBoardId.value
+    if (boardId == null) {
+      message("Choose a plan board before taking a baseline")
+      onDone(false)
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val baseline = planRepository.captureBaseline(boardId, name)
+        message("Baseline \"${baseline.name}\" saved")
+        onDone(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That baseline could not be saved")
+        onDone(false)
+      }
+    }
+  }
+
+  /** Reads a baseline and measures today's plan against it; nothing is written. */
+  fun compareBaseline(baselineId: String) {
+    val boardId = activePlanBoardId.value ?: return
+    viewModelScope.launch {
+      try {
+        val baseline = planBaselines.value.firstOrNull { it.id == baselineId }
+        val snapshot = planRepository.readBaseline(baselineId)
+        if (baseline == null || snapshot == null) {
+          message("That baseline could not be read")
+          return@launch
+        }
+        val relations = planGanttItems.value
+        _baselineComparison.value =
+          BaselineComparisonUiState(
+            baselineId = baselineId,
+            name = baseline.name,
+            capturedAt = baseline.capturedAt,
+            comparison =
+              BaselineVariance.compare(
+                baselineItems = snapshot.first,
+                baselineBlocks = snapshot.second,
+                currentItems = relations.map { it.item },
+                currentBlocks = relations.flatMap { it.blocks },
+              ),
+          )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That baseline could not be read")
+      }
+    }
+  }
+
+  fun dismissBaselineComparison() {
+    _baselineComparison.value = null
+  }
+
+  /** Puts the schedule back to a baseline as one undoable command. */
+  fun restoreBaseline(baselineId: String) {
+    val boardId = activePlanBoardId.value ?: return
+    viewModelScope.launch {
+      try {
+        val result = planRepository.restoreBaselineWithUndo(baselineId, boardId)
+        _baselineComparison.value = null
+        planMutationMessage(
+          "Restored ${result.value} block${if (result.value == 1) "" else "s"}",
+          result.mutationId,
+        )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That baseline could not be restored")
+      }
+    }
+  }
+
+  fun deleteBaseline(baselineId: String) {
+    val boardId = activePlanBoardId.value ?: return
+    viewModelScope.launch {
+      if (planRepository.deleteBaseline(baselineId, boardId)) {
+        if (_baselineComparison.value?.baselineId == baselineId) _baselineComparison.value = null
+        message("Baseline deleted")
+      } else {
+        message("That baseline was already gone")
+      }
+    }
+  }
+
+  private val _portfolio = MutableStateFlow<PortfolioRollupResult?>(null)
+
+  /** Every board at once. Null means the rollup is not open. */
+  val portfolio: StateFlow<PortfolioRollupResult?> = _portfolio.asStateFlow()
+
+  /**
+   * Totals across every live board.
+   *
+   * Read once on demand rather than kept live: a rollup is something a person opens to think with,
+   * and observing every board's tasks continuously would cost far more than it tells anyone.
+   */
+  fun openPortfolio() {
+    viewModelScope.launch {
+      try {
+        val boards = planBoards.value.filter { it.archivedAt == null }
+        val itemsByBoard = mutableMapOf<String, List<PlanItem>>()
+        val blocksByItem = mutableMapOf<String, List<PlanBlock>>()
+        boards.forEach { board ->
+          val items = planRepository.itemsForBoardOnce(board.id)
+          itemsByBoard[board.id] = items
+          planRepository.blocksForBoardOnce(board.id).groupBy(PlanBlock::planItemId).forEach {
+            (itemId, blocks) ->
+            blocksByItem[itemId] = blocks
+          }
+        }
+        _portfolio.value =
+          PortfolioRollup.summarise(
+            boards = boards.map { it.id to it.name },
+            itemsByBoard = itemsByBoard,
+            blocksByItem = blocksByItem,
+            nowMs = System.currentTimeMillis(),
+          )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "Those plans could not be totalled")
+      }
+    }
+  }
+
+  fun dismissPortfolio() {
+    _portfolio.value = null
+  }
+
+  private val _planScenarios = MutableStateFlow<List<PlanScenario>>(emptyList())
+
+  /** Alternative orderings of the same week. Empty means none have been asked for. */
+  val planScenarios: StateFlow<List<PlanScenario>> = _planScenarios.asStateFlow()
+
+  /** Runs the planner three defensible ways without writing anything. */
+  fun comparePlanScenarios(days: Int = 7) {
+    val boardId = activePlanBoardId.value
+    if (boardId == null) {
+      message("Choose a plan board before comparing approaches")
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val calendar = planRepository.observeDefaultWorkingCalendar().first()
+        if (calendar == null) {
+          message("Set up a working schedule before comparing approaches")
+          return@launch
+        }
+        val relations = planGanttItems.value
+        val now = System.currentTimeMillis()
+        val start = ScheduleAnalysis.startOfDay(now)
+        val end = ScheduleAnalysis.startOfDayOffset(start, days)
+        val commitments =
+          repository.eventsInRangeOnce(start, end).map { WorkingInterval(it.startTime, it.endTime) }
+        _planScenarios.value =
+          PlanScenarios.compare(
+            items = relations.map { it.item },
+            blocks = relations.flatMap { it.blocks },
+            fixedCommitments = commitments,
+            dependencies = planDependencies.value,
+            schedule = calendar.spec,
+            rangeStartMs = start,
+            rangeEndMs = end,
+            nowMs = now,
+          )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "Those approaches could not be compared")
+      }
+    }
+  }
+
+  fun dismissPlanScenarios() {
+    _planScenarios.value = emptyList()
+  }
+
+  /** Hands the chosen scenario to the ordinary proposal review rather than writing it outright. */
+  fun choosePlanScenario(key: String) {
+    val scenario = _planScenarios.value.firstOrNull { it.key == key } ?: return
+    _planScenarios.value = emptyList()
+    _autoPlan.value = scenario.result
+  }
+
+  /**
+   * Proposes blocks for unscheduled effort without writing anything.
+   *
+   * The engine is pure and the result is shown before it is applied, because a planner that moves
+   * a person's week while they are not looking is not a feature, it is a surprise.
+   */
+  fun proposePlan(days: Int = 7) {
+    val boardId = activePlanBoardId.value
+    if (boardId == null) {
+      message("Choose a plan board before planning it")
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val calendar = planRepository.observeDefaultWorkingCalendar().first()
+        if (calendar == null) {
+          message("Set up a working schedule before planning")
+          return@launch
+        }
+        val relations = planGanttItems.value
+        val now = System.currentTimeMillis()
+        val start = ScheduleAnalysis.startOfDay(now)
+        val end = ScheduleAnalysis.startOfDayOffset(start, days)
+        val commitments =
+          repository.eventsInRangeOnce(start, end).map { WorkingInterval(it.startTime, it.endTime) }
+        _autoPlan.value =
+          AutoPlan.propose(
+            items = relations.map { it.item },
+            blocks = relations.flatMap { it.blocks },
+            fixedCommitments = commitments,
+            dependencies = planDependencies.value,
+            schedule = calendar.spec,
+            rangeStartMs = start,
+            rangeEndMs = end,
+            nowMs = now,
+          )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That plan could not be proposed")
+      }
+    }
+  }
+
+  fun dismissPlanProposal() {
+    _autoPlan.value = null
+  }
+
+  /** Writes the whole proposal as one command, or none of it. */
+  fun applyPlanProposal() {
+    val proposal = _autoPlan.value ?: return
+    val boardId = activePlanBoardId.value ?: return
+    if (proposal.proposals.isEmpty()) return
+    viewModelScope.launch {
+      try {
+        val result = planRepository.applyPlanProposals(proposal.proposals, boardId)
+        _autoPlan.value = null
+        planMutationMessage(
+          "Scheduled ${result.value.size} block${if (result.value.size == 1) "" else "s"}",
+          result.mutationId,
+        )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That plan could not be applied")
+      }
+    }
+  }
+
+  /**
+   * A plan as plain text, ready to hand to something that is not this app.
+   *
+   * The export states its own scope on the first line, because a file cannot answer questions about
+   * what it left out and a person reading it months later will not remember.
+   */
+  fun exportActivePlan(asCalendar: Boolean, onReady: (String, String) -> Unit) {
+    val board = activePlanBoard.value
+    if (board == null) {
+      message("Choose a plan board before exporting it")
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val relations = planGanttItems.value
+        val scope =
+          ExportScope(
+            boardName = board.name,
+            generatedAtMs = System.currentTimeMillis(),
+            rangeStartMs = null,
+            rangeEndMs = null,
+            includesUnscheduled = !asCalendar,
+          )
+        val items = relations.map { it.item }
+        val blocks = relations.flatMap { it.blocks }
+        val body =
+          if (asCalendar) {
+            PlanExport.toIcs(items, blocks, scope, IsoDates::icsUtc)
+          } else {
+            PlanExport.toCsv(items, blocks, scope, IsoDates::isoUtc)
+          }
+        onReady(body, if (asCalendar) "text/calendar" else "text/csv")
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That plan could not be exported")
+      }
+    }
+  }
+
+  /**
+   * Last week, as it actually went. Read from the same journal that powers Undo, so the review
+   * cannot claim a smoother week than the record supports.
+   */
+  val weeklyReview: StateFlow<WeeklyReviewResult?> =
+    combine(planGanttItems, activePlanBoardId) { relations, boardId -> relations to boardId }
+      .flatMapLatest { (relations, boardId) ->
+        if (boardId == null) {
+          flowOf(null)
+        } else {
+          planRepository.observeMutationHistory(boardId, 200).map { history ->
+            val now = System.currentTimeMillis()
+            val start = ScheduleAnalysis.startOfDayOffset(ScheduleAnalysis.startOfDay(now), -6)
+            val end = ScheduleAnalysis.startOfDayOffset(start, 7)
+            val inWeek = history.filter { it.createdAt in start until end }
+            WeeklyReview.summarise(
+              items = relations.map { it.item },
+              blocks = relations.flatMap { it.blocks },
+              rescheduleCount = inWeek.count { it.mutationType == PlanMutationType.BLOCK_EDIT },
+              createdTaskCount = inWeek.count { it.mutationType == PlanMutationType.ITEM_CREATE },
+              rangeStartMs = start,
+              rangeEndMs = end,
+            )
+          }
+        }
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), null)
+
+  /** How long a change stays undoable; see [UndoWindowPolicy]. */
+  val undoWindowSeconds: StateFlow<Int> =
+    repository
+      .settingFlow(SettingKeys.UNDO_WINDOW_SECONDS)
+      .map { setting -> UndoWindowPolicy.seconds(setting?.value) }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, UndoWindowPolicy.DEFAULT_SECONDS)
+
+  fun setUndoWindowSeconds(seconds: Int) {
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.UNDO_WINDOW_SECONDS, UndoWindowPolicy.store(seconds))
+    }
+  }
+
+  fun setGanttRangeDays(days: Int) {
+    require(days in setOf(7, 30, 90)) { "Unsupported Gantt range" }
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.GANTT_RANGE_DAYS, days.toString())
+      repository.writeSetting(SettingKeys.ACTIVE_SAVED_PLAN_VIEW_ID, "")
+    }
+  }
+
+  val showLegacyPlanDisclosure: StateFlow<Boolean> =
+    combine(
+        repository.settingFlow(SettingKeys.PLAN_LEGACY_CATALOG_IMPORTED),
+        repository.settingFlow(SettingKeys.PLAN_IMPORT_DISCLOSURE_ACKNOWLEDGED),
+      ) { imported, acknowledged ->
+        imported?.value?.toBooleanStrictOrNull() == true &&
+          acknowledged?.value?.toBooleanStrictOrNull() != true
+      }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+  fun acknowledgeLegacyPlanDisclosure() {
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.PLAN_IMPORT_DISCLOSURE_ACKNOWLEDGED, "true")
+    }
+  }
+
+  val savedPlanViews: StateFlow<List<SavedPlanView>> =
+    activePlanBoardId
+      .flatMapLatest { boardId ->
+        if (boardId == null) flowOf(emptyList()) else planRepository.observeSavedViews(boardId)
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+  val activeSavedPlanViewId: StateFlow<String?> =
+    combine(
+        repository.settingFlow(SettingKeys.ACTIVE_SAVED_PLAN_VIEW_ID),
+        savedPlanViews,
+      ) { stored, views ->
+        stored?.value?.takeIf { id -> views.any { it.view.id == id } }
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), null)
+
+  val planMutationHistory: StateFlow<List<PlanMutation>> =
+    activePlanBoardId
+      .flatMapLatest { boardId ->
+        if (boardId == null) flowOf(emptyList())
+        else planRepository.observeMutationHistory(boardId, limit = 30)
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+  /** Everything on screen that a view is allowed to remember: presentation, never task data. */
+  private fun currentPlanViewState(): SavedPlanViewState {
+    val surface =
+      when (WorkspacePreferencePolicy.planView(planView.value)) {
+        "Board" -> PlanSurface.BOARD
+        "Gantt" -> PlanSurface.GANTT
+        else -> PlanSurface.OUTLINE
+      }
+    return SavedPlanViewState(
+      surface = surface,
+      filters =
+        if (outlineHideCompleted.value) {
+          mapOf(SavedPlanViewState.FILTER_HIDE_COMPLETED to "true")
+        } else {
+          emptyMap()
+        },
+      grouping = outlineGrouping.value.key,
+      sort = listOf(outlineSort.value.key),
+      columns = visibleBoardColumnIds.value.sorted(),
+      rangeDays = if (surface == PlanSurface.GANTT) ganttRangeDays.value else null,
+      collapsedItemIds = outlineCollapsedIds.value,
+    )
+  }
+
+  /** Points the active view at what is on screen now, without renaming it. */
+  fun updateActivePlanView(onComplete: (Boolean) -> Unit = {}) {
+    val boardId = activePlanBoardId.value
+    val viewId = activeSavedPlanViewId.value
+    if (boardId == null || viewId == null) {
+      message("Apply a saved view before updating it")
+      onComplete(false)
+      return
+    }
+    runPlanViewAction(onComplete) {
+      val updated = planRepository.updateSavedView(viewId, boardId, currentPlanViewState())
+      message("Updated \"${updated.view.name}\"")
+    }
+  }
+
+  fun renamePlanView(viewId: String, name: String, onComplete: (Boolean) -> Unit = {}) {
+    val boardId = activePlanBoardId.value ?: return onComplete(false)
+    runPlanViewAction(onComplete) {
+      val renamed = planRepository.renameSavedView(viewId, boardId, name)
+      message("Renamed to \"${renamed.view.name}\"")
+    }
+  }
+
+  fun duplicatePlanView(viewId: String, onComplete: (Boolean) -> Unit = {}) {
+    val boardId = activePlanBoardId.value ?: return onComplete(false)
+    runPlanViewAction(onComplete) {
+      val copy = planRepository.duplicateSavedView(viewId, boardId)
+      message("Copied to \"${copy.view.name}\"")
+    }
+  }
+
+  fun setPlanViewPinned(viewId: String, pinned: Boolean, onComplete: (Boolean) -> Unit = {}) {
+    val boardId = activePlanBoardId.value ?: return onComplete(false)
+    runPlanViewAction(onComplete) {
+      val view = planRepository.setSavedViewPinned(viewId, boardId, pinned)
+      message(if (pinned) "\"${view.view.name}\" opens this board" else "Unpinned \"${view.view.name}\"")
+    }
+  }
+
+  /** Returns the Plan surface to its own defaults and stops following the named view. */
+  fun resetPlanView() {
+    viewModelScope.launch {
+      repository.writeSetting(SettingKeys.PLAN_OUTLINE_SORT, OutlineSort.MANUAL.key)
+      repository.writeSetting(SettingKeys.PLAN_OUTLINE_HIDE_COMPLETED, false.toString())
+      repository.writeSetting(SettingKeys.PLAN_OUTLINE_COLLAPSED, SettingKeys.encodeList(emptyList()))
+      repository.writeSetting(SettingKeys.PLAN_OUTLINE_GROUPING, OutlineGrouping.SECTION.key)
+      repository.writeSetting(SettingKeys.PLAN_BOARD_COLUMNS, SettingKeys.encodeList(emptyList()))
+      repository.writeSetting(SettingKeys.ACTIVE_SAVED_PLAN_VIEW_ID, "")
+      message("View reset")
+    }
+  }
+
+  private fun runPlanViewAction(onComplete: (Boolean) -> Unit, block: suspend () -> Unit) {
+    viewModelScope.launch {
+      try {
+        block()
+        onComplete(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That view could not be changed")
+        onComplete(false)
+      }
+    }
+  }
+
+  fun saveCurrentPlanView(name: String, onComplete: (Boolean) -> Unit = {}) {
+    val boardId = activePlanBoardId.value
+    if (boardId == null) {
+      message("Choose a plan board before saving a view")
+      onComplete(false)
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val saved =
+          planRepository.saveSavedView(
+            boardId = boardId,
+            name = name,
+            state = currentPlanViewState(),
+          )
+        planRepository.activateSavedView(saved.view.id, boardId)
+        message("Saved view \"${saved.view.name}\"")
+        onComplete(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The view could not be saved")
+        onComplete(false)
+      }
+    }
+  }
+
+  /** The board a pinned view belongs to has already opened with it. */
+  private var pinnedViewAppliedFor: String? = null
+
+  /**
+   * Applies a board's pinned view when that board becomes active — once per switch, so a person who
+   * then resets or edits the view is not fought by their own pin until they come back.
+   */
+  private fun observePinnedPlanViews() {
+    viewModelScope.launch {
+      combine(activePlanBoardId, savedPlanViews) { boardId, views -> boardId to views }
+        .collect { (boardId, views) ->
+          if (boardId == null) {
+            pinnedViewAppliedFor = null
+            return@collect
+          }
+          if (pinnedViewAppliedFor == boardId) return@collect
+          val pinned = views.firstOrNull { it.view.pinned } ?: return@collect
+          pinnedViewAppliedFor = boardId
+          runCatching { planRepository.activateSavedView(pinned.view.id, boardId) }
+        }
+    }
+  }
+
+  fun applySavedPlanView(saved: SavedPlanView) {
+    val boardId = activePlanBoardId.value ?: return
+    viewModelScope.launch {
+      try {
+        planRepository.activateSavedView(saved.view.id, boardId)
+        message("Applied \"${saved.view.name}\"")
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That saved view could not be applied")
+      }
+    }
+  }
+
+  fun deleteSavedPlanView(saved: SavedPlanView) {
+    val boardId = activePlanBoardId.value ?: return
+    viewModelScope.launch {
+      if (planRepository.deleteSavedView(saved.view.id, boardId)) {
+        message("Deleted saved view \"${saved.view.name}\"")
+      } else {
+        message("That saved view was already removed")
+      }
+    }
+  }
+
+  private val _workingCalendarProblem = MutableStateFlow<String?>(null)
+  val workingCalendarProblem: StateFlow<String?> = _workingCalendarProblem.asStateFlow()
+
+  private val _workingCalendarSaving = MutableStateFlow(false)
+  val workingCalendarSaving: StateFlow<Boolean> = _workingCalendarSaving.asStateFlow()
+
+  val workingCalendar: StateFlow<PersistedWorkingCalendar?> =
+    planRepository
+      .observeDefaultWorkingCalendar()
+      .catch { error ->
+        _workingCalendarProblem.value =
+          error.message ?: "The saved working week could not be read safely"
+        emit(null)
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), null)
+
+  private val planHealthScheduleInputs =
+    combine(
+      workingCalendar,
+      activeWorkingCalendarsState,
+      planItemScheduleAssignmentsState,
+    ) { defaultCalendar, activeCalendars, assignments ->
+      PlanHealthScheduleInputs(defaultCalendar, activeCalendars, assignments)
+    }
+
+  private val planHealthInputs =
+    combine(
+      activePlanBoard,
+      planItems,
+      planGanttItems,
+      planCommitments,
+      planHealthScheduleInputs,
+    ) { board, items, relations, commitments, schedules ->
+      PlanHealthInputs(
+        board = board,
+        items = items,
+        relationBoardIds = relations.mapTo(mutableSetOf()) { it.item.boardId },
+        blocks = relations.flatMap(PlanItemWithBlocks::blocks),
+        commitments = commitments,
+        schedules = schedules,
+      )
+    }
+
+  val planHealth: StateFlow<PlanHealthUiState> =
+    combine(planHealthInputs, planDependencies, _dayTick) { inputs, dependencies, day ->
+        val board = inputs.board
+          ?: return@combine PlanHealthUiState(unavailableReason = "Choose a Plan board first")
+        val scheduleInputs = inputs.schedules
+        if (
+          !scheduleInputs.activeCalendars.loaded ||
+            !scheduleInputs.assignments.loaded ||
+            scheduleInputs.assignments.boardId != board.id
+        ) {
+          return@combine PlanHealthUiState(unavailableReason = "Plan Health is refreshing working schedules…")
+        }
+        val calendar = scheduleInputs.defaultCalendar
+          ?: return@combine PlanHealthUiState(unavailableReason = "Set a working week in Settings")
+        if (
+          inputs.items.any { it.boardId != board.id } ||
+            inputs.relationBoardIds.any { it != board.id } ||
+            dependencies.any { it.boardId != board.id } ||
+            inputs.commitments.any { it.kanbanBoard != board.name }
+        ) {
+          return@combine PlanHealthUiState(unavailableReason = "Plan Health is refreshing…")
+        }
+        val resolvedSchedules =
+          PlanHealthSchedulePolicy.resolve(
+            items = inputs.items,
+            mappings = scheduleInputs.assignments.assignments,
+            calendars = scheduleInputs.activeCalendars.calendars,
+            defaultScheduleId = calendar.schedule.id,
+          )
+        if (!resolvedSchedules.isUsable) {
+          return@combine PlanHealthUiState(
+            unavailableReason =
+              resolvedSchedules.problem
+                ?: "Plan Health cannot resolve the active working schedules.",
+          )
+        }
+        val rangeStart = ScheduleAnalysis.startOfDay(day)
+        val rangeEnd = ScheduleAnalysis.startOfDayOffset(rangeStart, PLAN_HEALTH_DAYS)
+        val now = System.currentTimeMillis()
+        runCatching {
+            MultiSchedulePlanHealth.evaluate(
+              schedules = resolvedSchedules.specsByScheduleId,
+              scheduleIdByItemId = resolvedSchedules.scheduleIdByItemId,
+              rangeStart = rangeStart,
+              rangeEnd = rangeEnd,
+              now = now,
+              items = inputs.items,
+              blocks = inputs.blocks,
+              fixedCommitments =
+                inputs.commitments
+                  .filter { it.startTime < rangeEnd && it.endTime > rangeStart }
+                  .map { event -> WorkingInterval(event.startTime, event.endTime) },
+              dependencies = dependencies,
+            )
+          }
+          .fold(
+            onSuccess = { result ->
+              PlanHealthUiState(
+                result = result,
+                rangeStart = rangeStart,
+                rangeEnd = rangeEnd,
+                generatedAt = now,
+                unavailableReason = null,
+              )
+            },
+            onFailure = { error ->
+              PlanHealthUiState(
+                rangeStart = rangeStart,
+                rangeEnd = rangeEnd,
+                generatedAt = now,
+                unavailableReason = error.message ?: "Plan Health could not be calculated safely",
+              )
+            },
+          )
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), PlanHealthUiState())
+
+  fun saveWorkingCalendar(spec: WorkingCalendarSpec, onComplete: (Boolean) -> Unit = {}) {
+    if (_workingCalendarSaving.value) return
+    viewModelScope.launch {
+      _workingCalendarSaving.value = true
+      _workingCalendarProblem.value = null
+      try {
+        val result = planRepository.saveDefaultWorkingCalendarWithUndo(spec)
+        planMutationMessage("Default working schedule saved", result.mutationId)
+        onComplete(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        _workingCalendarProblem.value = e.message ?: "The working week could not be saved"
+        onComplete(false)
+      } finally {
+        _workingCalendarSaving.value = false
+      }
+    }
+  }
+
+  fun createWorkingSchedule(
+    name: String,
+    spec: WorkingCalendarSpec,
+    onComplete: (PersistedWorkingCalendar?) -> Unit = {},
+  ) {
+    if (_workingCalendarSaving.value) return
+    viewModelScope.launch {
+      _workingCalendarSaving.value = true
+      _workingCalendarProblem.value = null
+      try {
+        val result = planRepository.createWorkingScheduleWithUndo(name, spec)
+        planMutationMessage("Created ${result.value.schedule.name}", result.mutationId)
+        onComplete(result.value)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        _workingCalendarProblem.value = e.message ?: "The working schedule could not be created"
+        onComplete(null)
+      } finally {
+        _workingCalendarSaving.value = false
+      }
+    }
+  }
+
+  fun updateWorkingSchedule(
+    id: String,
+    name: String,
+    spec: WorkingCalendarSpec,
+    onComplete: (PersistedWorkingCalendar?) -> Unit = {},
+  ) {
+    if (_workingCalendarSaving.value) return
+    viewModelScope.launch {
+      _workingCalendarSaving.value = true
+      _workingCalendarProblem.value = null
+      try {
+        val result = planRepository.updateWorkingScheduleWithUndo(id, name, spec)
+        planMutationMessage("Saved ${result.value.schedule.name}", result.mutationId)
+        onComplete(result.value)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        _workingCalendarProblem.value = e.message ?: "The working schedule could not be saved"
+        onComplete(null)
+      } finally {
+        _workingCalendarSaving.value = false
+      }
+    }
+  }
+
+  fun makeWorkingScheduleDefault(
+    id: String,
+    onComplete: (Boolean) -> Unit = {},
+  ) {
+    if (_workingCalendarSaving.value) return
+    viewModelScope.launch {
+      _workingCalendarSaving.value = true
+      _workingCalendarProblem.value = null
+      try {
+        val result = planRepository.makeWorkingScheduleDefaultWithUndo(id)
+        planMutationMessage("${result.value.schedule.name} is now the default", result.mutationId)
+        onComplete(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        _workingCalendarProblem.value =
+          e.message ?: "The default working schedule could not be changed"
+        onComplete(false)
+      } finally {
+        _workingCalendarSaving.value = false
+      }
+    }
+  }
+
+  fun archiveWorkingSchedule(
+    id: String,
+    replacementScheduleId: String?,
+    onComplete: (Boolean) -> Unit = {},
+  ) {
+    if (_workingCalendarSaving.value) return
+    viewModelScope.launch {
+      _workingCalendarSaving.value = true
+      _workingCalendarProblem.value = null
+      try {
+        val result =
+          planRepository.archiveWorkingScheduleWithUndo(id, replacementScheduleId)
+        planMutationMessage("Archived ${result.value.archivedSchedule.name}", result.mutationId)
+        onComplete(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        _workingCalendarProblem.value = e.message ?: "The working schedule could not be archived"
+        onComplete(false)
+      } finally {
+        _workingCalendarSaving.value = false
+      }
+    }
+  }
+
+  fun setActivePlanBoard(boardId: String) {
+    viewModelScope.launch {
+      if (!planRepository.setActiveBoard(boardId)) message("That plan board is unavailable")
+    }
+  }
+
+  fun newPlanItemDraft(columnId: String? = null, parentId: String? = null): PlanItemDraft =
+    PlanItemDraft(
+      boardId =
+        activePlanBoardId.value
+          ?: planBoards.value.firstOrNull { it.isDefault }?.id
+          ?: PlanRepository.DEFAULT_BOARD_ID,
+      columnId = columnId,
+      parentId = parentId,
+    )
+
+  fun planItemDraftFrom(item: PlanItem): PlanItemDraft = item.asDraft()
+
+  fun savePlanItem(draft: PlanItemDraft, onComplete: (Boolean) -> Unit = {}) {
+    if (draft.title.isBlank()) {
+      onComplete(false)
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val saved = planRepository.saveItemWithUndo(
+          PlanItemInput(
+            id = draft.id,
+            boardId = draft.boardId,
+            columnId = draft.columnId,
+            parentId = draft.parentId,
+            title = draft.title,
+            notes = draft.notes,
+            startConstraint = draft.startConstraint,
+            dueAt = draft.dueAt,
+            effortMinutes = draft.effortMinutes,
+            progress = draft.progress,
+            priority = draft.priority,
+            owner = draft.owner,
+            schedulingMode = draft.schedulingMode,
+            locked = draft.locked,
+            isMilestone = draft.isMilestone,
+          )
+        )
+        val destination =
+          if (draft.columnId == null) {
+            "Plan Inbox"
+          } else {
+            planColumns.value.firstOrNull { it.id == draft.columnId }?.name ?: "Plan"
+          }
+        planMutationMessage(
+          if (draft.id == null) "Added to $destination" else "Task updated",
+          saved.mutationId,
+        )
+        onComplete(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The task could not be saved")
+        onComplete(false)
+      }
+    }
+  }
+
+  /** Schedule assignment is an immediate, separately journaled editor command. */
+  fun assignPlanItemWorkingSchedule(itemId: String, workScheduleId: String?) {
+    if (itemId in _planItemScheduleAssignmentsInFlight.value) return
+    _planItemScheduleAssignmentsInFlight.update { it + itemId }
+    viewModelScope.launch {
+      try {
+        val result = planRepository.assignItemWorkingScheduleWithUndo(itemId, workScheduleId)
+        if (result.mutationId != null) {
+          val text =
+            if (workScheduleId == null) {
+              "Task now inherits the default working schedule"
+            } else {
+              val name =
+                activeWorkingCalendarsState.value.calendars
+                  .firstOrNull { it.schedule.id == workScheduleId }
+                  ?.schedule
+                  ?.name
+                  ?: "selected schedule"
+              "Task assigned to $name"
+            }
+          planMutationMessage(text, result.mutationId)
+        }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The working schedule could not be assigned")
+      } finally {
+        _planItemScheduleAssignmentsInFlight.update { it - itemId }
+      }
+    }
+  }
+
+  fun deletePlanItem(id: String, onComplete: (Boolean) -> Unit = {}) {
+    viewModelScope.launch {
+      try {
+        val result = planRepository.deleteItemWithUndo(id)
+        val deleted = result.value
+        if (deleted == null) message("That task was already removed")
+        else planMutationMessage("Task removed", result.mutationId)
+        onComplete(deleted != null)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message("The task could not be deleted")
+        onComplete(false)
+      }
+    }
+  }
+
+  fun savePlanItemFromEditor(draft: PlanItemDraft) {
+    beginEditorOperation(
+      busyKey = TASK_EDITOR_BUSY_KEY,
+      sequenceKey = TASK_EDITOR_SEQUENCE_KEY,
+      completionKey = TASK_EDITOR_COMPLETION_KEY,
+    ) { complete -> savePlanItem(draft, onComplete = complete) }
+  }
+
+  fun deletePlanItemFromEditor(id: String) {
+    beginEditorOperation(
+      busyKey = TASK_EDITOR_BUSY_KEY,
+      sequenceKey = TASK_EDITOR_SEQUENCE_KEY,
+      completionKey = TASK_EDITOR_COMPLETION_KEY,
+    ) { complete -> deletePlanItem(id, onComplete = complete) }
+  }
+
+  fun addPlanBlock(
+    item: PlanItem,
+    startAt: Long,
+    endAt: Long,
+    locked: Boolean,
+    onComplete: (Boolean) -> Unit = {},
+  ) {
+    if (endAt <= startAt || item.isMilestone) {
+      onComplete(false)
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val saved =
+          planRepository.saveBlockWithUndo(
+            PlanBlockInput(
+              planItemId = item.id,
+              startAt = startAt,
+              endAt = endAt,
+              locked = locked,
+            )
+          )
+        planMutationMessage("Scheduled \"${item.title}\"", saved.mutationId)
+        onComplete(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That task could not be scheduled")
+        onComplete(false)
+      }
+    }
+  }
+
+  /** Gantt-only edit command; repository validation and the exact BLOCK_EDIT journal stay atomic. */
+  fun updateGanttPlanBlock(
+    item: PlanItem,
+    block: PlanBlock,
+    startAt: Long,
+    endAt: Long,
+    locked: Boolean,
+    onComplete: (Boolean) -> Unit = {},
+  ) {
+    if (block.planItemId != item.id || endAt <= startAt || item.isMilestone) {
+      onComplete(false)
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val saved =
+          planRepository.saveBlockWithUndo(
+            PlanBlockInput(
+              id = block.id,
+              planItemId = item.id,
+              startAt = startAt,
+              endAt = endAt,
+              position = block.position,
+              locked = locked,
+              linkedEventId = block.linkedEventId,
+            )
+          )
+        planMutationMessage("Updated schedule for \"${item.title}\"", saved.mutationId)
+        onComplete(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That Plan block could not be updated")
+        onComplete(false)
+      }
+    }
+  }
+
+  /** Gantt-only removal command; Undo restores the repository's exact persisted block snapshot. */
+  fun deleteGanttPlanBlock(
+    item: PlanItem,
+    block: PlanBlock,
+    onComplete: (Boolean) -> Unit = {},
+  ) {
+    if (block.planItemId != item.id) {
+      onComplete(false)
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val deleted = planRepository.deleteBlockWithUndo(block.id)
+        if (deleted.value == null) {
+          message("That Plan block was already removed")
+          onComplete(false)
+        } else {
+          planMutationMessage("Removed schedule for \"${item.title}\"", deleted.mutationId)
+          onComplete(true)
+        }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That Plan block could not be removed")
+        onComplete(false)
+      }
+    }
+  }
+
+  fun togglePlanItemComplete(item: PlanItem) {
+    viewModelScope.launch {
+      try {
+        val result =
+          planRepository.setItemProgressWithUndo(
+            item.id,
+            if (item.progress == 100) 0 else 100,
+          )
+        planMutationMessage(
+          if (result.value.progress == 100) "Completed \"${item.title}\""
+          else "Reopened \"${item.title}\"",
+          result.mutationId,
+        )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The task could not be updated")
+      }
+    }
+  }
+
+  fun movePlanItem(item: PlanItem, columnId: String?) {
+    viewModelScope.launch {
+      try {
+        val result = planRepository.moveItemToColumnWithUndo(item.id, columnId)
+        val destination =
+          columnId?.let { id -> planColumns.value.firstOrNull { it.id == id }?.name } ?: "Inbox"
+        if (result.value.movedCount > 0) {
+          planMutationMessage(
+            if (result.value.movedCount > 1) {
+              "Moved ${result.value.movedCount} linked tasks to $destination"
+            } else {
+              "Moved \"${item.title}\" to $destination"
+            },
+            result.mutationId,
+          )
+        }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The task could not be moved")
+      }
+    }
+  }
+
+  /** Applies the complete fresh selection as one repository transaction and one Undo snapshot. */
+  fun movePlanItemsAtomically(
+    selectedItemIds: Collection<String>,
+    columnId: String?,
+    onComplete: (PlanBatchMoveOutcome) -> Unit = {},
+  ) {
+    viewModelScope.launch {
+      val requested = selectedItemIds.filter(String::isNotBlank).distinct()
+      val boardId = activePlanBoardId.value
+      if (requested.isEmpty() || boardId == null) {
+        val outcome =
+          PlanBatchMoveOutcome(
+            requestedSelectionCount = requested.size,
+            completedSelectionCount = 0,
+            movedTaskCount = 0,
+            completedStepCount = 0,
+            unavailableSelectionCount = requested.size,
+          )
+        message("No available Plan tasks were selected")
+        onComplete(outcome)
+        return@launch
+      }
+
+      val destination =
+        columnId?.let { id -> planColumns.value.firstOrNull { it.id == id }?.name }
+          ?: if (columnId == null) "Inbox" else "that workflow column"
+      try {
+        val result =
+          planRepository.moveItemsToColumnAtomicallyWithUndo(
+            itemIds = requested,
+            targetColumnId = columnId,
+            expectedBoardId = boardId,
+          )
+        val outcome =
+          PlanBatchMoveOutcome(
+            requestedSelectionCount = requested.size,
+            completedSelectionCount = requested.size,
+            movedTaskCount = result.value.movedCount,
+            completedStepCount = if (result.mutationId == null) 0 else 1,
+            unavailableSelectionCount = 0,
+          )
+        if (result.mutationId == null) {
+          message("The selected tasks are already in $destination")
+        } else {
+          planMutationMessage(
+            "Moved ${requested.size} selected ${if (requested.size == 1) "task" else "tasks"} " +
+              "to $destination in one saved step" +
+              if (result.value.movedCount > requested.size) {
+                " (${result.value.movedCount} linked tasks affected)"
+              } else "",
+            result.mutationId,
+          )
+        }
+        onComplete(outcome)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        val reason = e.message ?: "The selected tasks could not be moved"
+        message(reason)
+        onComplete(
+          PlanBatchMoveOutcome(
+            requestedSelectionCount = requested.size,
+            completedSelectionCount = 0,
+            movedTaskCount = 0,
+            completedStepCount = 0,
+            unavailableSelectionCount = 0,
+            failureMessage = reason,
+          )
+        )
+      }
+    }
+  }
+
+  fun addPlanDependency(
+    predecessorId: String,
+    successorId: String,
+    type: String,
+    lagMinutes: Int,
+    onComplete: (Boolean) -> Unit = {},
+  ) {
+    viewModelScope.launch {
+      try {
+        val result =
+          planRepository.addDependencyWithUndo(
+            predecessorId = predecessorId,
+            successorId = successorId,
+            type = type,
+            lagMinutes = lagMinutes,
+          )
+        planMutationMessage("Dependency added", result.mutationId)
+        onComplete(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The dependency could not be added")
+        onComplete(false)
+      }
+    }
+  }
+
+  fun updatePlanDependency(
+    dependency: PlanDependency,
+    type: String,
+    lagMinutes: Int,
+    onComplete: (Boolean) -> Unit = {},
+  ) {
+    viewModelScope.launch {
+      try {
+        val result = planRepository.updateDependency(dependency.id, type, lagMinutes)
+        planMutationMessage("Dependency updated", result.mutationId)
+        onComplete(true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The dependency could not be updated")
+        onComplete(false)
+      }
+    }
+  }
+
+  fun deletePlanDependency(
+    dependency: PlanDependency,
+    onComplete: (Boolean) -> Unit = {},
+  ) {
+    viewModelScope.launch {
+      try {
+        val result = planRepository.deleteDependency(dependency.id)
+        if (result.value == null) message("That dependency was already removed")
+        else planMutationMessage("Dependency removed", result.mutationId)
+        onComplete(result.value != null)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The dependency could not be removed")
+        onComplete(false)
+      }
+    }
+  }
+
+  fun undoPlanMutation(mutationId: String) {
+    viewModelScope.launch {
+      try {
+        val result = planRepository.undoMutation(mutationId)
+        message(
+          when (result.status) {
+            PlanUndoStatus.UNDONE -> "Undone: ${result.summary.orEmpty()}"
+            PlanUndoStatus.EXPIRED -> "Undo expired; the current plan was not changed"
+            PlanUndoStatus.STALE -> "Plan changed since then, so Undo was not applied"
+            PlanUndoStatus.UNSUPPORTED -> "That saved change cannot be safely undone"
+            PlanUndoStatus.UNAVAILABLE -> "That change was already undone or is unavailable"
+          }
+        )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message("Undo could not be applied; the current plan was not changed")
+      }
+    }
   }
 
   val uiDensity: StateFlow<UiDensity> =
@@ -340,17 +1996,14 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
   val collapsedSections: StateFlow<Set<String>> =
     repository
       .settingFlow(SettingKeys.COLLAPSED_SECTIONS)
-      .map { SettingKeys.decodeList(it?.value)?.toSet() ?: emptySet() }
+      .map { WorkspacePreferencePolicy.collapsedTodaySections(it?.value) }
       .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptySet())
 
   /** Which Today sections are shown, in the order the user arranged them. */
   val todaySections: StateFlow<List<TodaySection>> =
     repository
       .settingFlow(SettingKeys.TODAY_SECTIONS)
-      .map { setting ->
-        SettingKeys.decodeList(setting?.value)?.mapNotNull(TodaySection::byKey)?.ifEmpty { null }
-          ?: TodaySection.Defaults
-      }
+      .map { setting -> WorkspacePreferencePolicy.todaySections(setting?.value) }
       .stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(STOP_TIMEOUT),
@@ -361,36 +2014,34 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
   val homeCards: StateFlow<List<HomeCard>> =
     repository
       .settingFlow(SettingKeys.HOME_CARDS)
-      .map { setting ->
-        SettingKeys.decodeList(setting?.value)?.mapNotNull(HomeCard::byKey)?.ifEmpty { null }
-          ?: HomeCard.Defaults
-      }
+      .map { setting -> WorkspacePreferencePolicy.homeCards(setting?.value) }
       .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), HomeCard.Defaults)
 
   fun setHomeCardVisible(card: HomeCard, visible: Boolean) {
     viewModelScope.launch {
-      val current =
-        SettingKeys.decodeList(repository.readSetting(SettingKeys.HOME_CARDS))
-          ?.mapNotNull(HomeCard::byKey)
-          ?: HomeCard.Defaults
-      val next = if (visible) (current + card).distinct() else current.filterNot { it == card }
-      repository.writeSetting(SettingKeys.HOME_CARDS, SettingKeys.encodeList(next.map { it.key }))
+      workspacePreferencesMutex.withLock {
+        val next =
+          WorkspacePreferencePolicy.setHomeCardVisible(
+            repository.readSetting(SettingKeys.HOME_CARDS),
+            card,
+            visible,
+          )
+        repository.writeSetting(SettingKeys.HOME_CARDS, SettingKeys.encodeList(next.map { it.key }))
+      }
     }
   }
 
   fun moveHomeCard(card: HomeCard, delta: Int) {
     viewModelScope.launch {
-      val current =
-        (SettingKeys.decodeList(repository.readSetting(SettingKeys.HOME_CARDS))
-            ?.mapNotNull(HomeCard::byKey)
-            ?: HomeCard.Defaults)
-          .toMutableList()
-      val from = current.indexOf(card)
-      val to = from + delta
-      if (from < 0 || to !in current.indices) return@launch
-      current.removeAt(from)
-      current.add(to, card)
-      repository.writeSetting(SettingKeys.HOME_CARDS, SettingKeys.encodeList(current.map { it.key }))
+      workspacePreferencesMutex.withLock {
+        val next =
+          WorkspacePreferencePolicy.moveHomeCard(
+            repository.readSetting(SettingKeys.HOME_CARDS),
+            card,
+            delta,
+          )
+        repository.writeSetting(SettingKeys.HOME_CARDS, SettingKeys.encodeList(next.map { it.key }))
+      }
     }
   }
 
@@ -405,45 +2056,71 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
   }
 
   fun toggleSection(key: String) {
+    val section = TodaySection.byKey(key) ?: return
     viewModelScope.launch {
-      val current =
-        SettingKeys.decodeList(repository.readSetting(SettingKeys.COLLAPSED_SECTIONS))
-          ?.toMutableSet() ?: mutableSetOf()
-      if (!current.add(key)) current.remove(key)
-      repository.writeSetting(SettingKeys.COLLAPSED_SECTIONS, SettingKeys.encodeList(current.toList()))
+      workspacePreferencesMutex.withLock {
+        val next =
+          WorkspacePreferencePolicy.toggleTodaySection(
+            repository.readSetting(SettingKeys.COLLAPSED_SECTIONS),
+            section,
+          )
+        repository.writeSetting(SettingKeys.COLLAPSED_SECTIONS, SettingKeys.encodeList(next.toList()))
+      }
     }
   }
 
   fun setSectionVisible(section: TodaySection, visible: Boolean) {
     viewModelScope.launch {
-      val current =
-        SettingKeys.decodeList(repository.readSetting(SettingKeys.TODAY_SECTIONS))
-          ?.mapNotNull(TodaySection::byKey)
-          ?: TodaySection.Defaults
-      val next =
-        if (visible) (current + section).distinct() else current.filterNot { it == section }
-      // A workspace with nothing in it is a dead end; keep at least the agenda.
-      val safe = next.ifEmpty { listOf(TodaySection.Agenda) }
-      repository.writeSetting(SettingKeys.TODAY_SECTIONS, SettingKeys.encodeList(safe.map { it.key }))
+      workspacePreferencesMutex.withLock {
+        val next =
+          WorkspacePreferencePolicy.setTodaySectionVisible(
+            repository.readSetting(SettingKeys.TODAY_SECTIONS),
+            section,
+            visible,
+          )
+        repository.writeSetting(SettingKeys.TODAY_SECTIONS, SettingKeys.encodeList(next.map { it.key }))
+      }
     }
   }
 
   fun moveSection(section: TodaySection, delta: Int) {
     viewModelScope.launch {
-      val current =
-        (SettingKeys.decodeList(repository.readSetting(SettingKeys.TODAY_SECTIONS))
-            ?.mapNotNull(TodaySection::byKey)
-            ?: TodaySection.Defaults)
-          .toMutableList()
-      val from = current.indexOf(section)
-      val to = from + delta
-      if (from < 0 || to !in current.indices) return@launch
-      current.removeAt(from)
-      current.add(to, section)
-      repository.writeSetting(
-        SettingKeys.TODAY_SECTIONS,
-        SettingKeys.encodeList(current.map { it.key }),
-      )
+      workspacePreferencesMutex.withLock {
+        val next =
+          WorkspacePreferencePolicy.moveTodaySection(
+            repository.readSetting(SettingKeys.TODAY_SECTIONS),
+            section,
+            delta,
+          )
+        repository.writeSetting(
+          SettingKeys.TODAY_SECTIONS,
+          SettingKeys.encodeList(next.map { it.key }),
+        )
+      }
+    }
+  }
+
+  /** Makes a section visible and expanded as one Room transaction. */
+  fun revealTodaySection(section: TodaySection, onRevealed: () -> Unit = {}) {
+    viewModelScope.launch {
+      workspacePreferencesMutex.withLock {
+        val visible =
+          WorkspacePreferencePolicy.revealTodaySection(
+            repository.readSetting(SettingKeys.TODAY_SECTIONS),
+            section,
+          )
+        val collapsed =
+          WorkspacePreferencePolicy.collapsedTodaySections(
+            repository.readSetting(SettingKeys.COLLAPSED_SECTIONS)
+          ) - section.key
+        repository.writeSettingsAtomically(
+          mapOf(
+            SettingKeys.TODAY_SECTIONS to SettingKeys.encodeList(visible.map { it.key }),
+            SettingKeys.COLLAPSED_SECTIONS to SettingKeys.encodeList(collapsed.toList()),
+          )
+        )
+        onRevealed()
+      }
     }
   }
 
@@ -567,6 +2244,20 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
     }
 
   init {
+    // A process-death restore cannot resume the old coroutine. Clear only the
+    // transient running flags; the last completion token remains replayable.
+    savedStateHandle[EVENT_EDITOR_BUSY_KEY] = false
+    savedStateHandle[TASK_EDITOR_BUSY_KEY] = false
+    observePinnedPlanViews()
+    viewModelScope.launch {
+      try {
+        planRepository.ensureCatalog()
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message("Plan could not be prepared; calendar data is unchanged")
+      }
+    }
     // Keep the brief's staleness marker in step with the schedule it describes,
     // without silently spending API calls on every edit.
     viewModelScope.launch {
@@ -610,7 +2301,7 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
 
   fun sync(announce: Boolean = true) {
     viewModelScope.launch {
-      syncMutex.withLock {
+      scheduleActionMutex.withLock {
         _isSyncing.value = true
         try {
           val now = System.currentTimeMillis()
@@ -721,16 +2412,91 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
   /** Moves an existing event to a new start, keeping its length. */
   fun moveEventTo(event: BriefingEvent, newStartMs: Long) {
     val length = (event.endTime - event.startTime).coerceAtLeast(60_000L)
-    saveEvent(draftFrom(event).copy(startMs = newStartMs, endMs = newStartMs + length))
+    val newEndMs =
+      runCatching { Math.addExact(newStartMs, length) }.getOrElse {
+        message("That time is outside the supported calendar range")
+        return
+      }
+    moveEventToRange(event, newStartMs, newEndMs)
+  }
+
+  /** Exact local overlap list shown by the Timeline's pre-commit move preview. */
+  suspend fun timelineMoveConflicts(
+    movingEventId: String,
+    proposedStartMs: Long,
+    proposedEndMs: Long,
+  ): List<BriefingEvent> {
+    if (proposedEndMs <= proposedStartMs) return emptyList()
+    return repository
+      .eventsInRangeOnce(proposedStartMs, proposedEndMs)
+      .asSequence()
+      .filter { it.id != movingEventId }
+      .filter { it.startTime < proposedEndMs && it.endTime > proposedStartMs }
+      .sortedWith(compareBy<BriefingEvent> { it.startTime }.thenBy { it.id })
+      .toList()
+  }
+
+  /** Moves to an exact previewed range; callers must not invent a partial or invalid interval. */
+  fun moveEventToRange(event: BriefingEvent, newStartMs: Long, newEndMs: Long) {
+    val ownership = EventOwnership.forSource(event.source)
+    if (!ownership.movableOnTimeline) {
+      val guidance =
+        if (ownership.sourceFieldsEditable) "open it to edit its time"
+        else "reschedule it in its source app"
+      message("${event.source} events stay fixed in Timeline; $guidance")
+      return
+    }
+    if (newEndMs <= newStartMs) {
+      message("The moved event must end after it starts")
+      return
+    }
+    if (newStartMs == event.startTime && newEndMs == event.endTime) return
+    viewModelScope.launch {
+      scheduleActionMutex.withLock {
+        try {
+          val expectedStored =
+            repository.moveAppOwnedEventIfUnchanged(event, newStartMs, newEndMs)
+          if (expectedStored == null) {
+            message("That move preview is no longer current — nothing was changed")
+            return@withLock
+          }
+          try {
+            rescheduleReminderFor(expectedStored)
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            message("Event moved, but reminders could not be refreshed")
+          }
+          _messages.emit(
+            UiMessage(
+              text = "Moved \"${event.title}\"",
+              actionLabel = "Undo",
+              undoEvent = event,
+              undoExpectedEvent = expectedStored,
+            )
+          )
+        } catch (e: CancellationException) {
+          throw e
+        } catch (e: Exception) {
+          message("Couldn't move the event — nothing was changed")
+        }
+      }
+    }
+  }
+
+  /** Moves an event by local calendar days, preserving wall time or its all-day span. */
+  fun moveEventByDays(event: BriefingEvent, days: Int) {
+    val (start, end) = ScheduleAnalysis.moveEventByDays(event, days)
+    saveEvent(
+      draft = draftFrom(event).copy(startMs = start, endMs = end),
+      followMovedEvent = false,
+    )
   }
 
   fun newDraftFor(dayMs: Long = _selectedDay.value): EventDraft {
     // Anchored to the day the user is looking at, not to "now" — creating an
     // event while browsing next Tuesday used to land it on today.
-    val now = System.currentTimeMillis()
-    val start =
-      if (ScheduleAnalysis.isSameDay(dayMs, now)) roundUpToQuarterHour(now)
-      else ScheduleAnalysis.withTimeOfDay(dayMs, 9, 0)
+    val start = ScheduleAnalysis.suggestedEventStart(dayMs)
     return EventDraft(
       startMs = start,
       endMs = start + 60 * 60 * 1000L,
@@ -746,6 +2512,8 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
       description = event.description.orEmpty(),
       startMs = event.startTime,
       endMs = event.endTime,
+      source = event.source,
+      ownership = EventOwnership.forSource(event.source),
       isAllDay = event.isAllDay,
       isUrgent = event.isUrgent,
       isDeadline = event.isDeadline,
@@ -753,14 +2521,18 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
       column = event.kanbanStatus,
     )
 
-  fun saveEvent(draft: EventDraft, onComplete: (Boolean) -> Unit = {}) {
+  fun saveEvent(
+    draft: EventDraft,
+    followMovedEvent: Boolean = true,
+    onComplete: (Boolean) -> Unit = {},
+  ) {
     val title = draft.title.trim()
     if (title.isEmpty()) {
       onComplete(false)
       return
     }
     viewModelScope.launch {
-      eventMutationMutex.withLock {
+      scheduleActionMutex.withLock {
         try {
           val existing = draft.id?.let { id -> repository.eventById(id) }
           val validBoards = persistedBoards()
@@ -805,8 +2577,7 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
                 userEdited = true,
               )
 
-          repository.upsertEvent(event)
-          reportWriteBack(repository.writeEventBack(event), verb = "Saved")
+          reportWriteBack(repository.saveEventAndWriteBack(event), verb = "Saved")
           try {
             rescheduleReminderFor(event)
           } catch (e: CancellationException) {
@@ -814,7 +2585,7 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
           } catch (e: Exception) {
             message("Event saved, but reminders could not be refreshed")
           }
-          if (!ScheduleAnalysis.isSameDay(event.startTime, _selectedDay.value)) {
+          if (followMovedEvent && !ScheduleAnalysis.isSameDay(event.startTime, _selectedDay.value)) {
             selectDay(event.startTime)
           }
           onComplete(true)
@@ -830,22 +2601,37 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
 
   fun deleteEventById(id: String, onComplete: (Boolean) -> Unit = {}) {
     viewModelScope.launch {
-      eventMutationMutex.withLock {
+      // The undo offer is emitted after the lock is released. Emitting is a
+      // suspending call, and a full message buffer would otherwise hold the
+      // schedule lane closed until the user got around to reading a snackbar.
+      var undo: UiMessage? = null
+      scheduleActionMutex.withLock {
         try {
           val event = repository.eventById(id)
-          val calendarResult =
-            event?.let { repository.deleteEventFromCalendar(it) } ?: WriteBack.NotApplicable
-          repository.deleteEvent(id)
-          reportWriteBack(calendarResult, verb = "Removed")
+          val result =
+            event?.let { repository.deleteEventAndProvider(it) }
+              ?: EventDeleteOutcome(
+                writeBack = WriteBack.NotApplicable,
+                deleted = true,
+              )
+          if (event == null) repository.deleteEvent(id)
+          reportWriteBack(result.writeBack, verb = "Removed")
+          if (!result.deleted) {
+            onComplete(false)
+            return@withLock
+          }
           AlarmScheduler.cancelEventReminder(appContext, id)
           if (event != null) {
-            _messages.emit(
-              UiMessage(
-                text = "Deleted \"${event.title}\"",
-                actionLabel = "Undo",
-                undoEvent = event,
-              )
-            )
+            if (event.source in EventSource.SYNCED) {
+              message("Deleted \"${event.title}\" from its calendar")
+            } else {
+              undo =
+                UiMessage(
+                  text = "Deleted \"${event.title}\"",
+                  actionLabel = "Undo",
+                  undoEvent = event,
+                )
+            }
           }
           onComplete(true)
         } catch (e: CancellationException) {
@@ -855,14 +2641,48 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
           onComplete(false)
         }
       }
+      undo?.let { _messages.emit(it) }
     }
   }
 
-  fun restoreDeletedEvent(event: BriefingEvent) {
+  fun saveEventFromEditor(draft: EventDraft) {
+    beginEditorOperation(
+      busyKey = EVENT_EDITOR_BUSY_KEY,
+      sequenceKey = EVENT_EDITOR_SEQUENCE_KEY,
+      completionKey = EVENT_EDITOR_COMPLETION_KEY,
+    ) { complete -> saveEvent(draft, onComplete = complete) }
+  }
+
+  fun deleteEventFromEditor(id: String) {
+    beginEditorOperation(
+      busyKey = EVENT_EDITOR_BUSY_KEY,
+      sequenceKey = EVENT_EDITOR_SEQUENCE_KEY,
+      completionKey = EVENT_EDITOR_COMPLETION_KEY,
+    ) { complete -> deleteEventById(id, onComplete = complete) }
+  }
+
+  fun restoreDeletedEvent(event: BriefingEvent) = restoreEventSnapshot(event, expectedCurrent = null)
+
+  /** Restores only the exact state offered by the snackbar; a newer edit always wins. */
+  fun restoreEventSnapshot(event: BriefingEvent, expectedCurrent: BriefingEvent?) {
     viewModelScope.launch {
-      repository.upsertEvent(event, markUserEdited = false)
-      rescheduleReminderFor(event)
-      message("Restored \"${event.title}\"")
+      scheduleActionMutex.withLock {
+        if (!repository.restoreEventSnapshotIfUnchanged(event, expectedCurrent)) {
+          message("That event changed since then, so Undo was not applied")
+          return@withLock
+        }
+        try {
+          rescheduleReminderFor(event)
+        } catch (e: CancellationException) {
+          throw e
+        } catch (e: Exception) {
+          message("Event restored, but reminders could not be refreshed")
+        }
+        message(
+          if (expectedCurrent == null) "Restored \"${event.title}\""
+          else "Moved \"${event.title}\" back"
+        )
+      }
     }
   }
 
@@ -892,7 +2712,9 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
   }
 
   fun selectBoard(name: String) {
-    viewModelScope.launch { repository.writeSetting(SettingKeys.ACTIVE_BOARD, name) }
+    viewModelScope.launch {
+      if (!repository.selectBoard(name)) message("That board is unavailable")
+    }
   }
 
   fun addBoard(rawName: String, onComplete: (Boolean) -> Unit = {}) {
@@ -902,9 +2724,12 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
       return
     }
     viewModelScope.launch {
-      val success = repository.createBoard(name)
+      val result = repository.createBoardWithUndo(name)
+      val success = result.value
       if (!success) {
         message("A board called \"$name\" already exists")
+      } else {
+        planMutationMessage("Created board \"$name\"", result.mutationId)
       }
       onComplete(success)
     }
@@ -921,9 +2746,12 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
       return
     }
     viewModelScope.launch {
-      val success = repository.renameBoard(oldName, newName)
+      val result = repository.renameBoardWithUndo(oldName, newName)
+      val success = result.value
       if (!success) {
         message("A board called \"$newName\" already exists")
+      } else {
+        planMutationMessage("Renamed board to \"$newName\"", result.mutationId)
       }
       onComplete(success)
     }
@@ -932,8 +2760,16 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
   fun deleteBoard(name: String) {
     if (name == SettingKeys.DEFAULT_BOARD) return
     viewModelScope.launch {
-      repository.deleteBoard(name)?.let { fallback ->
-        message("Moved everything from \"$name\" to \"$fallback\"")
+      val result = repository.deleteBoardWithOutcomeAndUndo(name)
+      when (val outcome = result.value) {
+        is BoardDeleteOutcome.Deleted ->
+          planMutationMessage(
+            "Moved calendar labels from \"$name\" to \"${outcome.fallbackBoard}\"",
+            result.mutationId,
+          )
+        BoardDeleteOutcome.ContainsPlanItems ->
+          message("Move or delete this board's Plan tasks before deleting the board")
+        BoardDeleteOutcome.Invalid -> message("That board could not be deleted")
       }
     }
   }
@@ -945,9 +2781,12 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
       return
     }
     viewModelScope.launch {
-      val success = repository.createColumn(name)
+      val result = repository.createColumnWithUndo(name)
+      val success = result.value
       if (!success) {
         message("That column already exists")
+      } else {
+        planMutationMessage("Created column \"$name\"", result.mutationId)
       }
       onComplete(success)
     }
@@ -964,9 +2803,12 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
       return
     }
     viewModelScope.launch {
-      val success = repository.renameColumn(oldName, newName)
+      val result = repository.renameColumnWithUndo(oldName, newName)
+      val success = result.value
       if (!success) {
         message("That column already exists")
+      } else {
+        planMutationMessage("Renamed column to \"$newName\"", result.mutationId)
       }
       onComplete(success)
     }
@@ -974,8 +2816,11 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
 
   fun deleteColumn(name: String) {
     viewModelScope.launch {
-      if (!repository.deleteColumn(name)) {
+      val result = repository.deleteColumnWithUndo(name)
+      if (!result.value) {
         message("A board needs at least one column")
+      } else {
+        planMutationMessage("Deleted column \"$name\"", result.mutationId)
       }
     }
   }
@@ -1241,9 +3086,30 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
     _messages.tryEmit(UiMessage(text))
   }
 
-  private fun roundUpToQuarterHour(timeMs: Long): Long {
-    val quarter = 15 * 60 * 1000L
-    return ((timeMs + quarter - 1) / quarter) * quarter
+  private fun planMutationMessage(text: String, mutationId: String?) {
+    _messages.tryEmit(
+      UiMessage(
+        text = text,
+        actionLabel = mutationId?.let { "Undo" },
+        undoPlanMutationId = mutationId,
+      )
+    )
+  }
+
+  private fun beginEditorOperation(
+    busyKey: String,
+    sequenceKey: String,
+    completionKey: String,
+    start: ((Boolean) -> Unit) -> Unit,
+  ) {
+    if (savedStateHandle.get<Boolean>(busyKey) == true) return
+    val sequence = (savedStateHandle.get<Long>(sequenceKey) ?: 0L) + 1L
+    savedStateHandle[sequenceKey] = sequence
+    savedStateHandle[busyKey] = true
+    start { success ->
+      savedStateHandle[busyKey] = false
+      savedStateHandle[completionKey] = if (success) sequence else -sequence
+    }
   }
 
   companion object {
@@ -1252,8 +3118,15 @@ class BriefingViewModel(application: Application, savedStateHandle: SavedStateHa
     private const val AUTO_SYNC_INTERVAL_MS = 30 * 60 * 1000L
     private const val SYNC_DAYS_BACK = 7
     private const val SYNC_DAYS_FORWARD = 30
-    private const val STRIP_BACK = -7
-    private const val STRIP_FORWARD = 21
     private const val SELECTED_DAY_KEY = "selected_day"
+    private const val EVENT_EDITOR_BUSY_KEY = "event_editor_busy"
+    private const val EVENT_EDITOR_SEQUENCE_KEY = "event_editor_sequence"
+    private const val EVENT_EDITOR_COMPLETION_KEY = "event_editor_completion"
+    private const val TASK_EDITOR_BUSY_KEY = "task_editor_busy"
+    private const val TASK_EDITOR_SEQUENCE_KEY = "task_editor_sequence"
+    private const val TASK_EDITOR_COMPLETION_KEY = "task_editor_completion"
+    private const val DEFAULT_CALENDAR_VIEW = "Agenda"
+    private const val DEFAULT_PLAN_VIEW = "Outline"
+    private const val PLAN_HEALTH_DAYS = 7
   }
 }

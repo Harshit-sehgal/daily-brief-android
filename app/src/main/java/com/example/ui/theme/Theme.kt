@@ -9,14 +9,36 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 
-/** Corner radii. Two values carry the whole UI: 12 for controls, 18 for surfaces. */
+/**
+ * Every corner in the app, in four values.
+ *
+ * The screens had drifted to fourteen different radii — 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 18
+ * and 24 dp — which reads as carelessness long before anyone can name why. Radius is not decoration
+ * here: it says what kind of thing you are looking at. A control you press, a block of information,
+ * something layered above the page, or a mark too small to round at all.
+ */
+object Radius {
+  /** Marks that are drawn rather than pressed: progress dots, milestone diamonds, rules. */
+  val mark = 3.dp
+
+  /** Anything a finger presses: chips, icon buttons, schedule bars, small clipped hit areas. */
+  val control = 6.dp
+
+  /** Blocks of information: cards, board lanes, panels, grouped rows. */
+  val block = 10.dp
+
+  /** Things layered above the page: dialogs, sheets, the command palette. */
+  val container = 16.dp
+}
+
+/** Material's own scale, expressed in this app's four radii so built-in components match. */
 val AppShapes =
   Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(18.dp),
-    extraLarge = RoundedCornerShape(24.dp),
+    extraSmall = RoundedCornerShape(Radius.control),
+    small = RoundedCornerShape(Radius.block),
+    medium = RoundedCornerShape(Radius.block),
+    large = RoundedCornerShape(Radius.container),
+    extraLarge = RoundedCornerShape(Radius.container),
   )
 
 /**

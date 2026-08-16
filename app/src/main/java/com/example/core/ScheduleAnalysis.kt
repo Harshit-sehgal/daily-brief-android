@@ -208,11 +208,114 @@ object ScheduleAnalysis {
       }
       .timeInMillis
 
+  /** Suggests a start on the day being viewed without rounding into another day. */
+  fun suggestedEventStart(
+    dayMs: Long,
+    nowMs: Long = System.currentTimeMillis(),
+    timeZone: TimeZone = TimeZone.getDefault(),
+  ): Long {
+    if (!isSameDay(dayMs, nowMs, timeZone)) return withTimeOfDay(dayMs, 9, 0, timeZone)
+    val quarter = 15 * 60 * 1000L
+    val rounded = ((nowMs + quarter - 1) / quarter) * quarter
+    return rounded.takeIf { isSameDay(it, dayMs, timeZone) } ?: nowMs
+  }
+
+  /**
+   * Moves an event by local calendar days instead of fixed 24-hour periods.
+   *
+   * Timed events keep both endpoint wall-clock times. All-day events keep local-midnight
+   * boundaries and their calendar-day span, including across 23- and 25-hour days.
+   */
+  fun moveEventByDays(
+    event: BriefingEvent,
+    days: Int,
+    timeZone: TimeZone = TimeZone.getDefault(),
+  ): Pair<Long, Long> {
+    if (days == 0) return event.startTime to event.endTime
+    if (event.isAllDay) {
+      val start = startOfDayOffset(event.startTime, days, timeZone)
+      val end = startOfDayOffset(event.endTime, days, timeZone)
+      return start to if (end > start) end else startOfDayOffset(start, 1, timeZone)
+    }
+
+    val start = calendarTimeOffset(event.startTime, days, timeZone)
+    val end = calendarTimeOffset(event.endTime, days, timeZone)
+    return start to if (end > start) end else start + 60_000L
+  }
+
+  /** Moves an event onto an exact local calendar date while preserving its wall-clock span. */
+  fun moveEventToDay(
+    event: BriefingEvent,
+    targetDayMs: Long,
+    timeZone: TimeZone = TimeZone.getDefault(),
+  ): Pair<Long, Long> {
+    val delta = localDateOrdinal(targetDayMs, timeZone) - localDateOrdinal(event.startTime, timeZone)
+    require(delta in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) {
+      "The target date is outside the supported calendar range"
+    }
+    return moveEventByDays(event, delta.toInt(), timeZone)
+  }
+
   fun hourOf(timeMs: Long, timeZone: TimeZone = TimeZone.getDefault()): Int =
     Calendar.getInstance(timeZone).apply { timeInMillis = timeMs }.get(Calendar.HOUR_OF_DAY)
 
   fun minuteOf(timeMs: Long, timeZone: TimeZone = TimeZone.getDefault()): Int =
     Calendar.getInstance(timeZone).apply { timeInMillis = timeMs }.get(Calendar.MINUTE)
+
+  private fun calendarTimeOffset(timeMs: Long, days: Int, timeZone: TimeZone): Long {
+    val source = Calendar.getInstance(timeZone).apply { timeInMillis = timeMs }
+    val hour = source.get(Calendar.HOUR_OF_DAY)
+    val minute = source.get(Calendar.MINUTE)
+    val second = source.get(Calendar.SECOND)
+    val millisecond = source.get(Calendar.MILLISECOND)
+
+    // Move a noon anchor to resolve the target calendar date independently of
+    // offset changes, then rebuild the original wall clock on that date. Java's
+    // lenient calendar moves a nonexistent spring-gap time forward (02:30 ->
+    // 03:30) instead of silently pulling it back onto 01:30.
+    val targetDate =
+      Calendar.getInstance(timeZone).apply {
+        timeInMillis = timeMs
+        set(Calendar.HOUR_OF_DAY, 12)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+        add(Calendar.DAY_OF_YEAR, days)
+      }
+    return Calendar.getInstance(timeZone)
+      .apply {
+        isLenient = true
+        clear()
+        set(
+          targetDate.get(Calendar.YEAR),
+          targetDate.get(Calendar.MONTH),
+          targetDate.get(Calendar.DAY_OF_MONTH),
+          hour,
+          minute,
+          second,
+        )
+        set(Calendar.MILLISECOND, millisecond)
+      }
+      .timeInMillis
+  }
+
+  /** A zone-independent ordinal for the local date fields of one instant. */
+  private fun localDateOrdinal(timeMs: Long, timeZone: TimeZone): Long {
+    val local = Calendar.getInstance(timeZone).apply { timeInMillis = timeMs }
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+      .apply {
+        clear()
+        set(
+          local.get(Calendar.YEAR),
+          local.get(Calendar.MONTH),
+          local.get(Calendar.DAY_OF_MONTH),
+          0,
+          0,
+          0,
+        )
+      }
+      .timeInMillis / DAY_MS
+  }
 
   fun isSameDay(a: Long, b: Long, timeZone: TimeZone = TimeZone.getDefault()): Boolean =
     startOfDay(a, timeZone) == startOfDay(b, timeZone)

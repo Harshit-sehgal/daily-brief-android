@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import com.example.ui.viewmodel.EditorSaveGuard
+import com.example.ui.viewmodel.EditorField
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,13 +35,17 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -48,6 +54,8 @@ import com.example.core.ScheduleAnalysis
 import com.example.core.TimeFormatter
 import com.example.ui.theme.Space
 import com.example.ui.viewmodel.EventDraft
+import com.example.ui.viewmodel.EventDraftEdits
+import com.example.ui.viewmodel.EventOwnership
 
 /**
  * The one place an event is created or changed, wherever the user starts from.
@@ -59,6 +67,7 @@ import com.example.ui.viewmodel.EventDraft
 fun EventEditorSheet(
   draft: EventDraft,
   original: EventDraft,
+  hasOtherUnsavedChanges: Boolean = false,
   isBusy: Boolean,
   boards: List<String>,
   columnsByBoard: Map<String, List<String>>,
@@ -67,20 +76,43 @@ fun EventEditorSheet(
   onDismiss: () -> Unit,
   onSave: (EventDraft) -> Unit,
   onDelete: (() -> Unit)? = null,
+  /** Present only during creation; editing an existing event cannot change ownership type. */
+  onSwitchToTask: (() -> Unit)? = null,
 ) {
   val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  val focusRequester = remember { FocusRequester() }
   var showDatePicker by rememberSaveable { mutableStateOf(false) }
   var showStartPicker by rememberSaveable { mutableStateOf(false) }
   var showEndPicker by rememberSaveable { mutableStateOf(false) }
   var showDiscardConfirmation by rememberSaveable { mutableStateOf(false) }
   var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
+  // The times "All day" replaced, so switching it back off returns them rather
+  // than dropping the user on a 9am default they never chose.
+  var timedStartMs by rememberSaveable { mutableLongStateOf(if (draft.isAllDay) 0L else draft.startMs) }
+  var timedEndMs by rememberSaveable { mutableLongStateOf(if (draft.isAllDay) 0L else draft.endMs) }
+  LaunchedEffect(draft.isAllDay, draft.startMs, draft.endMs) {
+    if (!draft.isAllDay) {
+      timedStartMs = draft.startMs
+      timedEndMs = draft.endMs
+    }
+  }
   val currentColumns =
     columnsByBoard[draft.board].orEmpty().ifEmpty { listOf(draft.column).filter { it.isNotBlank() } }
   val hasValidDestination = draft.board in boards && draft.column in currentColumns
+  val blocker = EditorSaveGuard.forEvent(draft.title, hasValidDestination)
+  val sourceFieldsEnabled = !isBusy && draft.ownership.sourceFieldsEditable
+  val deleteAction = onDelete.takeIf { draft.ownership.deletableFromEditor }
   val requestDismiss: () -> Unit = {
     if (!isBusy) {
-      if (draft == original) onDismiss() else showDiscardConfirmation = true
+      if (draft == original && !hasOtherUnsavedChanges) {
+        onDismiss()
+      } else {
+        showDiscardConfirmation = true
+      }
     }
+  }
+  LaunchedEffect(draft.id) {
+    if (draft.id == null) focusRequester.requestFocus()
   }
 
   ModalBottomSheet(onDismissRequest = requestDismiss, sheetState = sheetState) {
@@ -95,34 +127,63 @@ fun EventEditorSheet(
           .testTag("event_editor"),
       verticalArrangement = Arrangement.spacedBy(Space.md),
     ) {
+      if (onSwitchToTask != null) {
+        ViewSwitcher(
+          options = listOf("Task", "Event"),
+          selectedIndex = 1,
+          onSelect = { if (it == 0) onSwitchToTask() },
+          modifier = Modifier.testTag("capture_kind"),
+        )
+      }
+
       Text(
         text = if (draft.id == null) "New event" else "Edit event",
         style = MaterialTheme.typography.titleLarge,
       )
 
+      if (draft.id != null) {
+        Column(
+          modifier = Modifier.fillMaxWidth().testTag("event_ownership"),
+          verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+          PropertyChip(
+            text = eventOwnershipLabel(draft),
+            tone = MaterialTheme.colorScheme.secondary,
+          )
+          Text(
+            text = eventOwnershipExplanation(draft),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      }
+
       OutlinedTextField(
         value = draft.title,
         onValueChange = { onDraftChange(draft.copy(title = it)) },
-        enabled = !isBusy,
+        enabled = sourceFieldsEnabled,
         label = { Text("Title") },
         singleLine = true,
-        modifier = Modifier.fillMaxWidth().testTag("editor_title"),
+        isError = blocker?.field == EditorField.TITLE,
+        supportingText =
+          blocker?.takeIf { it.field == EditorField.TITLE }?.let { { Text(it.message) } },
+        modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).testTag("editor_title"),
       )
 
       OutlinedTextField(
         value = draft.description,
         onValueChange = { onDraftChange(draft.copy(description = it)) },
-        enabled = !isBusy,
+        enabled = sourceFieldsEnabled,
         label = { Text("Notes") },
         minLines = 2,
         maxLines = 4,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("editor_notes"),
       )
 
       SectionLabel("When")
       OutlinedButton(
         onClick = { showDatePicker = true },
-        enabled = !isBusy,
+        enabled = sourceFieldsEnabled,
         colors = fieldButtonColors(),
         modifier = Modifier.fillMaxWidth().testTag("editor_date"),
       ) {
@@ -133,17 +194,17 @@ fun EventEditorSheet(
         Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
         OutlinedButton(
           onClick = { showStartPicker = true },
-          enabled = !isBusy,
+          enabled = sourceFieldsEnabled,
           colors = fieldButtonColors(),
-          modifier = Modifier.weight(1f),
+          modifier = Modifier.weight(1f).testTag("editor_start"),
         ) {
           Text("Starts ${formatter.time(draft.startMs)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         OutlinedButton(
           onClick = { showEndPicker = true },
-          enabled = !isBusy,
+          enabled = sourceFieldsEnabled,
           colors = fieldButtonColors(),
-          modifier = Modifier.weight(1f),
+          modifier = Modifier.weight(1f).testTag("editor_end"),
         ) {
           Text(
             if (ScheduleAnalysis.isSameDay(draft.startMs, draft.endMs)) {
@@ -161,21 +222,32 @@ fun EventEditorSheet(
       FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
         FilterChip(
           selected = draft.isAllDay,
-          onClick = { onDraftChange(draft.withAllDay(!draft.isAllDay)) },
-          enabled = !isBusy,
+          onClick = {
+            onDraftChange(
+              if (draft.isAllDay) {
+                EventDraftEdits.asTimed(draft, timedStartMs.takeIf { it > 0 }, timedEndMs.takeIf { it > 0 })
+              } else {
+                EventDraftEdits.asAllDay(draft)
+              }
+            )
+          },
+          enabled = sourceFieldsEnabled,
           label = { Text("All day") },
+          modifier = Modifier.testTag("editor_all_day"),
         )
         FilterChip(
           selected = draft.isUrgent,
           onClick = { onDraftChange(draft.copy(isUrgent = !draft.isUrgent)) },
           enabled = !isBusy,
           label = { Text("Urgent") },
+          modifier = Modifier.testTag("editor_urgent"),
         )
         FilterChip(
           selected = draft.isDeadline,
           onClick = { onDraftChange(draft.copy(isDeadline = !draft.isDeadline)) },
           enabled = !isBusy,
           label = { Text("Deadline") },
+          modifier = Modifier.testTag("editor_deadline"),
         )
       }
 
@@ -213,7 +285,7 @@ fun EventEditorSheet(
         horizontalArrangement = Arrangement.spacedBy(Space.sm, Alignment.End),
         verticalArrangement = Arrangement.spacedBy(Space.xs),
       ) {
-        if (onDelete != null) {
+        if (deleteAction != null) {
           TextButton(
             onClick = { showDeleteConfirmation = true },
             enabled = !isBusy,
@@ -225,12 +297,13 @@ fun EventEditorSheet(
         TextButton(onClick = requestDismiss, enabled = !isBusy) { Text("Cancel") }
         Button(
           onClick = { onSave(draft) },
-          enabled = !isBusy && draft.title.isNotBlank() && hasValidDestination,
+          enabled = !isBusy && blocker == null,
           modifier = Modifier.testTag("editor_save"),
         ) {
           Text(if (isBusy) "Saving…" else "Save")
         }
       }
+      SaveBlockerNotice(blocker, Modifier.testTag("editor_save_blocker"))
     }
   }
 
@@ -244,7 +317,9 @@ fun EventEditorSheet(
         TextButton(
           enabled = !isBusy,
           onClick = {
-            pickerState.selectedDateMillis?.let { onDraftChange(draft.movedToDay(it)) }
+            pickerState.selectedDateMillis?.let {
+              onDraftChange(EventDraftEdits.movedToDay(draft, it))
+            }
             showDatePicker = false
           }
         ) {
@@ -264,7 +339,7 @@ fun EventEditorSheet(
       is24Hour = formatter.is24Hour,
       onDismiss = { showStartPicker = false },
       onConfirm = { hour, minute ->
-        onDraftChange(draft.withStart(hour, minute))
+        onDraftChange(EventDraftEdits.withStart(draft, hour, minute))
         showStartPicker = false
       },
     )
@@ -277,7 +352,7 @@ fun EventEditorSheet(
       is24Hour = formatter.is24Hour,
       onDismiss = { showEndPicker = false },
       onConfirm = { hour, minute ->
-        onDraftChange(draft.withEnd(hour, minute))
+        onDraftChange(EventDraftEdits.withEnd(draft, hour, minute))
         showEndPicker = false
       },
     )
@@ -305,17 +380,17 @@ fun EventEditorSheet(
     )
   }
 
-  if (showDeleteConfirmation && onDelete != null) {
+  if (showDeleteConfirmation && deleteAction != null) {
     AlertDialog(
       onDismissRequest = { showDeleteConfirmation = false },
       title = { Text("Delete ${draft.title.ifBlank { "this event" }}?") },
-      text = { Text("You can undo this from the message shown after deletion.") },
+      text = { Text(eventDeleteExplanation(draft)) },
       confirmButton = {
         TextButton(
           enabled = !isBusy,
           onClick = {
             showDeleteConfirmation = false
-            onDelete()
+            deleteAction()
           },
           modifier = Modifier.testTag("editor_delete_confirm"),
         ) {
@@ -331,59 +406,38 @@ fun EventEditorSheet(
   }
 }
 
-/** Moves the whole event to another day, preserving its clock times and length. */
-private fun EventDraft.movedToDay(utcDayMs: Long): EventDraft {
-  val newDay = ScheduleAnalysis.localDayFromUtcMillis(utcDayMs)
-  if (isAllDay) {
-    return copy(
-      startMs = newDay,
-      endMs = ScheduleAnalysis.startOfDayOffset(newDay, 1),
-    )
-  }
-  val length = (endMs - startMs).coerceAtLeast(0L)
-  val start =
-    ScheduleAnalysis.withTimeOfDay(
-      newDay,
-      ScheduleAnalysis.hourOf(startMs),
-      ScheduleAnalysis.minuteOf(startMs),
-    )
-  return copy(startMs = start, endMs = start + length)
-}
-
-private fun EventDraft.withAllDay(allDay: Boolean): EventDraft {
-  val day = ScheduleAnalysis.startOfDay(startMs)
-  return if (allDay) {
-    copy(
-      startMs = day,
-      endMs = ScheduleAnalysis.startOfDayOffset(day, 1),
-      isAllDay = true,
-    )
-  } else {
-    val start = ScheduleAnalysis.withTimeOfDay(day, 9, 0)
-    copy(startMs = start, endMs = ScheduleAnalysis.withTimeOfDay(day, 10, 0), isAllDay = false)
+private fun eventOwnershipLabel(draft: EventDraft): String {
+  val source = draft.source.ifBlank { "External source" }
+  return when (draft.ownership) {
+    EventOwnership.APP_OWNED -> "Daily Brief · app-owned"
+    EventOwnership.DEVICE_CALENDAR -> "$source · calendar-owned"
+    EventOwnership.READ_ONLY_SOURCE -> "$source · read-only"
   }
 }
 
-/** Keeps the event's length when the start moves, so end never lands before start. */
-private fun EventDraft.withStart(hour: Int, minute: Int): EventDraft {
-  val length = (endMs - startMs).coerceAtLeast(15 * 60_000L)
-  val start = ScheduleAnalysis.withTimeOfDay(startMs, hour, minute)
-  return copy(startMs = start, endMs = start + length)
+private fun eventOwnershipExplanation(draft: EventDraft): String {
+  val source = draft.source.ifBlank { "its source app" }
+  return when (draft.ownership) {
+    EventOwnership.APP_OWNED ->
+      "This event belongs to Daily Brief. You can edit it here, and a deletion can be undone."
+    EventOwnership.DEVICE_CALENDAR ->
+      "This event belongs to $source. Edits are sent back when calendar access and write-back are available; a successful deletion cannot be undone here."
+    EventOwnership.READ_ONLY_SOURCE ->
+      "Title, notes, date, and time are controlled by $source. You can still change urgency, deadline, and Plan labels; delete or reschedule it in $source."
+  }
 }
 
-private fun EventDraft.withEnd(hour: Int, minute: Int): EventDraft {
-  var end = ScheduleAnalysis.withTimeOfDay(startMs, hour, minute)
-  // An end earlier than the start reads as "runs past midnight".
-  if (end <= startMs) {
-    end =
-      ScheduleAnalysis.withTimeOfDay(
-        ScheduleAnalysis.startOfDayOffset(startMs, 1),
-        hour,
-        minute,
-      )
+private fun eventDeleteExplanation(draft: EventDraft): String =
+  when (draft.ownership) {
+    EventOwnership.APP_OWNED ->
+      "This event will be removed from Daily Brief. You can undo it from the message shown after deletion."
+    EventOwnership.DEVICE_CALENDAR -> {
+      val source = draft.source.ifBlank { "the source calendar" }
+      "Daily Brief will ask $source to delete this event. If the source accepts it, the deletion cannot be undone here."
+    }
+    EventOwnership.READ_ONLY_SOURCE ->
+      "Delete this event in ${draft.source.ifBlank { "its source app" }}."
   }
-  return copy(endMs = end)
-}
 
 /** Outlined buttons standing in for form fields read better in body colour. */
 @Composable

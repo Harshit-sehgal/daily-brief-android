@@ -162,6 +162,106 @@ class ScheduleAnalysisTest {
   }
 
   @Test
+  fun `moving timed events preserves wall time across spring DST`() {
+    val newYork = TimeZone.getTimeZone("America/New_York")
+    val event =
+      event(
+        "spring",
+        instant(2026, 3, 7, 9, 30, newYork),
+        instant(2026, 3, 7, 10, 45, newYork),
+      )
+
+    val (start, end) = ScheduleAnalysis.moveEventByDays(event, 1, newYork)
+
+    assertEquals(instant(2026, 3, 8, 9, 30, newYork), start)
+    assertEquals(instant(2026, 3, 8, 10, 45, newYork), end)
+    assertEquals(23 * HOUR, start - event.startTime)
+  }
+
+  @Test
+  fun `moving into a spring DST gap normalizes forward on the target day`() {
+    val newYork = TimeZone.getTimeZone("America/New_York")
+    val event =
+      event(
+        "gap",
+        instant(2026, 3, 7, 2, 30, newYork),
+        instant(2026, 3, 7, 3, 30, newYork),
+      )
+
+    val (start, end) = ScheduleAnalysis.moveEventByDays(event, 1, newYork)
+
+    assertEquals(8, dayOfMonth(start, newYork))
+    assertEquals(3, ScheduleAnalysis.hourOf(start, newYork))
+    assertEquals(30, ScheduleAnalysis.minuteOf(start, newYork))
+    assertTrue(end > start)
+  }
+
+  @Test
+  fun `moving timed events preserves wall time across fall DST`() {
+    val newYork = TimeZone.getTimeZone("America/New_York")
+    val event =
+      event(
+        "fall",
+        instant(2026, 10, 31, 9, 30, newYork),
+        instant(2026, 10, 31, 10, 45, newYork),
+      )
+
+    val (start, end) = ScheduleAnalysis.moveEventByDays(event, 1, newYork)
+
+    assertEquals(instant(2026, 11, 1, 9, 30, newYork), start)
+    assertEquals(instant(2026, 11, 1, 10, 45, newYork), end)
+    assertEquals(25 * HOUR, start - event.startTime)
+  }
+
+  @Test
+  fun `moving all-day events preserves their calendar span across DST`() {
+    val newYork = TimeZone.getTimeZone("America/New_York")
+    val spring =
+      event(
+        "spring days",
+        instant(2026, 3, 7, zone = newYork),
+        instant(2026, 3, 9, zone = newYork),
+        allDay = true,
+      )
+    val fall =
+      event(
+        "fall days",
+        instant(2026, 10, 31, zone = newYork),
+        instant(2026, 11, 2, zone = newYork),
+        allDay = true,
+      )
+
+    val springMoved = ScheduleAnalysis.moveEventByDays(spring, 1, newYork)
+    val fallMoved = ScheduleAnalysis.moveEventByDays(fall, 1, newYork)
+
+    assertEquals(instant(2026, 3, 8, zone = newYork), springMoved.first)
+    assertEquals(instant(2026, 3, 10, zone = newYork), springMoved.second)
+    assertEquals(instant(2026, 11, 1, zone = newYork), fallMoved.first)
+    assertEquals(instant(2026, 11, 3, zone = newYork), fallMoved.second)
+  }
+
+  @Test
+  fun `moving to an exact local date preserves wall time across DST and year boundaries`() {
+    val newYork = TimeZone.getTimeZone("America/New_York")
+    val event =
+      event(
+        "year boundary",
+        instant(2025, 12, 31, 9, 30, newYork),
+        instant(2025, 12, 31, 10, 45, newYork),
+      )
+
+    val moved =
+      ScheduleAnalysis.moveEventToDay(
+        event,
+        instant(2026, 3, 8, 0, 0, newYork),
+        newYork,
+      )
+
+    assertEquals(instant(2026, 3, 8, 9, 30, newYork), moved.first)
+    assertEquals(instant(2026, 3, 8, 10, 45, newYork), moved.second)
+  }
+
+  @Test
   fun `picker dates round trip through UTC`() {
     val kolkata = TimeZone.getTimeZone("Asia/Kolkata")
     val localDay = ScheduleAnalysis.startOfDay(instant(2026, 3, 5, 23, 30, kolkata), kolkata)
@@ -183,6 +283,25 @@ class ScheduleAnalysisTest {
     assertEquals(5, dayOfMonth(at1745, kolkata))
     assertEquals(17, ScheduleAnalysis.hourOf(at1745, kolkata))
     assertEquals(45, ScheduleAnalysis.minuteOf(at1745, kolkata))
+  }
+
+  @Test
+  fun `suggested event starts stay on the day being viewed`() {
+    val kolkata = TimeZone.getTimeZone("Asia/Kolkata")
+    val day = instant(2026, 8, 9, zone = kolkata)
+    val morning = instant(2026, 8, 9, 10, 7, kolkata)
+    val lateNight = instant(2026, 8, 9, 23, 48, kolkata)
+    val anotherDay = instant(2026, 8, 12, zone = kolkata)
+
+    assertEquals(
+      instant(2026, 8, 9, 10, 15, kolkata),
+      ScheduleAnalysis.suggestedEventStart(day, morning, kolkata),
+    )
+    assertEquals(lateNight, ScheduleAnalysis.suggestedEventStart(day, lateNight, kolkata))
+    assertEquals(
+      instant(2026, 8, 12, 9, 0, kolkata),
+      ScheduleAnalysis.suggestedEventStart(anotherDay, morning, kolkata),
+    )
   }
 
   @Test
