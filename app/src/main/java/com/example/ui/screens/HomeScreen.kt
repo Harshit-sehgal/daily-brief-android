@@ -376,13 +376,14 @@ private fun FocusBlock(
 
   val current = pulse.current
   val next = pulse.next
+  val freeMinutes = pulse.freeMinutes
   val focusEvent = current ?: next
 
   val (label, tone) =
     when {
       current != null -> "NOW" to status.deadline
-      next != null && pulse.freeMinutes != null ->
-        "FREE FOR ${DayPulse.humanDuration(pulse.freeMinutes)}" to scheme.primary
+      next != null && freeMinutes != null ->
+        "FREE FOR ${DayPulse.humanDuration(freeMinutes)}" to scheme.primary
       pulse.isDone -> "DONE FOR THE DAY" to status.positive
       else -> "NOTHING SCHEDULED" to scheme.onSurfaceVariant
     }

@@ -43,6 +43,7 @@ jobs:
         # --continue so one lint finding does not hide the test results.
         run: >-
           ./gradlew --no-daemon --stacktrace --continue
+          :planning-core:jvmTest
           testDebugUnitTest
           lintDebug
           assembleDebug
@@ -61,6 +62,7 @@ jobs:
             app/build/outputs/apk/
             app/build/reports/
             app/build/test-results/
+            planning-core/build/test-results/
 
   instrumentation:
     name: API ${{ matrix.api-level }} instrumentation

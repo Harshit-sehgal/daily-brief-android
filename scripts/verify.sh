@@ -51,11 +51,15 @@ for arg in "$@"; do
   esac
 done
 
+# The engine's tests are a separate task: :planning-core is a Kotlin Multiplatform
+# module, so it has jvmTest rather than the app's testDebugUnitTest, and an unqualified
+# task name would skip it silently.
 if [ "$FAST" = 1 ]; then
-  TASKS=(testDebugUnitTest)
+  TASKS=(:planning-core:jvmTest testDebugUnitTest)
 else
   # Mirrors .github/workflows: JVM tests, both lints, both APKs, R8 config.
   TASKS=(
+    :planning-core:jvmTest
     testDebugUnitTest
     lintDebug
     assembleDebug

@@ -83,6 +83,10 @@ room {
 
 // The app only depends on libraries referenced by production or test source.
 dependencies {
+  // The scheduling engine and the domain model it operates on. The app is a consumer
+  // of the planner now, not its owner.
+  implementation(project(":planning-core"))
+
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.compose.material.icons.core)

@@ -973,7 +973,7 @@ private fun PlanHistoryEntry(
 }
 
 private fun PlanMutation.isUndoable(now: Long): Boolean =
-  status == PlanMutationStatus.APPLIED && (expiresAt == null || expiresAt > now)
+  status == PlanMutationStatus.APPLIED && (expiresAt?.let { it > now } ?: true)
 
 private fun PlanMutation.statusLabel(now: Long): String =
   when {

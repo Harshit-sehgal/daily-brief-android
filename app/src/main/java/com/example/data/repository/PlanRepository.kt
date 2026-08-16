@@ -1635,7 +1635,10 @@ class PlanRepository internal constructor(private val database: AppDatabase) {
             mutation.summary,
           )
         }
-        if (mutation.expiresAt != null && mutation.expiresAt <= now) {
+        // Bound to a local: PlanMutation lives in :planning-core now, and Kotlin will not
+        // smart-cast a val it does not own.
+        val expiresAt = mutation.expiresAt
+        if (expiresAt != null && expiresAt <= now) {
           planDao.expirePlanMutations(now)
           return@withTransaction PlanUndoResult(PlanUndoStatus.EXPIRED, mutation.summary)
         }
@@ -2121,14 +2124,16 @@ class PlanRepository internal constructor(private val database: AppDatabase) {
       val boardWillExist =
         state.boards[item.boardId]?.let { true } ?: (planDao.getBoard(item.boardId) != null)
       if (!boardWillExist) return false
-      if (item.columnId != null) {
+      val columnId = item.columnId
+      if (columnId != null) {
         val columnWillExist =
-          state.columns[item.columnId]?.let { true } ?: (planDao.getColumn(item.columnId) != null)
+          state.columns[columnId]?.let { true } ?: (planDao.getColumn(columnId) != null)
         if (!columnWillExist) return false
       }
-      if (item.parentId != null) {
+      val parentId = item.parentId
+      if (parentId != null) {
         val parentWillExist =
-          state.items[item.parentId]?.let { true } ?: (planDao.getItem(item.parentId) != null)
+          state.items[parentId]?.let { true } ?: (planDao.getItem(parentId) != null)
         if (!parentWillExist) return false
       }
     }

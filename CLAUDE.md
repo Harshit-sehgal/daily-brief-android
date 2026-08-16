@@ -1,8 +1,17 @@
 # Daily Brief — working notes
 
 A local-first Android app: device calendar + Notion in one schedule, overlap
-detection, and an optional Gemini summary. Single Gradle module (`:app`),
-Compose UI, Room storage, no DI framework.
+detection, and an optional Gemini summary. Compose UI, Room storage, no DI
+framework.
+
+Two Gradle modules. `:app` is the Android app. `:planning-core` is the scheduling
+engine and the domain model it works on — extracted so a server can run the same
+code the phone runs. It is a Kotlin Multiplatform module whose `commonMain` is
+compiled against the common stdlib only, so anything placed there is provably
+portable; everything still needing JVM APIs sits in `jvmShared`, which both the
+`jvm` target and Android depend on. Moving a file from `jvmShared` to `commonMain`
+is the unit of porting work, and `docs/saas/05-kmp-portability-audit.md` tracks
+what is left.
 
 ## Build and test
 
@@ -39,7 +48,8 @@ the APK to `/data/local/tmp` and `pm install -r -t` it instead.
 
 | Layer | Package | Notes |
 | --- | --- | --- |
-| Pure schedule maths | `core/` | No Android, no Compose — unit-tested directly |
+| Pure schedule maths | `:planning-core` `core/` | No Android, no Compose — unit-tested directly on the JVM |
+| Domain model | `:planning-core` `data/model/` | The Room entities. They still carry Room annotations, which is the one thing keeping them out of `commonMain` |
 | Storage | `data/database/` | Room; schema is exported to `app/schemas/` |
 | Sources | `data/api/` | `DeviceCalendarSync`, `NotionClient`, `GeminiClient` |
 | Secrets | `data/security/SecretStore` | Keystore-backed; never in Room |
@@ -56,6 +66,18 @@ for anything new. Date arithmetic especially: it is where midnight, DST and
 
 ## Invariants worth knowing
 
+- **Every module compiles against SDK 37.1, never bare 37.** The pinned SDK has
+  `platforms;android-37.1` and nothing else, so `compileSdk = 37` asks for 37.0 and sends
+  Gradle to the network for a platform that is not there. Because the download reports no
+  task progress, the build looks hung rather than failed — it sat for thirteen minutes
+  before this was spotted. `:app` writes `compileSdk { version = release(37) { minorApiLevel = 1 } }`
+  and `:planning-core` writes the same thing inside its `androidLibrary` block.
+- **Kotlin does not smart-cast a `val` it does not own.** Now that the domain model lives in
+  `:planning-core`, `if (row.dayOfWeek != null) use(row.dayOfWeek)` no longer compiles in
+  `:app` — the compiler will not assume a property from another module is stable. Bind a
+  local first (`val dayOfWeek = requireNotNull(row.dayOfWeek)`), which is what
+  `WorkingCalendarMapper`, `PlanRepository` and `HomeScreen` now do. Expect this on every
+  nullable field the app reads off a model type.
 - **The source owns times; the user owns wording.** `SyncMergePolicy` is the only
   place that decides what a re-sync may overwrite. Change it with tests.
 - **Deletes fail closed.** A read-only source (Notion, a repeating series,

@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 rootProject.name = "Daily Brief"
 
 include(":app")
+include(":planning-core")

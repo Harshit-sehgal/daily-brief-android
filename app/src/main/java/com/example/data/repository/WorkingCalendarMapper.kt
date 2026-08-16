@@ -47,10 +47,10 @@ object WorkingCalendarMapper {
       require(row.kind in WorkScheduleWindowKind.All) { "Unknown working-window kind" }
       when (row.kind) {
         WorkScheduleWindowKind.WEEKLY -> {
-          require(row.dayOfWeek != null) { "A weekly window requires a weekday" }
+          val dayOfWeek = requireNotNull(row.dayOfWeek) { "A weekly window requires a weekday" }
           require(row.localDate == null) { "A weekly window cannot contain a local date" }
           require(!row.isClosed) { "Weekly availability cannot use a closed-date sentinel" }
-          weekly += WorkingWeekWindow(row.dayOfWeek, row.startMinute, row.endMinute)
+          weekly += WorkingWeekWindow(dayOfWeek, row.startMinute, row.endMinute)
         }
         WorkScheduleWindowKind.DATE_OVERRIDE -> {
           require(row.dayOfWeek == null) { "A date override cannot contain a weekday" }
