@@ -28,6 +28,23 @@ class LegacyNameKeysFixtureTest {
   }
 
   @Test
+  fun `trim semantics match JVM Character isWhitespace, not Unicode whitespace`() {
+    // The JVM actual trims with Character.isWhitespace: U+0085, U+00A0, U+2007 and U+202F
+    // survive (their NFKC decomposes them to a plain space, so the expected values show the
+    // space), while U+1680, U+2002 and U+3000 are trimmed. The iOS actual shares legacyTrim,
+    // so these pins are the byte-compatibility proof for stored name keys.
+    assertEquals(" work ", nameKey("\u00a0work\u00a0"))
+    assertEquals("\u0085work\u0085", nameKey("\u0085work\u0085"))
+    assertEquals(" work ", nameKey("\u2007work\u2007"))
+    assertEquals(" work ", nameKey("\u202fwork\u202f"))
+    assertEquals("work", nameKey("\twork\n"))
+    assertEquals("work", nameKey("\u001cwork\u001d"))
+    assertEquals("work", nameKey("\u1680work\u1680"))
+    assertEquals("work", nameKey("\u2002work\u2002"))
+    assertEquals("work", nameKey("\u3000work\u3000"))
+  }
+
+  @Test
   fun `stableId pairs match the captured JVM output`() {
     assertEquals("2c1743a3-9130-3fbf-b67d-f8e4f069f9f9", stableId("alpha"))
     assertEquals("d5237a63-e184-3adb-8f97-149839950bc0", stableId("alpha "))

@@ -23,11 +23,25 @@ is roughly a gigabyte, and not in the pinned toolchain) would hand the job back 
 | Scope | `commonMain` | `jvmShared` | Portable |
 | --- | ---: | ---: | ---: |
 | Engine core (`core/`) | 5,319 | 0 | **100%** |
-| Whole module | 7,873 | 11 | **99%** |
+| Whole module | 8,128 | 9 | **99.9%** |
 
-`core/` has no files left outside `commonMain`. The 11 remaining lines are the JVM `actual` for
-`LegacyNameKeys` — `Normalizer` NFKC and name-based `UUID`, which are stored-identity functions
-that must not be approximated (see below).
+`core/` has no files left outside `commonMain`. The 9 remaining lines are the JVM `actual` for
+`LegacyNameKeys` — `Normalizer` NFKC, which is stored-identity that must not be approximated
+(see below).
+
+### iOS is now a first-class target
+
+`iosArm64` + `iosSimulatorArm64` were added (WP-16 prep). The targets configure and resolve
+metadata on every host — Linux keeps `linuxX64` as the compiled purity guard, and a Mac runs
+`scripts/build-ios-framework.sh` to produce the `PlannerCore` XCFramework.
+
+`LegacyNameKeys` is fully ported: `precomposedStringWithCompatibilityMapping` + `en_US_POSIX`
+lowercase on iOS, exactly as the expect declaration always said. The two byte-sensitive halves
+— the JVM `Character.isWhitespace` trim semantics and Java's `UUID.nameUUIDFromBytes` (RFC
+1321 MD5 of the UTF-8 seed, version 3) — live in `commonMain` (`legacyTrim`, `legacyStableId`,
+`LegacyMd5`) so both actuals are the same code the JVM fixture test pins. The RFC 1321 vectors
+and the whitespace-boundary cases (U+0085/00A0/2007/202F survive; U+1680/2002/3000 trim) are
+tested on the JVM, which is the strongest byte-compatibility proof available without a Mac.
 
 The path was 22% → 33% → 59% → 74% → 100% of the engine core. Two files were the levers:
 `WorkingCalendar` released 1,633 lines behind it, and `ScheduleAnalysis` released the remaining
@@ -61,11 +75,9 @@ Counted by the purity test, not by the engine-core figure above.
 | `PlanningModels`, `BriefingEvent` | 501 | `commonMain` | Domain model; keeps its Room annotations because `room-common` is multiplatform |
 | `SavedViewCodec` | 252 | `commonMain` | Moved from `jvmShared` — nothing was blocking it |
 | `WorkScheduleDefaults` | 10 | `commonMain` | Moved from `jvmShared` — nothing was blocking it |
-| `PlanMutationCodec` | 808 | `jvmShared` | Via `LegacyNameKeys`, `WorkingCalendarMapper` |
-| `WorkingScheduleMutationCodec` | 363 | `jvmShared` | Via `LegacyNameKeys`, `WorkingCalendarMapper` |
-| `PlanCatalogMutationCodec` | 359 | `jvmShared` | Via `LegacyNameKeys`, `WorkingCalendarMapper` |
-| `WorkingCalendarMapper` | 239 | `jvmShared` | `Calendar` |
-| `LegacyNameKeys` | 22 | `jvmShared` | `Normalizer`, `StandardCharsets`, `Locale`, `UUID` — small, and it blocks all three codecs |
+| `SyncMergePolicy` | 85 | `commonMain` | Moved from `jvmShared` (WP-13) — pure Kotlin, nothing blocked it |
+| `LegacyMd5`, `LegacyIdentity` | 170 | `commonMain` | Shared byte-exact identity code for the iOS actual |
+| `LegacyNameKeys` | 9 | `jvmShared` | `Normalizer`, `Locale` — the only JVM actual left |
 
 **The three journal codecs are one unit, and it is not a cheap unblock.** An earlier version of
 this document called `LegacyNameKeys` "22 lines gating 1,530 lines of codec — the cheapest
@@ -171,6 +183,13 @@ audit:
 
 ## Change log
 
+- 2026-08-18: `iosArm64`/`iosSimulatorArm64` targets added (configure everywhere, build on
+  macOS only); `LegacyNameKeys.ios.kt` actual lands (`precomposedStringWithCompatibilityMapping`
+  + `en_US_POSIX`); trim + name-based UUID shared into `commonMain` (`legacyTrim`,
+  `legacyStableId`, pure-Kotlin `LegacyMd5` pinned against RFC 1321 vectors and the
+  whitespace-boundary set); `SyncMergePolicy` → `commonMain` (it was pure). Whole module
+  99% → 99.9%: the only jvmShared lines left are the JVM `actual`. `scripts/build-ios-framework.sh`
+  is the Mac-side XCFramework build.
 - 2026-08-17: `DependencyAnalysis`, `CriticalPathEngine`, `GuardedArithmetic` → `commonMain`;
   codec/`WorkingCalendarMapper`/`SavedViewCodec` untangled into `planning-core`; `GanttInteraction`
   split back into `:app`; `CommonMainPurityTest` added. All suites green (`scripts/verify.sh
