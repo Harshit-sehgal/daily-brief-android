@@ -60,9 +60,12 @@ strings/lists — they serialize into the same journal encoding, so history surv
    in the lock. Server: per-tenant advisory lock, fetch outside it. Property to preserve:
    reconciliation of a source's rows and a concurrent user edit must not interleave.
 2. **Undo's staleness check.** `matchesMutationState` is whole-row value equality inside one
-   SQLite transaction on a single-writer database. Postgres: `SERIALIZABLE` or `SELECT … FOR
-   UPDATE` on the journal row plus the affected entities; the compare-and-set semantics of the
-   journal writers (a stale entry refuses rather than overwrites) are the contract.
+   SQLite transaction on a single-writer database. Postgres: claim-the-entry `UPDATE …
+   RETURNING` plus `SELECT … FOR UPDATE` on the affected entities in id order, with the same
+   whole-row comparison (settled in `09-server-invariants.md` §2 — `SERIALIZABLE` was
+   rejected: same guarantee with less concurrency and a retry loop). The compare-and-set
+   semantics of the journal writers (a stale entry refuses rather than overwrites) are the
+   contract.
 3. **Secrets.** Android Keystore → KMS/envelope encryption. Keep the design properties:
    AAD bound to the setting key, never destroy ciphertext on a failed read, secrets never in
    plain columns (`SECRET_SETTING_KEYS` routing carries over).

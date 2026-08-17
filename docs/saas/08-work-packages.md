@@ -447,12 +447,66 @@ JVM, kotlinx-serialization-json 1.8.1) turns it into executable bytes:
 
 # Stage 3 and beyond
 
-Summarised only; plan them properly when Stage 2 closes.
+## WP-13 — The vertical slice  (in progress)
 
-- **WP-13 vertical slice** — sign in → connect calendar → add tasks → "Plan my week" → proposal
-  with reasons → apply → Today. Ktor service wrapping `planning-core`; Next.js for Today and
-  Planner *only*. **The 90-second magic moment is the acceptance test, literally**: signup to an
-  accepted-or-rejected proposal on a real Google account, in 90 seconds.
+The journey, nothing else: **sign in → connect a calendar → add tasks → "Plan my week" → see a
+proposal with reasons → apply → see it on Today.** One user, one Google account, one weekend of
+schedule. The 90-second magic moment is the acceptance test, literally: signup to an
+accepted-or-rejected proposal, on a real Google account, in 90 seconds. Over three minutes is a
+bug in this stage.
+
+**Exit criteria:** the loop works end to end; a rejected proposal writes nothing; Undo restores
+exactly; the journey runs headless against a fixture provider in CI (gate) and is walked
+manually against a real Google account (runbook).
+
+### Shape
+
+- **`:server`** — new Gradle module, plain JVM: Ktor (Netty) + Postgres JDBC + Flyway
+  migrations (the proven `db/schema.sql` is V1) + kotlinx-serialization. Depends on
+  `:planning-core` (jvm) and `:planning-contract`. The engine's Room-annotated models are inert
+  JVM data classes, usable directly; the service maps contract DTOs ⇄ engine types and never
+  reimplements a decision the engine owns.
+- **`web/`** — Next.js + TypeScript, two screens only: Planner (tasks, Plan my week, the
+  proposal with reasons, apply/undo) and Today (overlaps + day shape). No Projects, no Board,
+  no Gantt. The client renders; the server is authoritative for Apply.
+- **Google OAuth** — one consent covers identity + calendar scopes. Server-side tokens, stored
+  in `calendar_connections.token_ciphertext` in the WP-11 envelope shape. There is no KMS in
+  the slice: a dev key from config fills the envelope's place so the production swap is
+  configuration, not shape (documented deviation; KMS is a deployment concern).
+- **Reconciliation worker** — per-tenant advisory lock, provider fetch *outside* the lock
+  (invariant 1), `SyncMergePolicy` applied, merged rows written. WP-14's sync worker is
+  consumed by this slice; what remains there is hardening and ops (retries, backoff, metrics,
+  partial failure handling).
+- **Planner endpoint** — `POST /v1/plan`: wire request → engine → wire result. Determinism
+  cache by request hash + `data_version` (04). **Apply** — `POST /v1/plan/{id}/apply`: the
+  proposal becomes blocks through the journal (one `AuditEntry`, compare-and-set undo per
+  invariant 2). A rejection writes nothing. Undo restores exactly.
+- **Today** — `ScheduleAnalysis` (already in `jvmShared`) over external events + plan blocks:
+  conflicts, day shape. No Gemini in the slice; summaries are WP-15.
+
+### Porting that this package needs
+
+- **`SyncMergePolicy` moves into `planning-core`** (jvmShared). It is pure today except
+  `DeviceCalendarSync.providerEventId` (the `device_<id>_<begin>` convention). The policy takes
+  a `providerIdOf: (BriefingEvent) -> Long?` parameter; the app passes its device extractor,
+  the server passes its Google one. The policy's own test suite moves with it and runs in both
+  places — the rules are the same code, never a re-implementation.
+- Everything else the worker touches (`ScheduleAnalysis`, codecs, models) is already in
+  `planning-core`.
+
+### Acceptance
+
+1. **Automated journey (gate)**: docker Postgres + fixture provider, drive the HTTP API
+   through the whole loop — signup, connect, tasks, plan, proposal with reasons, apply,
+   Today shows the blocks, reject-a-proposal writes nothing, undo restores. Timed: the service
+   leg must not be where the 90 seconds die.
+2. **Manual runbook**: the same journey against a real Google account, with the 90-second
+   stopwatch and a table of where time goes.
+
+### Out of scope (later WPs)
+
+Notion on the server, Gemini summaries, alarms/push, billing, scale-out beyond one node, KMS
+proper, Expo mobile (WP-16).
 - **WP-14 Google Calendar sync worker** — OAuth server-side, tokens encrypted at rest,
   `SyncMergePolicy`'s rules ported exactly: times and location are source-owned, wording and
   placement are user-owned, `userEdited` is sticky.

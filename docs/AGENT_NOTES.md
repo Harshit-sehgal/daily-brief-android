@@ -206,9 +206,13 @@ Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
   kotlinx-serialization-json 1.8.1) with wire DTOs, per-message versioning (newer refused,
   unknown fields ignored), golden byte-identical files, whole-minute proposal rules, range
   refusal as data. 19 tests; joined the verify.sh gate.
-- **WP-13..16** vertical slice (90-second magic moment is the acceptance test),
-  Google Calendar sync worker, depth + paid tier, Expo mobile. Summarised in `08`;
-  plan properly when Stage 2 closes.
+- **WP-13** the vertical slice (in progress; brief in `08`): sign in → connect calendar →
+  add tasks → Plan my week → proposal with reasons → apply → Today, on a real Google account
+  in 90 seconds. `:server` Ktor module + Next.js `web/` client; SyncMergePolicy moves into
+  `planning-core` jvmShared with a provider-id extractor parameter. Exit: automated journey
+  against a fixture provider in the gate + a real-account runbook.
+- **WP-14..16** sync-worker hardening, depth + paid tier, Expo mobile. Summarised in `08`;
+  plan properly when WP-13 closes.
 
 ### Product / HCI (not part of the WP flow)
 
