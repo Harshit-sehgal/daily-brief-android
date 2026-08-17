@@ -336,10 +336,9 @@ speak `kotlinx-datetime`, delete the bridge and the comment above it.
 
 ---
 
-## WP-9 — The three open engine defects
+## WP-9 — The three open engine defects  ✅ done
 
-Independent of the portability work. Each is a **behaviour change**, so each gets its own commit
-with its own tests, and defect 3 should be confirmed as wanted before you build it.
+All three done; defect 3 confirmed as wanted before building (`4aac835`, `df1ef68`).
 
 **Defect 3 — only `FINISH_TO_START` dependencies are scheduled around.**
 `AutoPlan` emits an explicit `UnplacedTask` for SS/FF/SF saying it does not schedule around them.
@@ -348,11 +347,15 @@ planner needs to use it. Consultants with client hand-offs hit this immediately.
 
 **Defect 5 — `AutoPlan` is O(tasks × chunks × free × taken).** Fine for one week on one device.
 The V1 architecture runs the planner server-side for many tenants over longer horizons. Add a
-benchmark first (800 tasks / 4 weeks, the shape `BaselineVarianceTest`'s perf case uses), then
-optimise against it.
+benchmark first, then optimise against it. `AutoPlanBenchmarkTest` defines the shape (the doc's
+"`BaselineVarianceTest`'s perf case" does not exist): 800 tasks / 4 weeks, Mon-Fri 9-17, buffer;
+~11× over capacity by construction, which is the point — it measures search cost, not placement.
+It measured 66 ms, so no optimisation was needed; the tripwire is the deliverable.
 
 **Defect 7 — coverage is inverted against product value.** `AutoPlan` is the feature the SaaS is
-sold on. Grow its cases toward `MultiSchedulePlanHealth`'s 17.
+sold on. Grow its cases toward `MultiSchedulePlanHealth`'s 17. Done: 17 (was 5), adding hard and
+soft deadlines, preferred order, remainder reporting, the sub-floor rounding contract, start
+constraints, milestone exclusion, and empty ranges.
 
 ---
 

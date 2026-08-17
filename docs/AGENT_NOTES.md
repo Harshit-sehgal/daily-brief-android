@@ -156,7 +156,7 @@ WP-3 GanttInteraction   (independent, small)
 WP-4 LegacyNameKeys ────┬── WP-5 journal codecs (needs WP-6 too)
 WP-6 WorkingCalendarMapper ─┘
 WP-7 non-JVM target     (after WP-1..WP-6; makes the guard redundant)
-WP-9 engine defects     (independent; defect 3 wants user confirmation)
+WP-9 engine defects     ✅ (defect 3 confirmed wanted before building)
 Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
 ```
 
@@ -184,8 +184,8 @@ Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
       `CommonMainPurityTest` as the fast duplicate.
 - [ ] **WP-8** Delete the `NotionClient` `commonZone` bridge (line ~76) once
       `ScheduleAnalysis` speaks kotlinx-datetime. Trivial.
-- [ ] **WP-9** Defects 3 (SS/FF/SF — confirm wanted first), 5 (benchmark 800 tasks /
-      4 weeks, then optimise), 7 (grow `AutoPlan` coverage toward 17 cases).
+- [x] **WP-9** Defects 3 (SS/FF/SF — confirmed wanted, then built), 5 (benchmark
+      800 tasks / 4 weeks; measured 66 ms, no optimisation needed), 7 (coverage 5 → 17).
 
 ### Stage 2+ (not started)
 
