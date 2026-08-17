@@ -82,6 +82,13 @@ for anything new. Date arithmetic especially: it is where midnight, DST and
   task progress, the build looks hung rather than failed — it sat for thirteen minutes
   before this was spotted. `:app` writes `compileSdk { version = release(37) { minorApiLevel = 1 } }`
   and `:planning-core` writes the same thing inside its `androidLibrary` block.
+- **The engine's dates are `kotlinx-datetime`, and that costs core library desugaring.** On
+  Android `kotlinx-datetime` is backed by `java.time`, which arrived in API 26 while `minSdk`
+  here is 24 — so `:app` sets `isCoreLibraryDesugaringEnabled = true` and depends on
+  `desugar_jdk_libs`. Without it the engine cannot run on Android 7 at all, and lint fails the
+  build with `NewApi` rather than letting it crash at runtime. The alternative was raising
+  `minSdk` to 26 and dropping those devices. Do not remove the desugaring dependency while
+  `minSdk < 26`.
 - **A file earns a place in `:planning-core` by being called by the planner**, not by being free
   of Android imports. `RowBackupCodec` is portable Kotlin and still does not belong there: it
   encodes Room cursor rows for a device backup, and neither the planning service nor iOS will

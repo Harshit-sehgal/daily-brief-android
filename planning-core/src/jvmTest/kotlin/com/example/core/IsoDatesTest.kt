@@ -2,13 +2,23 @@ package com.example.core
 
 import java.util.Calendar
 import java.util.TimeZone
+import kotlinx.datetime.TimeZone as CommonTimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
+/**
+ * The expectations are still built with `java.util.Calendar` on purpose.
+ *
+ * `IsoDates` no longer uses it — the parser is `kotlinx-datetime` now — so `Calendar` is an
+ * independent oracle rather than the implementation restating itself. If the port had changed
+ * any accepted shape or any resulting instant, these would fail.
+ */
 class IsoDatesTest {
 
   private val utc = TimeZone.getTimeZone("UTC")
   private val kolkata = TimeZone.getTimeZone("Asia/Kolkata")
+  private val utcZone = CommonTimeZone.UTC
+  private val kolkataZone = CommonTimeZone.of("Asia/Kolkata")
 
   private fun utcInstant(
     year: Int,
@@ -35,15 +45,15 @@ class IsoDatesTest {
         }
         .timeInMillis
 
-    assertEquals(expected, IsoDates.parse("2026-03-05", kolkata))
+    assertEquals(expected, IsoDates.parse("2026-03-05", kolkataZone))
   }
 
   @Test
   fun `a trailing Z is read as UTC`() {
-    assertEquals(utcInstant(2026, 3, 5, 10, 30), IsoDates.parse("2026-03-05T10:30:00Z", kolkata))
+    assertEquals(utcInstant(2026, 3, 5, 10, 30), IsoDates.parse("2026-03-05T10:30:00Z", kolkataZone))
     assertEquals(
       utcInstant(2026, 3, 5, 10, 30),
-      IsoDates.parse("2026-03-05T10:30:00.000Z", kolkata),
+      IsoDates.parse("2026-03-05T10:30:00.000Z", kolkataZone),
     )
   }
 
@@ -52,25 +62,25 @@ class IsoDatesTest {
     // 10:30+05:30 is 05:00 UTC, whatever zone the phone is in.
     assertEquals(
       utcInstant(2026, 3, 5, 5, 0),
-      IsoDates.parse("2026-03-05T10:30:00.000+05:30", utc),
+      IsoDates.parse("2026-03-05T10:30:00.000+05:30", utcZone),
     )
-    assertEquals(utcInstant(2026, 3, 5, 5, 0), IsoDates.parse("2026-03-05T10:30:00+0530", utc))
+    assertEquals(utcInstant(2026, 3, 5, 5, 0), IsoDates.parse("2026-03-05T10:30:00+0530", utcZone))
   }
 
   @Test
   fun `a timestamp without an offset is local wall-clock time`() {
-    assertEquals(utcInstant(2026, 3, 5, 10, 30), IsoDates.parse("2026-03-05T10:30:00", utc))
+    assertEquals(utcInstant(2026, 3, 5, 10, 30), IsoDates.parse("2026-03-05T10:30:00", utcZone))
   }
 
   @Test
   fun `unparseable input returns zero rather than a wrong date`() {
-    assertEquals(0L, IsoDates.parse("not a date", utc))
-    assertEquals(0L, IsoDates.parse("", utc))
-    assertEquals(0L, IsoDates.parse("2026-13-45", utc))
+    assertEquals(0L, IsoDates.parse("not a date", utcZone))
+    assertEquals(0L, IsoDates.parse("", utcZone))
+    assertEquals(0L, IsoDates.parse("2026-13-45", utcZone))
   }
 
   @Test
   fun `surrounding whitespace is ignored`() {
-    assertEquals(utcInstant(2026, 3, 5, 10, 30), IsoDates.parse("  2026-03-05T10:30:00Z  ", utc))
+    assertEquals(utcInstant(2026, 3, 5, 10, 30), IsoDates.parse("  2026-03-05T10:30:00Z  ", utcZone))
   }
 }

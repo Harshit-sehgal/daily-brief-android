@@ -37,6 +37,9 @@ kotlin {
       // JS and JVM variants), so the domain model keeps its @Entity metadata *and* lives in
       // commonMain. The app still owns the database; this module only owns the shape.
       api(libs.androidx.room.common)
+      // The engine's date maths. `api` because TimeZone appears in public signatures that
+      // :app and the future planning service both call.
+      api(libs.kotlinx.datetime)
     }
 
     val jvmShared = create("jvmShared") {

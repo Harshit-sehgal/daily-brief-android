@@ -67,6 +67,10 @@ android {
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
+    // The planning engine's dates are kotlinx-datetime, which is java.time-backed on Android.
+    // java.time arrived in API 26 and minSdk here is 24, so without this the engine cannot run
+    // on Android 7 at all. The alternative was raising minSdk to 26 and dropping those devices.
+    isCoreLibraryDesugaringEnabled = true
   }
 
   buildFeatures {
@@ -86,6 +90,7 @@ dependencies {
   // The scheduling engine and the domain model it operates on. The app is a consumer
   // of the planner now, not its owner.
   implementation(project(":planning-core"))
+  coreLibraryDesugaring(libs.desugar.jdk.libs)
 
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.activity.compose)
