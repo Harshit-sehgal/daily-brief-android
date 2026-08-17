@@ -101,6 +101,9 @@ class BriefingRepository(private val context: Context) {
 
   fun eventsForBoard(board: String): Flow<List<BriefingEvent>> = eventDao.getEventsForBoard(board)
 
+  // REDESIGN (docs/saas/09-server-invariants.md §1): this process-wide mutex becomes a
+  // per-tenant Postgres advisory lock with the provider fetch moved outside it. The property
+  // to preserve is that a source's rows and a concurrent user edit never interleave.
   suspend fun upsertEvent(event: BriefingEvent, markUserEdited: Boolean = true) =
     withContext(Dispatchers.IO) {
       SCHEDULE_MUTEX.withLock {

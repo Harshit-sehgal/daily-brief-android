@@ -25,6 +25,10 @@ import kotlinx.coroutines.flow.flowOn
  *
  * Ciphertext lives in an excluded SharedPreferences file; the non-exportable
  * AES key lives in Android Keystore and is not transferred to another device.
+ *
+ * REDESIGN (docs/saas/09-server-invariants.md §3): on the server this shape becomes a KMS
+ * envelope — data key per write, AAD bound to workspace + setting key, ciphertext never
+ * destroyed on a failed read. The device Keystore stays for device-local secrets.
  */
 class SecretStore(context: Context) {
   private val preferences =

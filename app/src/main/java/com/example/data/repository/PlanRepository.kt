@@ -1748,6 +1748,10 @@ class PlanRepository internal constructor(private val database: AppDatabase) {
       else -> before != null && after != null
     }
 
+  // REDESIGN (docs/saas/09-server-invariants.md §2): whole-row equality inside one SQLite
+  // transaction becomes SELECT ... FOR UPDATE on the audit entry plus the affected entities,
+  // with the same compare-and-set refusal. The comparison code itself moves to the server
+  // verbatim.
   private suspend fun matchesMutationState(
     mutation: PlanMutation,
     state: PlanMutationState?,
