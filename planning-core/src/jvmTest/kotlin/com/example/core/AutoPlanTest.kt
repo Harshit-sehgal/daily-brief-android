@@ -306,6 +306,173 @@ class AutoPlanTest {
     assertEquals(result, again)
   }
 
+  @Test
+  fun `a hard deadline truncates the search and names work that missed it`() {
+    val result =
+      AutoPlan.propose(
+        items =
+          listOf(
+            item("write", effort = 60, dueAt = monday + 11 * HOUR),
+            item("late", effort = 60, dueAt = monday - HOUR),
+          ),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies = emptyList(),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    val write = result.proposals.single { it.itemId == "write" }
+    assertTrue("a hard deadline never proposes past the due date", write.endAt <= monday + 11 * HOUR)
+    assertTrue(write.reason, write.reason.contains("ahead of its due date"))
+    val late = result.unplaced.single { it.itemId == "late" }
+    assertTrue(late.reason, late.reason.contains("due date has already passed"))
+  }
+
+  @Test
+  fun `a soft deadline plans past the due date but says so`() {
+    val result =
+      AutoPlan.propose(
+        items = listOf(item("write", effort = 180, dueAt = monday + 10 * HOUR)),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies = emptyList(),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+        deadlinePolicy = DeadlinePolicy.SOFT,
+      )
+
+    assertEquals(2, result.proposals.size)
+    assertTrue(
+      "a soft deadline never claims work is ahead of a due date it blows past",
+      result.proposals.none { it.reason.contains("ahead of its due date") },
+    )
+  }
+
+  @Test
+  fun `preferred order wins over due-date order without writing to the tasks`() {
+    val result =
+      AutoPlan.propose(
+        items =
+          listOf(
+            item("later", effort = 60, dueAt = monday + 3 * DAY, rank = 2),
+            item("sooner", effort = 60, dueAt = monday + DAY, rank = 1),
+          ),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies = emptyList(),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+        preferredOrder = listOf("later", "sooner"),
+      )
+
+    val later = result.proposals.single { it.itemId == "later" }
+    assertEquals(monday + 9 * HOUR, later.startAt)
+    // The later-due task took the first slot; the due-sooner task follows it.
+    val sooner = result.proposals.single { it.itemId == "sooner" }
+    assertTrue(sooner.startAt > later.startAt)
+  }
+
+  @Test
+  fun `a task too big for the range names the minutes that remain`() {
+    val result =
+      AutoPlan.propose(
+        items = listOf(item("write", effort = 2500)),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies = emptyList(),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    assertEquals(2400, result.proposals.sumOf { ((it.endAt - it.startAt) / 60_000L).toInt() })
+    val remainder = result.unplaced.single { it.itemId == "write" }
+    assertTrue(remainder.reason, remainder.reason.contains("100 minutes of it still have nowhere to go"))
+  }
+
+  @Test
+  fun `a remainder below the chunk floor is rounded off, not crammed in`() {
+    val result =
+      AutoPlan.propose(
+        items = listOf(item("write", effort = 135)),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies = emptyList(),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    val proposal = result.proposals.single()
+    assertEquals(120, minutes(proposal))
+    // Fifteen minutes is below the 30-minute floor, so the planner neither book a slot
+    // for it nor claims it needs one — sub-floor rounding is part of the chunk contract.
+    assertTrue(result.unplaced.isEmpty())
+  }
+
+  @Test
+  fun `a start constraint holds even when the working day opens earlier`() {
+    val result =
+      AutoPlan.propose(
+        items = listOf(item("write", effort = 60, startConstraint = monday + 11 * HOUR)),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies = emptyList(),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    val proposal = result.proposals.single()
+    assertEquals(monday + 11 * HOUR, proposal.startAt)
+  }
+
+  @Test
+  fun `milestones are not candidates and need no excuse`() {
+    val result =
+      AutoPlan.propose(
+        items = listOf(item("landmark", effort = 60, milestone = true)),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies = emptyList(),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    assertTrue(result.proposals.isEmpty())
+    assertTrue(result.unplaced.isEmpty())
+  }
+
+  @Test
+  fun `a range that ends before it starts is refused out loud`() {
+    val result =
+      AutoPlan.propose(
+        items = listOf(item("write", effort = 60)),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies = emptyList(),
+        schedule = schedule,
+        rangeStartMs = weekEnd,
+        rangeEndMs = monday,
+        nowMs = monday,
+      )
+
+    assertTrue(result.isEmpty)
+    assertEquals("That range ends before it starts.", result.explanation)
+  }
+
   private fun minutes(proposal: PlanProposal) = ((proposal.endAt - proposal.startAt) / 60_000L).toInt()
 
   private fun at(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =
@@ -322,6 +489,7 @@ class AutoPlanTest {
     rank: Long = 1,
     dueAt: Long? = null,
     startConstraint: Long? = null,
+    milestone: Boolean = false,
   ) =
     PlanItem(
       id = id,
@@ -333,6 +501,7 @@ class AutoPlanTest {
       locked = locked,
       dueAt = dueAt,
       startConstraint = startConstraint,
+      isMilestone = milestone,
       createdAt = 1,
       updatedAt = 1,
     )
@@ -353,6 +522,7 @@ class AutoPlanTest {
     )
 
   private companion object {
-    const val DAY = 24 * 60 * 60 * 1000L
+    const val HOUR = 60 * 60 * 1000L
+    const val DAY = 24 * HOUR
   }
 }
