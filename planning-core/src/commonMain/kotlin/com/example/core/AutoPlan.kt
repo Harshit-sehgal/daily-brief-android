@@ -108,22 +108,25 @@ object AutoPlan {
             .thenBy { it.id }
         )
 
-    // Only finish-to-start is scheduled around for now; anything else is disclosed, not ignored.
-    val predecessors = mutableMapOf<String, MutableList<String>>()
+    // Generalized precedence, the same translation CriticalPathEngine uses: every dependency
+    // becomes successor-start >= predecessor-anchor + offset. FS anchors on the predecessor's
+    // finish, SS on its start; FF and SF subtract the successor's own duration because they
+    // bound its finish, and the planner places a task's whole stated effort, so that bound is
+    // exact. A predecessor with nothing scheduled yet contributes no bound — the greedy cannot
+    // honour a link to a task it has not placed, and says nothing rather than inventing a time.
+    val startByItem = mutableMapOf<String, Long>()
+    val finishByItem = mutableMapOf<String, Long>()
+    blocks.forEach { block ->
+      startByItem[block.planItemId] =
+        minOf(startByItem[block.planItemId] ?: Long.MAX_VALUE, block.startAt)
+      finishByItem[block.planItemId] =
+        maxOf(finishByItem[block.planItemId] ?: Long.MIN_VALUE, block.endAt)
+    }
+    val constraintsByItem = mutableMapOf<String, MutableList<PlanDependency>>()
     dependencies.forEach { dependency ->
       if (dependency.predecessorId !in byId || dependency.successorId !in byId) return@forEach
-      if (dependency.type == PlanDependencyType.FINISH_TO_START) {
-        predecessors.getOrPut(dependency.successorId) { mutableListOf() } += dependency.predecessorId
-      } else {
-        unplaced +=
-          UnplacedTask(
-            dependency.successorId,
-            "Depends on ${byId[dependency.predecessorId]?.title ?: "another task"} by a " +
-              "${dependency.type} link, which this planner does not schedule around yet.",
-          )
-      }
+      constraintsByItem.getOrPut(dependency.successorId) { mutableListOf() } += dependency
     }
-    val skipped = unplaced.map(UnplacedTask::itemId).toSet()
 
     // Time already spoken for: existing blocks and fixed commitments plus their buffer. The
     // buffer lives in WorkingCalendar.freeIntervals, the same single code path PlanHealth uses.
@@ -141,27 +144,48 @@ object AutoPlan {
         .toMutableList()
 
     val proposals = mutableListOf<PlanProposal>()
-    val finishByItem = mutableMapOf<String, Long>()
-    blocks.forEach { block ->
-      finishByItem[block.planItemId] =
-        maxOf(finishByItem[block.planItemId] ?: Long.MIN_VALUE, block.endAt)
-    }
 
-    candidates.filterNot { it.id in skipped }.forEach { item ->
+    candidates.forEach { item ->
       var remaining = requireNotNull(item.effortMinutes) - (scheduledMinutes[item.id] ?: 0)
-      val notBefore =
-        listOfNotNull(
-            earliest,
-            item.startConstraint?.let { maxOf(it, earliest) },
-            predecessors[item.id].orEmpty().mapNotNull { finishByItem[it] }.maxOrNull(),
-          )
-          .max()
+      var notBefore = listOfNotNull(earliest, item.startConstraint?.let { maxOf(it, earliest) }).max()
+      var blockingPhrase: String? = null
+      constraintsByItem[item.id].orEmpty().forEach { dependency ->
+        val predecessorId = dependency.predecessorId
+        val anchor =
+          when (dependency.type) {
+            PlanDependencyType.FINISH_TO_START -> finishByItem[predecessorId]
+            PlanDependencyType.START_TO_START -> startByItem[predecessorId]
+            PlanDependencyType.FINISH_TO_FINISH -> finishByItem[predecessorId]
+            PlanDependencyType.START_TO_FINISH -> startByItem[predecessorId]
+            else -> null
+          }
+        if (anchor == null) return@forEach
+        val durationAdjustmentMs =
+          if (dependency.type == PlanDependencyType.FINISH_TO_FINISH ||
+            dependency.type == PlanDependencyType.START_TO_FINISH
+          ) {
+            -requireNotNull(item.effortMinutes) * 60_000L
+          } else {
+            0L
+          }
+        val lagMs = dependency.lagMinutes * 60_000L
+        val bound =
+          runCatching {
+            GuardedArithmetic.addExact(GuardedArithmetic.addExact(anchor, durationAdjustmentMs), lagMs)
+          }.getOrNull()
+        if (bound != null && bound > notBefore) {
+          notBefore = bound
+          val title = byId.getValue(predecessorId).title
+          blockingPhrase =
+            when (dependency.type) {
+              PlanDependencyType.FINISH_TO_START, PlanDependencyType.FINISH_TO_FINISH ->
+                "after $title finishes"
+              else -> "from when $title starts"
+            }
+        }
+      }
       val notAfter =
         if (deadlinePolicy == DeadlinePolicy.HARD) item.dueAt else null
-      val blockedByName =
-        predecessors[item.id].orEmpty().firstOrNull { finishByItem.containsKey(it) }?.let {
-          byId[it]?.title
-        }
       var placedAny = false
 
       while (remaining >= schedule.minimumChunkMinutes) {
@@ -182,10 +206,9 @@ object AutoPlan {
                 append("First free ")
                 append(minutes)
                 append("-minute slot in your working time")
-                if (blockedByName != null) {
-                  append(" after ")
-                  append(blockedByName)
-                  append(" finishes")
+                if (blockingPhrase != null) {
+                  append(" ")
+                  append(blockingPhrase)
                 }
                 if (item.dueAt != null && end <= item.dueAt) {
                   append(", ahead of its due date")
@@ -195,6 +218,7 @@ object AutoPlan {
               },
           )
         taken += WorkingInterval(slot.startAt, end)
+        startByItem[item.id] = minOf(startByItem[item.id] ?: Long.MAX_VALUE, slot.startAt)
         finishByItem[item.id] = maxOf(finishByItem[item.id] ?: Long.MIN_VALUE, end)
         remaining -= minutes
         placedAny = true

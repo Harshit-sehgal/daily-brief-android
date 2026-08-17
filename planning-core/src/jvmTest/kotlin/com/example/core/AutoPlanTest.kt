@@ -112,23 +112,18 @@ class AutoPlanTest {
   }
 
   @Test
-  fun `a finish-to-start successor waits, and an unsupported link is disclosed`() {
-    val dependencies =
-      listOf(
-        dependency("d1", "first", "second", PlanDependencyType.FINISH_TO_START),
-        dependency("d2", "first", "third", PlanDependencyType.START_TO_START),
-      )
+  fun `a finish-to-start successor waits for the predecessor to end`() {
     val result =
       AutoPlan.propose(
         items =
           listOf(
             item("first", effort = 60, rank = 1),
             item("second", effort = 60, rank = 2),
-            item("third", effort = 60, rank = 3),
           ),
         blocks = emptyList(),
         fixedCommitments = emptyList(),
-        dependencies = dependencies,
+        dependencies =
+          listOf(dependency("d1", "first", "second", PlanDependencyType.FINISH_TO_START)),
         schedule = schedule,
         rangeStartMs = monday,
         rangeEndMs = weekEnd,
@@ -138,12 +133,130 @@ class AutoPlanTest {
     val firstEnd = result.proposals.single { it.itemId == "first" }.endAt
     val second = result.proposals.single { it.itemId == "second" }
     assertTrue("a successor cannot start before its predecessor ends", second.startAt >= firstEnd)
-    assertTrue(second.reason, second.reason.contains("after"))
+    assertTrue(second.reason, second.reason.contains("after first finishes"))
+  }
 
-    // The link type it cannot schedule around is said out loud rather than ignored.
-    val disclosed = result.unplaced.single { it.itemId == "third" }
-    assertTrue(disclosed.reason, disclosed.reason.contains("does not schedule around yet"))
-    assertTrue(result.proposals.none { it.itemId == "third" })
+  @Test
+  fun `a start-to-start successor may begin as soon as the predecessor does`() {
+    val result =
+      AutoPlan.propose(
+        items =
+          listOf(
+            item("first", effort = 60, rank = 1),
+            item("second", effort = 60, rank = 2),
+          ),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies =
+          listOf(dependency("d1", "first", "second", PlanDependencyType.START_TO_START)),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    val firstStart = result.proposals.single { it.itemId == "first" }.startAt
+    val second = result.proposals.single { it.itemId == "second" }
+    assertTrue("an SS successor may start from the predecessor's start", second.startAt >= firstStart)
+    assertTrue(second.reason, second.reason.contains("from when first starts"))
+  }
+
+  @Test
+  fun `a start-to-start lag pushes the successor past the predecessor's start plus the lag`() {
+    val result =
+      AutoPlan.propose(
+        items =
+          listOf(
+            item("first", effort = 60, rank = 1),
+            item("second", effort = 60, rank = 2),
+          ),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies =
+          listOf(
+            PlanDependency(
+              id = "d1",
+              boardId = "board",
+              predecessorId = "first",
+              successorId = "second",
+              type = PlanDependencyType.START_TO_START,
+              lagMinutes = 60,
+              createdAt = 1,
+              updatedAt = 1,
+            ),
+          ),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    val firstStart = result.proposals.single { it.itemId == "first" }.startAt
+    val second = result.proposals.single { it.itemId == "second" }
+    assertTrue("an SS lag delays the successor by the full lag", second.startAt >= firstStart + 60 * 60_000L)
+  }
+
+  @Test
+  fun `a finish-to-finish successor ends after the predecessor, lag included`() {
+    val result =
+      AutoPlan.propose(
+        items =
+          listOf(
+            item("first", effort = 60, rank = 1),
+            item("second", effort = 60, rank = 2),
+          ),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies =
+          listOf(
+            PlanDependency(
+              id = "d1",
+              boardId = "board",
+              predecessorId = "first",
+              successorId = "second",
+              type = PlanDependencyType.FINISH_TO_FINISH,
+              lagMinutes = 30,
+              createdAt = 1,
+              updatedAt = 1,
+            ),
+          ),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    val firstEnd = result.proposals.single { it.itemId == "first" }.endAt
+    val second = result.proposals.single { it.itemId == "second" }
+    assertTrue("an FF successor ends after its predecessor plus the lag", second.endAt >= firstEnd + 30 * 60_000L)
+  }
+
+  @Test
+  fun `a start-to-finish successor ends after the predecessor starts, however late the predecessor`() {
+    val result =
+      AutoPlan.propose(
+        items =
+          listOf(
+            item("first", effort = 60, rank = 1, startConstraint = at(2036, Calendar.FEBRUARY, 4, 14, 0)),
+            item("second", effort = 60, rank = 2),
+          ),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies =
+          listOf(dependency("d1", "first", "second", PlanDependencyType.START_TO_FINISH)),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    val firstStart = result.proposals.single { it.itemId == "first" }.startAt
+    val second = result.proposals.single { it.itemId == "second" }
+    assertEquals(at(2036, Calendar.FEBRUARY, 4, 14, 0), firstStart)
+    // Without the SF link the successor would sit at 09:00; with it, it must end after 14:00,
+    // so the greedy parks it at 13:00–14:00.
+    assertEquals(at(2036, Calendar.FEBRUARY, 4, 13, 0), second.startAt)
+    assertTrue(second.endAt >= firstStart)
   }
 
   @Test
@@ -208,6 +321,7 @@ class AutoPlanTest {
     locked: Boolean = false,
     rank: Long = 1,
     dueAt: Long? = null,
+    startConstraint: Long? = null,
   ) =
     PlanItem(
       id = id,
@@ -218,6 +332,7 @@ class AutoPlanTest {
       progress = progress,
       locked = locked,
       dueAt = dueAt,
+      startConstraint = startConstraint,
       createdAt = 1,
       updatedAt = 1,
     )
