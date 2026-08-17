@@ -6,12 +6,22 @@ framework.
 
 Two Gradle modules. `:app` is the Android app. `:planning-core` is the scheduling
 engine and the domain model it works on — extracted so a server can run the same
-code the phone runs. It is a Kotlin Multiplatform module whose `commonMain` is
-compiled against the common stdlib only, so anything placed there is provably
-portable; everything still needing JVM APIs sits in `jvmShared`, which both the
-`jvm` target and Android depend on. Moving a file from `jvmShared` to `commonMain`
-is the unit of porting work, and `docs/saas/05-kmp-portability-audit.md` tracks
-what is left.
+code the phone runs. It is a Kotlin Multiplatform module: `commonMain` holds the
+portable half, `jvmShared` holds everything still needing JVM APIs, and both the
+`jvm` target and Android depend on `jvmShared`. Moving a file from `jvmShared` to
+`commonMain` is the unit of porting work; `docs/saas/05-kmp-portability-audit.md`
+tracks what is left and why.
+
+**`commonMain` purity is enforced by a test, not by the compiler.** This is
+counter-intuitive and worth knowing before trusting a green build:
+`compileCommonMainKotlinMetadata` exists but is **SKIPPED**, because Kotlin only
+produces a metadata compilation once some target needs one, and `jvm` plus
+`androidTarget` are both JVM-family. A file importing `java.util.Calendar` in
+`commonMain` therefore compiles without complaint — confirmed by planting one.
+The check fails *open*, which is worse than absent, so `CommonMainPurityTest`
+reads the sources instead, the way `UiConsistencyTest` reads the UI. Adding a
+non-JVM target (Kotlin/Native is roughly a gigabyte, and not in the pinned
+toolchain) would hand the job back to the compiler.
 
 ## Build and test
 

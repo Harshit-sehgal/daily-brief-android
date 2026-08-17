@@ -32,13 +32,15 @@ kotlin {
   applyDefaultHierarchyTemplate()
 
   sourceSets {
+    getByName("commonMain").dependencies {
+      // Room's annotations are themselves multiplatform (room-common publishes iOS, wasm,
+      // JS and JVM variants), so the domain model keeps its @Entity metadata *and* lives in
+      // commonMain. The app still owns the database; this module only owns the shape.
+      api(libs.androidx.room.common)
+    }
+
     val jvmShared = create("jvmShared") {
       dependsOn(getByName("commonMain"))
-      dependencies {
-        // Annotations only. The Room entities still live here during the cutover;
-        // retiring this dependency is what unblocks the rest of commonMain.
-        implementation(libs.androidx.room.common)
-      }
     }
     getByName("jvmMain").dependsOn(jvmShared)
     getByName("androidMain").dependsOn(jvmShared)
