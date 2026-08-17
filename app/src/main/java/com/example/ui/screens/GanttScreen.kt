@@ -1068,38 +1068,57 @@ private fun GanttTable(
 
   LaunchedEffect(range.startInclusiveMs, rangeDays) { horizontalScroll.scrollTo(0) }
 
-  Box(modifier = modifier.fillMaxWidth().verticalScroll(verticalScroll)) {
+  // The date axis is pinned: it lives outside the vertical scroll so the rows move under it while
+  // the axis keeps the day the user is reading. It shares the canvas's horizontal ScrollState, so
+  // one gesture scrolls both in lockstep.
+  Column(modifier = modifier.fillMaxWidth()) {
     Row(modifier = Modifier.fillMaxWidth()) {
-      GanttLabels(
-        rows = rows,
-        formatter = formatter,
-        onEditEvent = onEditEvent,
-        onEditTask = onEditTask,
-        onSchedule = onSchedule,
-        onRevealAt = onRevealAt,
-        modifier = Modifier.width(labelWidth),
-      )
+      GanttLabelsHeader(modifier = Modifier.width(labelWidth))
       Box(
         modifier =
           Modifier.weight(1f)
-            .onSizeChanged { timelineViewportWidthPixels = it.width }
-            .pointerInput(rangeDays, selectedMoveBlockId) {
-              // Pinch is an accelerator for the range buttons, so it lands on 7, 30 or 90 and the
-              // buttons keep reporting the truth. Move mode owns the pointer instead.
-              if (selectedMoveBlockId != null) return@pointerInput
-              detectTransformGestures { centroid, _, zoom, _ ->
-                pinchScale *= zoom
-                val next = GanttZoom.rangeForScale(rangeDays, pinchScale)
-                if (next != rangeDays) {
-                  val width = size.width.toFloat().takeIf { it > 0f } ?: return@detectTransformGestures
-                  val focus = ((centroid.x + horizontalScroll.value) / width).coerceIn(0f, 1f)
-                  onZoom(next, focus)
-                  pinchScale = 1f
-                }
-              }
-            }
             .horizontalScroll(horizontalScroll, enabled = selectedMoveBlockId == null)
       ) {
+        GanttAxisRow(
+          ticks = ticks,
+          canvasWidth = canvasWidth,
+          defaultNonWorkingBands = defaultNonWorkingBands,
+          formatter = formatter,
+        )
+      }
+    }
+    Box(modifier = Modifier.fillMaxWidth().verticalScroll(verticalScroll)) {
+      Row(modifier = Modifier.fillMaxWidth()) {
+        GanttLabels(
+          rows = rows,
+          formatter = formatter,
+          onEditEvent = onEditEvent,
+          onEditTask = onEditTask,
+          onSchedule = onSchedule,
+          onRevealAt = onRevealAt,
+          modifier = Modifier.width(labelWidth),
+        )
+        Box(
+          modifier =
+            Modifier.weight(1f)
+              .onSizeChanged { timelineViewportWidthPixels = it.width }
+              .pointerInput(rangeDays, selectedMoveBlockId) {
+                // Pinch is an accelerator for the range buttons, so it lands on 7, 30 or 90 and the
+                // buttons keep reporting the truth. Move mode owns the pointer instead.
+                if (selectedMoveBlockId != null) return@pointerInput
+                detectTransformGestures { centroid, _, zoom, _ ->
+                  pinchScale *= zoom
+                  val next = GanttZoom.rangeForScale(rangeDays, pinchScale)
+                  if (next != rangeDays) {
+                    val width = size.width.toFloat().takeIf { it > 0f } ?: return@detectTransformGestures
+                    val focus = ((centroid.x + horizontalScroll.value) / width).coerceIn(0f, 1f)
+                    onZoom(next, focus)
+                    pinchScale = 1f
+                  }
+                }
+              }
+              .horizontalScroll(horizontalScroll, enabled = selectedMoveBlockId == null)
+        ) {
         GanttCanvas(
           focused = focused,
           rows = rows,
@@ -1147,6 +1166,7 @@ private fun GanttTable(
       }
     }
   }
+  }
 }
 
 @Composable
@@ -1162,17 +1182,6 @@ private fun GanttLabels(
   val d = LocalDensityTokens.current
   val colors = MaterialTheme.colorScheme
   Column(modifier = modifier.background(colors.surface)) {
-    Box(
-      modifier = Modifier.fillMaxWidth().height(AxisHeight).padding(horizontal = Space.sm),
-      contentAlignment = Alignment.CenterStart,
-    ) {
-      Text(
-        "WORK",
-        fontSize = d.label,
-        fontWeight = FontWeight.SemiBold,
-        color = colors.onSurfaceVariant,
-      )
-    }
     rows.forEach { row ->
       when (row) {
         is GanttDisplayRow.Group -> {
@@ -1285,6 +1294,72 @@ private fun GanttLabels(
 }
 
 /**
+ * The pinned column header above the rows: the "WORK" label, hoisted out of the vertical scroll
+ * together with the date axis so the reading column never scrolls away either.
+ */
+@Composable
+private fun GanttLabelsHeader(modifier: Modifier = Modifier) {
+  val d = LocalDensityTokens.current
+  val colors = MaterialTheme.colorScheme
+  Box(
+    modifier = modifier.height(AxisHeight).background(colors.surface).padding(horizontal = Space.sm),
+    contentAlignment = Alignment.CenterStart,
+  ) {
+    Text(
+      "WORK",
+      fontSize = d.label,
+      fontWeight = FontWeight.SemiBold,
+      color = colors.onSurfaceVariant,
+    )
+  }
+}
+
+/**
+ * The pinned date axis: the day ticks and non-working bands, hoisted out of the vertical scroll.
+ * It shares the canvas's horizontal scroll, so the dates stay over the days they name.
+ */
+@Composable
+private fun GanttAxisRow(
+  ticks: List<GanttLayout.Tick>,
+  canvasWidth: Dp,
+  defaultNonWorkingBands: List<NonWorkingBand>,
+  formatter: TimeFormatter,
+  modifier: Modifier = Modifier,
+) {
+  val d = LocalDensityTokens.current
+  val colors = MaterialTheme.colorScheme
+  Box(
+    modifier =
+      modifier
+        .width(canvasWidth)
+        .height(AxisHeight)
+        .ganttNonWorkingBands(defaultNonWorkingBands, colors.onSurface)
+        .drawBehind {
+          ticks.forEach { tick ->
+            val x = (tick.position * size.width).toFloat()
+            drawLine(
+              colors.outlineVariant,
+              start = androidx.compose.ui.geometry.Offset(x, 0f),
+              end = androidx.compose.ui.geometry.Offset(x, size.height),
+            )
+          }
+        }
+  ) {
+    ticks.filter { it.position < 0.995 }.forEach { tick ->
+      Text(
+        formatter.mediumDay(tick.timeMs),
+        fontSize = d.label,
+        color = colors.onSurfaceVariant,
+        modifier =
+          Modifier.offset(x = normalizedOffset(tick.position, canvasWidth))
+            .padding(start = 4.dp, top = Space.sm),
+        maxLines = 1,
+      )
+    }
+  }
+}
+
+/**
  * Links and slack, drawn as one overlay rather than per row.
  *
  * The overlay never takes pointer input: a dependency is edited in the ledger, where it can be
@@ -1294,7 +1369,6 @@ private fun GanttLabels(
 private fun GanttLinkOverlay(
   connectors: List<GanttConnector>,
   slackBands: List<GanttSlackBand>,
-  axisHeight: Dp,
   modifier: Modifier = Modifier,
 ) {
   val colors = MaterialTheme.colorScheme
@@ -1302,21 +1376,20 @@ private fun GanttLinkOverlay(
   val criticalColor = colors.error
   val slackColor = colors.primary
   Canvas(modifier = modifier) {
-    val axis = axisHeight.toPx()
     slackBands.forEach { band ->
       val left = (band.fromPosition * size.width).toFloat()
       val right = (band.toPosition * size.width).toFloat()
       drawRect(
         color = slackColor.copy(alpha = 0.12f),
-        topLeft = Offset(left, axis),
-        size = androidx.compose.ui.geometry.Size((right - left).coerceAtLeast(1f), size.height - axis),
+        topLeft = Offset(left, 0f),
+        size = androidx.compose.ui.geometry.Size((right - left).coerceAtLeast(1f), size.height),
       )
     }
     connectors.forEach { connector ->
       val fromX = (connector.fromPosition * size.width).toFloat()
       val toX = (connector.toPosition * size.width).toFloat()
-      val fromY = axis + connector.fromDp.dp.toPx()
-      val toY = axis + connector.toDp.dp.toPx()
+      val fromY = connector.fromDp.dp.toPx()
+      val toY = connector.toDp.dp.toPx()
       val color = if (connector.critical) criticalColor else linkColor
       val alpha = if (connector.critical) 0.75f else 0.45f
       val elbow = if (connector.backwards) fromX + 8.dp.toPx() else (fromX + toX) / 2f
@@ -1359,7 +1432,6 @@ private fun GanttCanvas(
   modifier: Modifier = Modifier,
   focused: Boolean,
 ) {
-  val d = LocalDensityTokens.current
   val colors = MaterialTheme.colorScheme
   // Rows are laid out in a column of known heights, so where each bar sits is arithmetic rather
   // than measurement. Doing it here keeps the link drawing in one place instead of per row.
@@ -1395,44 +1467,14 @@ private fun GanttCanvas(
       GanttDependencyPaths.slackBands(rowGeometry, slackMinutesByItemId, rangeMinutes)
     }
   LaunchedEffect(connectorPlan) { onConnectorsPlanned(connectorPlan) }
-  val totalHeight = remember(rows) { rows.fold(AxisHeight) { total, row -> total + displayRowHeight(row) } }
+  val totalHeight = remember(rows) { rows.fold(0.dp) { total, row -> total + displayRowHeight(row) } }
   Box(modifier = modifier) {
     GanttLinkOverlay(
       connectors = connectorPlan.connectors,
       slackBands = slackBands,
-      axisHeight = AxisHeight,
       modifier = Modifier.fillMaxWidth().height(totalHeight).testTag("gantt_link_overlay"),
     )
   Column {
-    Box(
-      modifier =
-        Modifier.fillMaxWidth()
-          .height(AxisHeight)
-          .ganttNonWorkingBands(defaultNonWorkingBands, colors.onSurface)
-          .drawBehind {
-            ticks.forEach { tick ->
-              val x = (tick.position * size.width).toFloat()
-              drawLine(
-                colors.outlineVariant,
-                start = androidx.compose.ui.geometry.Offset(x, 0f),
-                end = androidx.compose.ui.geometry.Offset(x, size.height),
-              )
-            }
-          }
-    ) {
-      ticks.filter { it.position < 0.995 }.forEach { tick ->
-        Text(
-          formatter.mediumDay(tick.timeMs),
-          fontSize = d.label,
-          color = colors.onSurfaceVariant,
-          modifier =
-            Modifier.offset(x = normalizedOffset(tick.position, canvasWidth))
-              .padding(start = 4.dp, top = Space.sm),
-          maxLines = 1,
-        )
-      }
-    }
-
     rows.forEach { row ->
       when (row) {
         is GanttDisplayRow.Group ->
