@@ -403,18 +403,27 @@ it is the authoritative current schema. Both constraints, the per-workspace re-s
 Room's global unique indexes, and the composite FKs are proven against a real Postgres 16 by
 `db/verify-schema.sh` — four refusals must appear or the script exits non-zero.
 
-## WP-11 — The four invariants that need redesign, not translation
+## WP-11 — The four invariants that need redesign, not translation  ✅ done (`f42b1e4`)
+
+Design in `docs/saas/09-server-invariants.md`; the four code sites carry `REDESIGN` markers.
 
 1. **`SCHEDULE_MUTEX`** is a process-wide `Mutex` holding provider I/O *inside* the lock. Server
-   form: per-tenant advisory lock with the network fetch **outside** it. Preserve the property —
-   reconciliation of a source's rows and a concurrent user edit must not interleave.
+   form: per-tenant advisory lock (`pg_advisory_xact_lock` over the workspace id) with the
+   network fetch **outside** it. Preserve the property — reconciliation of a source's rows and a
+   concurrent user edit must not interleave. The merge policy running at write time is *more*
+   correct than the device's fetch-start merge; `lock_timeout` bounds the wait.
 2. **Undo's staleness check** is whole-row value equality inside one SQLite transaction on a
-   single-writer database. Postgres needs `SERIALIZABLE` or `SELECT … FOR UPDATE` on the journal
-   row plus the affected entities.
+   single-writer database. Postgres form chosen: claim-the-entry `UPDATE … RETURNING` +
+   `SELECT … FOR UPDATE` on the affected entities in id order + the same
+   `matchesMutationState` comparison verbatim. `SERIALIZABLE` rejected: same guarantee, less
+   concurrency, retry loop; the one un-lockable predicate is already a partial unique index.
 3. **`SecretStore`** → KMS envelope encryption. Keep its design properties: AAD bound to the
-   setting key, never destroy ciphertext on a failed read.
+   setting key, never destroy ciphertext on a failed read. Data key per write, AAD extended to
+   workspace + key, `SECRET_SETTING_KEYS` routing carries over.
 4. **Gemini keys** move from per-user BYOK to a platform key with per-tenant quota. The browser
-   never receives a long-lived secret.
+   never receives a long-lived secret. Limits in `subscriptions.quota_json`; a monthly
+   `gemini_usage` ledger (lands with its consumer, WP-13); reserve-then-refuse. The device
+   keeps its local BYOK path.
 
 ## WP-12 — Freeze the planner API
 

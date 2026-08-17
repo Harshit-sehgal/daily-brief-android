@@ -197,10 +197,11 @@ Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
   index + work_schedules partial unique index become real constraints; source column
   types from `app/schemas/.../9.json`). `db/schema.sql`; proven by `db/verify-schema.sh`
   against docker postgres:16 (4 expected refusals or the script fails).
-- **WP-11** the four invariants redesigned: SCHEDULE_MUTEX → per-tenant advisory lock
-  with fetch outside; Undo staleness → SERIALIZABLE/FOR UPDATE; SecretStore → KMS
-  envelope (AAD bound to key, keep ciphertext on failed read); Gemini platform key +
-  per-tenant quota.
+- [x] **WP-11** the four invariants redesigned (docs/saas/09-server-invariants.md):
+  SCHEDULE_MUTEX → per-tenant advisory lock with fetch outside; Undo staleness →
+  claim-the-entry + FOR UPDATE (SERIALIZABLE rejected); SecretStore → KMS envelope
+  (AAD = workspace + key, keep ciphertext on failed read); Gemini platform key +
+  per-tenant quota (reserve-then-refuse). Code sites carry REDESIGN markers.
 - **WP-12** freeze the planner API: `PlanningRequest`/`PlanningResult`/
   `PlanProposal`/`PlanConflict`/`PlanHealth` as a versioned wire contract with
   round-trip tests. Nothing in Stage 3 starts until frozen.
