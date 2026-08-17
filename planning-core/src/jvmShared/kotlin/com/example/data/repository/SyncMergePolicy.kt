@@ -1,6 +1,5 @@
 package com.example.data.repository
 
-import com.example.data.api.DeviceCalendarSync
 import com.example.data.model.BriefingEvent
 
 /**
@@ -8,7 +7,12 @@ import com.example.data.model.BriefingEvent
  *
  * This is the one place where source data and hand edits meet, and getting it
  * wrong silently destroys the user's work — so it is pure, and tested directly
- * rather than only through a database.
+ * rather than only through a database. It moved out of the app (WP-13) so the
+ * server's reconciliation worker runs the same policy code: the platform only
+ * differs in how a stored row's provider id is recovered ([providerIdOf]).
+ *
+ * This is the only place that decides what a re-sync may overwrite. Change it
+ * with tests.
  */
 object SyncMergePolicy {
 
@@ -17,21 +21,26 @@ object SyncMergePolicy {
    *
    * Times and location always track the source of truth. Wording, priority flags
    * and board placement belong to whoever last touched them by hand.
+   *
+   * [providerIdOf] recovers the provider row id from a stored id — on the device that is
+   * `DeviceCalendarSync.providerEventId` (the `device_<id>_<begin>` convention), on the
+   * server it is the Google calendar's own row id. The policy itself is platform-neutral.
    */
   fun merge(
     incoming: List<BriefingEvent>,
     existingEvents: List<BriefingEvent>,
+    providerIdOf: (BriefingEvent) -> Long?,
   ): List<BriefingEvent> {
     val existingById = existingEvents.associateBy { it.id }
     val existingByProviderId =
       existingEvents
         .mapNotNull { event ->
-          DeviceCalendarSync.providerEventId(event.id)?.let { providerId -> providerId to event }
+          providerIdOf(event)?.let { providerId -> providerId to event }
         }
         .groupBy(keySelector = { it.first }, valueTransform = { it.second })
 
     return incoming.map { fresh ->
-      val prior = priorFor(fresh, existingById, existingByProviderId) ?: return@map fresh
+      val prior = priorFor(fresh, existingById, existingByProviderId, providerIdOf) ?: return@map fresh
       if (prior.userEdited) {
         fresh.copy(
           title = prior.title,
@@ -62,11 +71,10 @@ object SyncMergePolicy {
     fresh: BriefingEvent,
     existingById: Map<String, BriefingEvent>,
     existingByProviderId: Map<Long, List<BriefingEvent>>,
+    providerIdOf: (BriefingEvent) -> Long?,
   ): BriefingEvent? =
     existingById[fresh.id]
-      ?: DeviceCalendarSync.providerEventId(fresh.id)?.let { providerId ->
-        existingByProviderId[providerId]?.singleOrNull()
-      }
+      ?: providerIdOf(fresh)?.let { providerId -> existingByProviderId[providerId]?.singleOrNull() }
 
   /** Drops rows from other sources and collapses duplicate ids from one fetch. */
   fun scopedToSources(

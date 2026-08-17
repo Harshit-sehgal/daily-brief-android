@@ -322,7 +322,7 @@ class BriefingRepository(private val context: Context) {
   ): ReconcileResult {
     val existing = eventDao.getEventsBySources(sources)
     val merged =
-      SyncMergePolicy.merge(SyncMergePolicy.scopedToSources(incoming, sources), existing)
+      SyncMergePolicy.merge(SyncMergePolicy.scopedToSources(incoming, sources), existing, { DeviceCalendarSync.providerEventId(it.id) })
     val incomingIds = merged.mapTo(mutableSetOf()) { it.id }
     eventDao.clearEventsBySources(sources)
     if (merged.isNotEmpty()) eventDao.insertEvents(merged)
@@ -342,7 +342,7 @@ class BriefingRepository(private val context: Context) {
     val scopedIncoming =
       incoming.filter { it.startTime < endExclusive && it.endTime > startInclusive }
     val merged =
-      SyncMergePolicy.merge(SyncMergePolicy.scopedToSources(scopedIncoming, sources), existing)
+      SyncMergePolicy.merge(SyncMergePolicy.scopedToSources(scopedIncoming, sources), existing, { DeviceCalendarSync.providerEventId(it.id) })
     val incomingIds = merged.mapTo(mutableSetOf()) { it.id }
     eventDao.clearEventsBySourcesInRange(sources, startInclusive, endExclusive)
     if (merged.isNotEmpty()) eventDao.insertEvents(merged)
@@ -358,7 +358,7 @@ class BriefingRepository(private val context: Context) {
   ): ReconcileResult {
     val existing = eventDao.getEventsBySources(sources)
     val merged =
-      SyncMergePolicy.merge(SyncMergePolicy.scopedToSources(incoming, sources), existing)
+      SyncMergePolicy.merge(SyncMergePolicy.scopedToSources(incoming, sources), existing, { DeviceCalendarSync.providerEventId(it.id) })
     if (merged.isNotEmpty()) eventDao.insertEvents(merged)
     return ReconcileResult(writtenCount = merged.size)
   }

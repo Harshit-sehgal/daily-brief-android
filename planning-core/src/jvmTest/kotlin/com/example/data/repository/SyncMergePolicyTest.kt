@@ -7,6 +7,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SyncMergePolicyTest {
+  /** The device's `device_<providerId>_<rawBegin>` convention, exactly as in the app. */
+  private fun providerIdOf(event: BriefingEvent): Long? {
+    if (!event.id.startsWith("device_")) return null
+    return event.id.removePrefix("device_").substringBefore('_').toLongOrNull()
+  }
 
   private fun event(
     id: String,
@@ -52,7 +57,7 @@ class SyncMergePolicyTest {
       )
     val fresh = event(id = "device_7", startTime = 5_000L, endTime = 6_000L)
 
-    val merged = SyncMergePolicy.merge(listOf(fresh), listOf(stored)).single()
+    val merged = SyncMergePolicy.merge(listOf(fresh), listOf(stored), ::providerIdOf).single()
 
     assertEquals("My wording", merged.title)
     assertEquals("My note", merged.description)
@@ -79,7 +84,7 @@ class SyncMergePolicyTest {
       )
     val fresh = event(id = "device_7", title = "New source title")
 
-    val merged = SyncMergePolicy.merge(listOf(fresh), listOf(stored)).single()
+    val merged = SyncMergePolicy.merge(listOf(fresh), listOf(stored), ::providerIdOf).single()
 
     assertEquals("New source title", merged.title)
     // Flags the user never set follow the source; where they filed it does not.
@@ -94,7 +99,7 @@ class SyncMergePolicyTest {
       event(id = "device_7_1700000000000", title = "My wording", userEdited = true)
     val fresh = event(id = "device_7", title = "Source title")
 
-    val merged = SyncMergePolicy.merge(listOf(fresh), listOf(stored)).single()
+    val merged = SyncMergePolicy.merge(listOf(fresh), listOf(stored), ::providerIdOf).single()
 
     assertEquals("device_7", merged.id)
     assertEquals("My wording", merged.title)
@@ -110,7 +115,7 @@ class SyncMergePolicyTest {
       )
     val fresh = event(id = "device_7", title = "Source title")
 
-    val merged = SyncMergePolicy.merge(listOf(fresh), storedInstances).single()
+    val merged = SyncMergePolicy.merge(listOf(fresh), storedInstances, ::providerIdOf).single()
 
     assertEquals("Source title", merged.title)
     assertEquals(false, merged.userEdited)
@@ -120,7 +125,7 @@ class SyncMergePolicyTest {
   fun `a brand new event passes through untouched`() {
     val fresh = event(id = "device_9", title = "Source title")
 
-    assertEquals(listOf(fresh), SyncMergePolicy.merge(listOf(fresh), emptyList()))
+    assertEquals(listOf(fresh), SyncMergePolicy.merge(listOf(fresh), emptyList(), ::providerIdOf))
   }
 
   @Test
@@ -128,7 +133,7 @@ class SyncMergePolicyTest {
     val stored = event(id = "notion_a", title = "My wording", source = EventSource.NOTION, userEdited = true)
     val fresh = event(id = "notion_b", title = "Source title", source = EventSource.NOTION)
 
-    val merged = SyncMergePolicy.merge(listOf(fresh), listOf(stored)).single()
+    val merged = SyncMergePolicy.merge(listOf(fresh), listOf(stored), ::providerIdOf).single()
 
     assertEquals("Source title", merged.title)
   }
