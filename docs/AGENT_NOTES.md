@@ -18,40 +18,49 @@ Three roots: Home (now/next/conflicts), Calendar (Agenda/Timeline/Week), Plan
 (max-flow multi-schedule capacity — "the crown jewel"), dependencies/critical path,
 baselines, scenarios, portfolio rollups, journal + Undo.
 
-### The SaaS programme (`docs/saas/00-programme-plan.md`, branch `saas-extraction`)
+### The SaaS programme (`docs/saas/00-programme-plan.md`)
 - Thesis: intelligent planning for independent consultants (3–8 concurrent client
   projects). Positioning: *Know what you can commit to before you commit to it.*
 - Wedge: hybrid — auto-plan + Today free; project depth (Gantt, deps, capacity,
   baselines, scenarios) Pro, $19–29/mo (not locked).
 - Stack: Next.js web · TypeScript SaaS API · Kotlin/Ktor planner · Postgres · Expo
-  mobile. Current step is specification + engine extraction only.
-- Phase 0 committed (`fa89f56`, 203 files); Phase 1 `:planning-core` extraction done
-  (`3d05da8`, 47/60 files pure renames, package names preserved);
-  Phase 2 first `commonMain` migration done but **uncommitted** (domain model + 7 pure
-  files, 22% of engine portable, 1,233 lines).
-- Phases 3–7 not started. Verification: `scripts/verify.sh` (fast/full/--device),
-  `:planning-core:jvmTest` must be named explicitly or the engine suite is skipped.
-- KMP audit lives in `docs/saas/05-kmp-portability-audit.md` — does not exist yet,
-  must be written from §4 of the programme plan (Phase 2 checklist).
+  mobile. Current step is the portability project (Stage 1) on the road to the web V1.
+- Phase 0 committed (`fa89f56`); Phase 1 extraction (`3d05da8`); Phase 2 migrations
+  (`17cdc00`, `86e62ad`); Phase 5 codec untangling + `CriticalPathEngine` heap
+  (`f87635b`); Phase 3 contract tests (`b649ac7`); Phase 4 spec set (`b0ecbd3`);
+  engine defects 1/2/4/6 (`b11ad72`); **Stage 1.1 date-time port (`b436b1e`,
+  `e440cd3`)** — engine core 74% portable, whole module 59% (`c097596`).
+- Scope deviations: **all closed** — see `06-scope-deviations.md` (D1 resolved by
+  amending `02`, D2 accepted, D3/D4/D5/D7 fixed in code).
+- **Forward plan: `07-roadmap.md` (the why and order); execution detail:
+  `08-work-packages.md` (WP-1..WP-16 with files, steps, acceptance tests, traps).**
+- Verification: `scripts/verify.sh` (fast/full/--device), `:planning-core:jvmTest`
+  must be named explicitly or the engine suite is skipped.
+- Baseline (2026-08-17, WP-1 start): **222 engine tests / 30 suites, 179 app tests /
+  40 suites, zero failures.**
 
 ### Key technical facts that bite
 - `commonMain` purity is enforced by `CommonMainPurityTest` (source scan), NOT the
   compiler — `compileCommonMainKotlinMetadata` is SKIPPED (jvm + androidTarget are both
   JVM-family). Fails open; a planted `java.util.Calendar` import compiled silently.
-- All date maths is `java.util.Calendar`/`TimeZone`/`SimpleDateFormat` (8 files) — never
-  `java.time`. `WorkingCalendarTest` pins Calendar's DST tie-breaks: gap → next valid
-  minute (forward), fall-back → **later** standard-time occurrence (kotlinx-datetime and
-  `java.time` choose the earlier one). Porting naively flips a tested contract;
-  programme plan recommends explicit `AmbiguousLocalTime.LATER_OFFSET` policy.
+  WP-7 (non-JVM target) is what hands the job back to the compiler.
+- **The engine's dates are `kotlinx-datetime` 0.8.0** (adopted `b436b1e`). On Android it
+  is `java.time`-backed, which is why `:app` has `isCoreLibraryDesugaringEnabled` +
+  `desugar_jdk_libs` (minSdk 24 < java.time's API 26). `java.util.Calendar` is gone
+  from `commonMain`; its DST tie-breaks — gap → next valid minute, fall-back → **later**
+  standard-time occurrence — are now named code in `AmbiguousLocalTime.LATER_OFFSET`,
+  and `WorkingCalendarTest` pins them. `IsoDatesTest` still builds its expectations
+  with `java.util.Calendar` on purpose (jvmTest, allowed).
 - Every module compiles against SDK 37.1, never bare 37 (pinned SDK has only 37.1;
   `compileSdk = 37` downloads 37.0 silently and looks hung for ~13 min).
 - Kotlin does not smart-cast a `val` from another module — bind a local first
   (`val dayOfWeek = requireNotNull(row.dayOfWeek)`).
 - AGP 9: use `com.android.kotlin.multiplatform.library` (not `com.android.library`
   alongside KMP plugin); DSL is `androidLibrary { }` inside `kotlin { }`.
-- Journal codecs (`PlanMutationCodec` → `WorkingScheduleMutationCodec` →
-  `LegacyPlanCatalogBuilder`) are entangled with the Room migration file — queued as
-  Phase 5 untangling before they can move to `planning-core`.
+- The three journal codecs (`PlanMutationCodec`, `PlanCatalogMutationCodec`,
+  `WorkingScheduleMutationCodec`) are one sealed `PlanMutationState` hierarchy — they
+  move to `commonMain` together or not at all (WP-5), gated on `LegacyNameKeys` (WP-4,
+  `expect`/`actual` — stored NFKC name keys) and `WorkingCalendarMapper` (WP-6).
 - `room-common` is fully multiplatform → the domain model keeps `@Entity` in `commonMain`.
 - Toolchain pinned at `~/.local/android-toolchain` (JDK 21 + SDK); system `java` is 8,
   so `JAVA_HOME` must be set; Gradle runs `--offline` (deps cached). AGP 9.3.1, Gradle
@@ -97,9 +106,12 @@ baselines, scenarios, portfolio rollups, journal + Undo.
   ways). Harness is `@CaptureOnly`, never part of the gate.
 
 ### Open questions for the user (programme plan §9)
-1. Approve `AutoPlan` treating `dueAt` as a hard constraint?
-2. Kotlin/Native target (~1 GB) for compiler-enforced `commonMain`, or keep the source
-   scan test until iOS work starts?
+1. ~~Approve `AutoPlan` treating `dueAt` as a hard constraint?~~ **Approved and
+   implemented** (`b11ad72`, Defect 1; open question closed).
+2. ~~kotlinx-datetime absent from the offline cache~~ — **resolved by the toolchain
+   owner**: kotlinx-datetime 0.8.0 + desugar_jdk_libs 2.1.5 are cached and in use.
+   The remaining half is the Kotlin/Native target (~1 GB) for compiler-enforced
+   `commonMain` (WP-7) — the source-scan test stays the guard until then.
 3. Monorepo reshuffle ordering — `apps/ services/ packages/` deferred until the web
    app exists.
 
@@ -131,176 +143,134 @@ baselines, scenarios, portfolio rollups, journal + Undo.
 - Back leaves the mode, not the screen; keyboard shortcuts must claim key-down;
   manipulation targets may not overlap.
 
-## Remaining work — complete list (2026-08-17)
+## Remaining work — work-package tracker (2026-08-17, Stage 1)
 
-Consolidated from all plan docs. Grouped by stream; within a stream, ordered as the
-source orders it. Checkboxes are for tracking here, not in the canonical docs.
+The canonical forward plan is `docs/saas/07-roadmap.md`; execution detail is
+`docs/saas/08-work-packages.md`. This tracker mirrors the WP list so a session can
+start from a one-line status. Do each package as its own commit, green before commit.
 
-### A. SaaS programme — Phase 2 finish (next per programme plan §7)
+```
+WP-1 ScheduleAnalysis ──┬── WP-2 the six files it gates
+                        └── WP-8 remove the NotionClient bridge
+WP-3 GanttInteraction   (independent, small)
+WP-4 LegacyNameKeys ────┬── WP-5 journal codecs (needs WP-6 too)
+WP-6 WorkingCalendarMapper ─┘
+WP-7 non-JVM target     (after WP-1..WP-6; makes the guard redundant)
+WP-9 engine defects     (independent; defect 3 wants user confirmation)
+Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
+```
 
-- [x] Add a guarded-arithmetic helper to `commonMain`; move `DependencyAnalysis`
-      (+257 lines → ~26% portable). Trivial class: `Math.addExact` →
-      guarded helper, `Math.floorMod` → `a.mod(b)`.
-- [x] Write `docs/saas/05-kmp-portability-audit.md` from programme plan §4.
-- [x] Run `scripts/verify.sh`. **Commit not made** — the user has not asked for one;
-      everything is left in the working tree (and the §3 correction to the `3d05da8`
-      claim is documented in the audit doc instead of the plan).
+### Stage 1 status
 
-### B. SaaS programme — Phase 3: engine contract tests
+- [ ] **WP-1** Port `ScheduleAnalysis` to `commonMain` (374 lines; the last root
+      blocker in `core/`, gating 861). Needs `kotlinx-datetime` + common SHA-256 for
+      `signature` (decision (a) — keep the daily-brief cache key byte-identical) +
+      `TimeZone` param type change across ~10 `:app` files. Signature fixture test
+      first. **Next up.**
+- [ ] **WP-2** Move the six files: `GanttLayout` (BigDecimal/BigInteger — keep the
+      Long-limit stability, `GanttLayoutTest` pins it), `PlanGanttLayout`,
+      `TimelineLayout`, `DayPulse`, `GanttZoom`, `PortfolioGantt`.
+- [ ] **WP-3** `GanttInteraction` off `java.io.Serializable` (Compose `Saver` in
+      `:app`, copy `NullableEventDraftSaver` shape) → 108 lines to `commonMain`.
+- [ ] **WP-4** `LegacyNameKeys` via `expect`/`actual` — fixture test of known
+      input→output pairs FIRST (NFKC name keys are stored on rows and compared on
+      Undo; `stableId` derives v5 import IDs). JVM actual stays byte-identical.
+- [ ] **WP-5** The three journal codecs (1,530 lines) as one unit — sealed
+      `PlanMutationState` cannot span source sets. Needs WP-4 + WP-6.
+- [ ] **WP-6** `WorkingCalendarMapper` off `Calendar` (239 lines; Sunday-is-1
+      convention preserved). Can precede WP-4; WP-5 needs both.
+- [ ] **WP-7** Non-JVM target (linuxX64 ~1 GB) so `compileCommonMainKotlinMetadata`
+      stops being SKIPPED. Offline cache risk; do last; keep
+      `CommonMainPurityTest` as the fast duplicate.
+- [ ] **WP-8** Delete the `NotionClient` `commonZone` bridge (line ~76) once
+      `ScheduleAnalysis` speaks kotlinx-datetime. Trivial.
+- [ ] **WP-9** Defects 3 (SS/FF/SF — confirm wanted first), 5 (benchmark 800 tasks /
+      4 weeks, then optimise), 7 (grow `AutoPlan` coverage toward 17 cases).
 
-- [x] Canonical scenarios pinning *current* behaviour so Android/iOS/server divergence
-      is caught: working calendars (both DST edges), dependencies (all four types),
-      critical path and slack, deadline feasibility, multi-schedule capacity, plan
-      health, conflict handling, auto-plan determinism. *(Existing per-area suites
-      already pin most; `EngineContractTest` adds the planner-level DST week, explicit
-      preferred-order determinism, and more.)*
-- [x] Characterisation test for defect 1 (missing deadline constraint) that documents
-      the behaviour rather than asserting it is correct.
+### Stage 2+ (not started)
 
-### C. SaaS programme — Phase 4: the specification set (published as an Artifact)
+- **WP-10** multi-tenant Postgres schema (tenancy from day one; `saved_views` unique
+  index + work_schedules partial unique index become real constraints; source column
+  types from `app/schemas/.../9.json`).
+- **WP-11** the four invariants redesigned: SCHEDULE_MUTEX → per-tenant advisory lock
+  with fetch outside; Undo staleness → SERIALIZABLE/FOR UPDATE; SecretStore → KMS
+  envelope (AAD bound to key, keep ciphertext on failed read); Gemini platform key +
+  per-tenant quota.
+- **WP-12** freeze the planner API: `PlanningRequest`/`PlanningResult`/
+  `PlanProposal`/`PlanConflict`/`PlanHealth` as a versioned wire contract with
+  round-trip tests. Nothing in Stage 3 starts until frozen.
+- **WP-13..16** vertical slice (90-second magic moment is the acceptance test),
+  Google Calendar sync worker, depth + paid tier, Expo mobile. Summarised in `08`;
+  plan properly when Stage 2 closes.
 
-- [x] `01-product-teardown.md` — every capability → KEEP/REDESIGN/MERGE/LATER/DELETE,
-      anchored to file paths, filtered by consultant ICP.
-- [x] `02-v1-product-spec.md` — IA (Today · Planner · Inbox · Projects →
-      Tasks/Board/Timeline · Capacity · Integrations · Settings), progressive
-      disclosure, onboarding + 90-second magic moment, replan loop, tier boundary,
-      "not in V1" list.
-- [x] `03-domain-and-architecture.md` — multi-tenant Postgres model, Room→Postgres
-      mapping, service architecture, four invariants needing redesign (SCHEDULE_MUTEX →
-      per-tenant advisory lock with fetch outside it; Undo staleness → SERIALIZABLE /
-      FOR UPDATE; SecretStore → KMS/envelope with AAD; app-code constraints → real
-      Postgres constraints incl. partial unique index on one non-archived default).
-      New entity: `Client`. Security: platform Gemini key with per-tenant quota,
-      server-side OAuth — changes `activeGeminiKey()` and the Gemini settings surface.
-- [x] `04-planner-api-contract.md` — `PlanningRequest` / `PlanningResult` /
-      `PlanProposal` / `PlanConflict` / `PlanHealth` from the real signatures.
-- [x] `05-kmp-portability-audit.md` — programme plan §4, kept current (same as A).
+### Product / HCI (not part of the WP flow)
 
-### D. SaaS programme — Phase 5: the portability project
+- Product: PREMIUM_PRODUCT_PLAN Phase 3 (change digest, weekly review), Phase 4
+  leftovers (change log/restore points/audit UI, timestamped exports + print,
+  shortcuts, notification actions, deterministic restore preview), Phase 2
+  (pinch zoom, minimap, Today jump, canvas dependency creation), typography QA.
+- HCI evidence: 16 KB AVD not recordable on this host (125/129 once; system_server
+  crash-loops — needs a healthier host); API 24 rendered inspection; physical
+  devices; manual AT passes; boundary matrix 599/600…1599/1600; 200% text; T1–T11;
+  RTL/long text; process death at every edit point.
 
-- [x] Untangle `PlanMutationCodec` → `WorkingScheduleMutationCodec` →
-      `LegacyPlanCatalogBuilder` (split the pure builder out of the Room migration
-      file), then move journal codecs + 3 test files to `planning-core`.
-- [x] Replace `PriorityQueue` in `CriticalPathEngine` (716 lines; must reproduce the
-      lexicographic min-heap determinism exactly).
-- [ ] The date-time cluster: `WorkingCalendar`, `ScheduleAnalysis`, `IsoDates`,
-      `TimelineLayout`, `DayPulse`, `GanttLayout` (1,291 lines) — with the §5 DST
-      decision made explicitly (`AmbiguousLocalTime.LATER_OFFSET`); also
-      `ScheduleAnalysis.signature` SHA-256 (or brief cache key changes) and
-      `GanttLayout`'s BigDecimal/BigInteger stability near Long limits.
-      Leverage: clearing `WorkingCalendar` unblocks 1,894 lines downstream; clearing
-      `ScheduleAnalysis` unblocks 792. **Blocked this session: `kotlinx-datetime` is
-      not in the offline Gradle cache and has no TZ engine anyway; a zone-offset
-      engine is its own project. Needs the toolchain owner's decision (open
-      question 2).**
-- [x] Split `GanttInteraction`: `GanttBlockEditPolicy` / `GanttWorkingBands` are
-      domain; `GanttDirectManipulationPolicy` / `GanttDirectManipulationTargets` are
-      touch geometry → back in `:app`.
-- [ ] Optional: add Kotlin/Native or wasm target (~1 GB toolchain) so the compiler
-      enforces `commonMain`; `CommonMainPurityTest` becomes a fast duplicate.
+### Assessed UI items (PRINCIPLES §4b — kept for the record)
 
-### E. SaaS programme — Phase 6: engine defects (with user approval)
-
-- [x] Defect 1: `AutoPlan` treats `dueAt` as a hard constraint — explicitly approved
-      behaviour change, tests first. (`b11ad72`: `DeadlinePolicy` SOFT/HARD, HARD
-      default; placement clamped via `nextSlot(..., notAfter = dueAt)`; remainder named
-      "…past its due date". Contract tests in `EngineContractTest`.)
-- [x] Defect 2: `AutoPlan` honours `item.startConstraint`. (`b11ad72`: per-task
-      `notBefore` fed into placement; contract test covers a task that must not start
-      before noon.)
-- [x] Defect 4: all-day events no longer become full-day hard blocks (ViewModel feeds
-      every calendar row into `fixedCommitments`; filter like
-      `ScheduleAnalysis.findConflicts` does). (`b11ad72`: new
-      `ScheduleAnalysis.fixedCommitments()` filter + tests; all three ViewModel call
-      sites switched.)
-- [x] Defect 6: one buffer code path (`AutoPlan` vs `PlanHealth.freeIntervals`).
-      (`b11ad72`: AutoPlan's buffer path now consumes `WorkingCalendar.freeIntervals`
-      with the same min-space logic.)
-- (Defect 3: SS/FF/SF scheduling; Defect 5: O(tasks × chunks × free × taken); Defect 7:
-  inverted test coverage — recorded, no committed order.)
-
-### F. SaaS programme — Phase 7: the vertical slice (after model/engine frozen)
-
-- [ ] login → connect calendar → create tasks → "Plan my week" → valid schedule →
-      apply; then AI assistant (interprets/explains; deterministic code validates and
-      commits), billing, email, analytics, observability. Monorepo reshuffle
-      (`apps/ services/ packages/`) deferred until the web app exists (open question 3).
-
-### G. Product — PREMIUM_PRODUCT_PLAN open phase items
-
-- [ ] Phase 3: explainable scheduling engine proposals, scenario comparison, change
-      digest, weekly review. *(Capacity slice done.)*
-- [x] Phase 4 (partial): cross-board portfolio Gantt and rollups (`181f4cb` —
-      `PortfolioGantt` projector + tests, ViewModel `portfolioTimeline`, Portfolio
-      dialog Rollup/Timeline tabs, 14-day range); widgets (`a5bc8c1` — home-screen
-      Today widget, refresh broadcast from `sync()`); PDF export (`a5bc8c1` —
-      `PdfPlanExporter`/`PdfPlanLayout`, A4, CreateDocument launcher); encrypted
-      backup/restore (`43dea69` — `RowBackupCodec`, `BackupManager`, purpose-bound
-      SecretStore AES-GCM, `.dbb` files, restore preview via full wipe preview).
-      Still open: change log / restore points / audit UI, timestamped exports + print
-      layouts, shortcuts, notification actions, deterministic restore preview.
-- [ ] Phase 2: pinch zoom, minimap, Timeline/minimap Today jump, dependency creation
-      on the canvas. *(Most of the rest of Phase 2 is marked done.)*
-- [ ] Typography: Atkinson Hyperlegible / IBM Plex Mono remain candidates only after
-      font licensing, glyph, weight, fallback, rendering and 200% text QA.
-
-### H. HCI evidence still open (REDESIGN §8D/§12 PENDING rows, PRINCIPLES §5)
-
-- [ ] API 37.1 / 16 KB execution on `dailybrief_api37_1_16k` AVD — attempted
-      2026-08-17; host cannot hold it (system_server crash-looping during installs and
-      mid-run; one complete pass saw 125/129, the failures being the locked-user
-      launch condition). Needs a healthier host; the API 36 AVD is the recorded gate.
-- [ ] Rendered inspection at API 24 (CI runs instrumentation there, local proof does not).
-- [ ] Physical-device calendar read/write for supported providers + read-only/refused
-      calendars; provider refusal wording on a real provider.
-- [ ] Manual assistive-technology passes: TalkBack linear navigation, Switch Access,
-      Voice Access label targeting.
-- [ ] Hardware keyboard, mouse, trackpad, stylus behaviour.
-- [ ] 200% font size, display scaling, dark mode, high contrast, reduced motion, RTL,
-      at least one long-localized-text pass.
-- [ ] Exact adaptive/state matrix: 599/600, 839/840, 1199/1200, 1599/1600 dp live
-      resize; focus + draft + selection preservation across recreation; vertical
-      focus/horizontal time anchor by stable ID.
-- [ ] Process death during edit, drag preview, commit, provider write, Undo.
-- [ ] Task-based usability sessions T1–T11, incl. at least one screen-reader or switch
-      user before accessibility sign-off.
-- [ ] Rendered empty/loading/permission/refusal/conflict/offline state matrix for the
-      *older* screens (predates this work, never inspected as a matrix).
-
-### I. Known open UI items (PRINCIPLES §4b)
-
-- [x] Home's greeting is decoration — largest text on screen, least useful; a root
-      title naming the day's shape would earn the space. *(Assessed: the greeting
-      already exists as `greeting(nowMs, name)` in `HomeScreen.kt:897`; the item is
-      about its *content*. Kept open in spirit — any day-shape title change is a
-      wording decision for the user.)*
-- [x] Settings opens six accordions on a list that fits; several categories are two
-      rows now and opening one closes another. *(Assessed: `SettingsDisclosure`
-      accordions already exist in `SettingsScreen.kt:242`. The open question is
-      whether the default-open categories still deserve it — a product call, no
-      code defect.)*
-- [x] Gantt date axis scrolls away with the rows (P24 "not done, named rather than
-      glossed"): pinning needs hoisting the axis out of the vertical scroll while
-      keeping shared horizontal scroll; the dependency overlay assumes axis-inside —
-      a real refactor of the most intricate layout. **Done 2026-08-17** — axis and
-      "WORK" header hoisted into a pinned row sharing the canvas's `ScrollState`;
-      `GanttAxisRow`/`GanttLabelsHeader` added, overlay y-offsets now row-relative.
-      Evidence: `scripts/verify.sh --device` green incl. `ScheduleMapPage`,
-      `ScheduleMapProportion`, `GanttSmallScreen`, `GanttDirectManipulation` suites;
-      `preview.html` recaptured.
-
-### Open questions for the user (programme plan §9)
-
-1. ~~Approve `AutoPlan` treating `dueAt` as a hard constraint (behaviour change)?~~
-   **Approved and implemented** (`b11ad72`, Defect 1; open question closed).
-2. Kotlin/Native target (~1 GB) for compiler-enforced `commonMain`, or source scan
-   test until iOS work starts?
-3. Monorepo reshuffle ordering — deferred until the web app exists; confirm.
+- Home's greeting is decoration — assessed: `greeting(nowMs, name)` already exists
+  (`HomeScreen.kt:897`); the item is about its *content*. Any day-shape title change
+  is a wording decision for the user.
+- Settings' six accordions — assessed: `SettingsDisclosure` accordions already exist
+  (`SettingsScreen.kt:242`); whether default-open categories still deserve it is a
+  product call, no code defect.
+- Gantt date axis (P24) — **done 2026-08-17**: axis + "WORK" header hoisted into a
+  pinned row sharing the canvas's `ScrollState`; overlay y-offsets now row-relative.
+  Evidence: `--device` green incl. `ScheduleMapPage`, `ScheduleMapProportion`,
+  `GanttSmallScreen`, `GanttDirectManipulation`; `preview.html` recaptured.
 
 ## Work log
 
 (Updates from here on. Each entry: date, what changed, evidence — same discipline as
 the canonical docs: name the test or command that proves a claim.)
+### 2026-08-17 (user's pass) — deviations closed, roadmap + work packages, date-time port
+
+**`d238f75`** — reconciled docs with the tree; opened `06-scope-deviations.md`
+(seven entries: D1 widget/PDF/backup built against the V1 exclusion list — resolved
+by *amending `02`* to separate Android surface from web V1 scope, code kept;
+D2 deadline change accepted and recorded in `00` §6; D3 `RowBackupCodec` moved back
+to `:app`; D4 jvmTest inputs declared for the source-reading purity test; D5
+`SavedViewCodec` + `WorkScheduleDefaults` to commonMain; D6 aligned work; D7 the
+audit's method — only the compiler is authoritative).
+
+**`5250c5a`** — closed the deviations and wrote `07-roadmap.md`: Stage 1 portability
+(1.1 date-time cluster, 1.2 `signature`, 1.3 journal codecs, 1.4 compiler purity),
+Stage 2 domain model + server contract (schema, four invariants, frozen planner API),
+Stage 3 vertical slice (90-second magic moment is the acceptance test), Stage 4 depth
++ paid tier, Stage 5 mobile (local engine previews; server authoritative for Apply).
+
+**`b436b1e`** — date-time port started: `kotlinx-datetime` 0.8.0 +
+`desugar_jdk_libs` 2.1.5 (toolchain owner added them to the cache — open question 2
+resolved); `:app` gains `isCoreLibraryDesugaringEnabled` (minSdk 24 vs java.time's
+API 26); `IsoDates` → commonMain (regex replaces the SimpleDateFormat stack;
+accepted shapes and failure mode unchanged; `IsoDatesTest` still builds expectations
+with `java.util.Calendar` on purpose).
+
+**`e440cd3`** — `WorkingCalendar` → commonMain, releasing `PlanHealth`,
+`MultiSchedulePlanHealth`, `AutoPlan`, `PlanBlockPreview`, `PlanScenarios` (1,633
+lines). The inherited DST policy is now named code: `AmbiguousLocalTime.LATER_OFFSET`
+(gap → next valid minute; fall-back → later, standard-time occurrence — what
+`java.util.Calendar` did, and what kotlinx/java.time do *not*). Both pinned
+`WorkingCalendarTest` DST cases pass unchanged.
+
+**`c097596`** — audit re-measured against the tree: engine core 34.7% → **74%**,
+whole module 33% → **59%**; `ScheduleAnalysis` is the only root blocker in `core/`,
+gating 861 lines.
+
+**`c7c4faa`** — `08-work-packages.md`: WP-1..WP-16 with files, steps, acceptance
+tests and traps; three-agent parallel split (A: WP-1→2→8; B: WP-4→6→5; C: WP-3,
+WP-9; WP-7 last).
+
+Baseline verified at WP-1 start: 222 engine / 179 app tests, 0 failures.
+
 ### 2026-08-17 (second) — engine defects 1/2/4/6 + Phase 4 features + device gate
 
 **Engine defects (`b11ad72`).**
