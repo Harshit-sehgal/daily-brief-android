@@ -1,7 +1,7 @@
 package com.example.data.api
 
 import java.util.Calendar
-import java.util.TimeZone
+import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -30,7 +30,7 @@ class NotionClientTest {
 
   @Test
   fun `date-only item becomes a DST-safe all-day window`() {
-    val losAngeles = TimeZone.getTimeZone("America/Los_Angeles")
+    val losAngeles = TimeZone.of("America/Los_Angeles")
 
     val window =
       parseNotionDateWindow(NotionDateCandidate("Date", "2026-03-08"), losAngeles)!!
@@ -43,7 +43,7 @@ class NotionClientTest {
 
   @Test
   fun `timed item without an end gets a one-hour window`() {
-    val utc = TimeZone.getTimeZone("UTC")
+    val utc = TimeZone.of("UTC")
 
     val window =
       parseNotionDateWindow(
@@ -57,7 +57,7 @@ class NotionClientTest {
 
   @Test
   fun `invalid explicit date range is rejected instead of invented`() {
-    val utc = TimeZone.getTimeZone("UTC")
+    val utc = TimeZone.of("UTC")
 
     assertNull(
       parseNotionDateWindow(
@@ -77,7 +77,7 @@ class NotionClientTest {
     day: Int,
     zone: TimeZone,
   ): Long =
-    Calendar.getInstance(zone)
+    Calendar.getInstance(java.util.TimeZone.getTimeZone(zone.id))
       .apply {
         clear()
         set(year, month - 1, day, 0, 0, 0)

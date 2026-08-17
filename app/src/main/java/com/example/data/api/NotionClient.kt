@@ -2,12 +2,11 @@ package com.example.data.api
 
 import android.util.Log
 import com.example.core.IsoDates
-import kotlinx.datetime.toKotlinTimeZone
+import kotlinx.datetime.TimeZone
 import com.example.core.ScheduleAnalysis
 import com.example.data.model.BriefingEvent
 import com.example.data.model.EventSource
 import java.util.Locale
-import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -63,34 +62,30 @@ internal fun selectNotionDateCandidate(
 /** Maps a Notion date property to a half-open event window. */
 internal fun parseNotionDateWindow(
   candidate: NotionDateCandidate,
-  fallbackTimeZone: TimeZone = TimeZone.getDefault(),
+  fallbackTimeZone: TimeZone = TimeZone.currentSystemDefault(),
 ): NotionDateWindow? {
   val startRaw = candidate.start.trim()
   val endRaw = candidate.end.trim()
   if (startRaw.isEmpty()) return null
 
   val zone = candidate.timeZoneId?.let(::notionTimeZoneOrNull) ?: fallbackTimeZone
-  // IsoDates has moved to commonMain and speaks kotlinx-datetime; ScheduleAnalysis has not yet.
-  // The conversion is exact — no fallback zone, so a bad id still fails rather than silently
-  // becoming UTC. Remove once the whole date-time cluster has moved.
-  val commonZone = zone.toZoneId().toKotlinTimeZone()
-  val startMs = IsoDates.parse(startRaw, commonZone)
+  val startMs = IsoDates.parse(startRaw, zone)
   if (startMs == 0L) return null
 
   val allDay = DATE_ONLY.matches(startRaw) && (endRaw.isEmpty() || DATE_ONLY.matches(endRaw))
   if (allDay) {
     // Notion's end is the last calendar date shown in its inclusive date-range UI;
     // our storage/query convention is an exclusive end.
-    val lastDay = if (endRaw.isEmpty()) startMs else IsoDates.parse(endRaw, commonZone)
+    val lastDay = if (endRaw.isEmpty()) startMs else IsoDates.parse(endRaw, zone)
     if (lastDay == 0L || lastDay < startMs) return null
     return NotionDateWindow(
       startMs = startMs,
-      endExclusiveMs = ScheduleAnalysis.startOfDayOffset(lastDay, 1, commonZone),
+      endExclusiveMs = ScheduleAnalysis.startOfDayOffset(lastDay, 1, zone),
       isAllDay = true,
     )
   }
 
-  val endMs = if (endRaw.isEmpty()) startMs + HOUR_MS else IsoDates.parse(endRaw, commonZone)
+  val endMs = if (endRaw.isEmpty()) startMs + HOUR_MS else IsoDates.parse(endRaw, zone)
   if (endMs <= startMs) return null
   return NotionDateWindow(startMs, endMs, isAllDay = false)
 }
@@ -98,8 +93,11 @@ internal fun parseNotionDateWindow(
 private fun notionTimeZoneOrNull(id: String): TimeZone? {
   val clean = id.trim()
   if (clean.isEmpty()) return null
-  val zone = TimeZone.getTimeZone(clean)
-  return zone.takeIf { it.id != "GMT" || clean.equals("GMT", true) || clean.equals("UTC", true) }
+  // kotlinx rejects unknown ids outright (no silent GMT fallback), which is stricter than
+  // java.util.TimeZone's behaviour and exactly what a source of truth should be.
+  return runCatching { TimeZone.of(clean) }
+    .getOrNull()
+    ?.takeIf { it.id == clean || clean.equals("GMT", true) || clean.equals("UTC", true) }
 }
 
 object NotionClient {
