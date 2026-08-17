@@ -30,8 +30,13 @@ scripts/verify.sh --device    # ...plus instrumentation on the `dailybrief` AVD
 
 `scripts/verify.sh` is the same task list CI runs. **A change is not done until it is green.**
 
-Current baseline, so you can tell whether you broke something: **222 engine tests / 30 suites,
-179 app tests / 40 suites, zero failures.** Engine core **74% portable**, whole module **59%**.
+Current baseline, so you can tell whether you broke something: **243 engine tests / 34 suites,
+179 app tests / 40 suites, zero failures.** The engine core is **100% portable** — `core/` has no
+files left in `jvmShared`, and the whole module is **99%** (11 lines remain: the JVM `actual` for
+`LegacyNameKeys`).
+
+**Stage 1 is complete.** WP-1 through WP-9 are done. Start at WP-10 unless a package below says
+otherwise.
 
 ### Seven traps that have already cost time
 
@@ -46,10 +51,15 @@ Current baseline, so you can tell whether you broke something: **222 engine test
    same-package references (`core/` is one package). Regex over symbol names produces false
    positives and cannot see sealed-hierarchy or visibility rules. Both methods produced
    confident wrong answers here. **Move the file, compile, read the error.**
-4. **`commonMain` purity is not enforced by the compiler.** `compileCommonMainKotlinMetadata`
-   exists but is SKIPPED — Kotlin only builds metadata once a target needs it, and `jvm` plus
-   `androidTarget` are both JVM-family. It fails *open*. `CommonMainPurityTest` reads the
-   sources instead. Until WP-7 lands, that test is the only guard.
+4. **`commonMain` purity is compiler-enforced now — but it was not, and it failed *open*.**
+   `compileCommonMainKotlinMetadata` used to be SKIPPED, because Kotlin only builds metadata once
+   a non-JVM target needs it. WP-7 added `linuxX64`, so the task executes and a `java.*` import in
+   `commonMain` now fails the build (`Unresolved reference 'java'`), verified by planting one.
+   `CommonMainPurityTest` remains as a faster duplicate with a better error message, and it
+   catches things that are *not* imports and so slipped past the old scan: `toSortedMap`,
+   `@JvmOverloads`, `String.format`, `System.currentTimeMillis`. The native target only
+   **compiles** — `LegacyNameKeys`'s native `actual` throws — so never assume `linuxX64` runs
+   the planner.
 5. **Kotlin will not smart-cast a `val` from another module.** `if (row.dayOfWeek != null)
    use(row.dayOfWeek)` does not compile in `:app` against a `:planning-core` type. Bind a local
    first. Expect this on every nullable model field you touch.
@@ -90,14 +100,15 @@ WP-9 engine defects     (independent of all the above)
 Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
 ```
 
-Good parallel split for three agents: **A** takes WP-1 → WP-2 → WP-8. **B** takes WP-4 → WP-6 →
-WP-5. **C** takes WP-3, then WP-9. WP-7 last, by whoever finishes first.
+**All of Stage 1 (WP-1 … WP-9) is complete.** The graph above is kept as the record of how it
+was sequenced. Stage 2 starts at WP-10, and WP-10 → WP-11 → WP-12 is a chain: the schema decides
+the invariants, and both decide the contract.
 
 ---
 
 # Stage 1 — finish the portability project
 
-## WP-1 — Port `ScheduleAnalysis` to `commonMain`
+## WP-1 — Port `ScheduleAnalysis` to `commonMain`  ✅ done (`c32c7ad`)
 
 **Size:** large. The last root blocker in `core/`, and unlike `WorkingCalendar` this one has a
 caller blast radius.
@@ -192,7 +203,7 @@ replace with shifts, but **keep the byte order identical** or the digest changes
 
 ---
 
-## WP-2 — Move the six files `ScheduleAnalysis` gates
+## WP-2 — Move the six files `ScheduleAnalysis` gates  ✅ done (`34f4385`)
 
 **Size:** medium. **Precondition: WP-1 merged.**
 
@@ -218,7 +229,7 @@ passes, or `expect`/`actual` it. Do not drop the precision and assume nobody scr
 
 ---
 
-## WP-3 — Free `GanttInteraction` from `java.io.Serializable`
+## WP-3 — Free `GanttInteraction` from `java.io.Serializable`  ✅ done (`3b5af10`)
 
 **Size:** small, self-contained. No preconditions.
 
@@ -235,7 +246,7 @@ state restoration.
 
 ---
 
-## WP-4 — `LegacyNameKeys` via `expect`/`actual`
+## WP-4 — `LegacyNameKeys` via `expect`/`actual`  ✅ done (`2c7ea46`)
 
 **Size:** small in lines, **highest blast radius in the module.** Read this whole section before
 touching it.
@@ -275,7 +286,7 @@ migrate.
 
 ---
 
-## WP-5 — The journal codecs, as one unit
+## WP-5 — The journal codecs, as one unit  ✅ done (`0bbdf42`)
 
 **Size:** large. **Preconditions: WP-4 and WP-6 merged.**
 
@@ -295,7 +306,7 @@ compares.
 
 ---
 
-## WP-6 — `WorkingCalendarMapper` off `Calendar`
+## WP-6 — `WorkingCalendarMapper` off `Calendar`  ✅ done (`72e8db6`)
 
 **Size:** small. **Precondition: none** (it can precede WP-4, but WP-5 needs both).
 
@@ -332,7 +343,7 @@ kept as the fast duplicate with the better error message, per the plan.
 
 ---
 
-## WP-8 — Remove the `NotionClient` bridge
+## WP-8 — Remove the `NotionClient` bridge  ✅ done (`8a618ce`)
 
 **Size:** trivial. **Precondition: WP-1 merged.**
 

@@ -12,9 +12,13 @@ Sequencing principle, unchanged since the teardown: **the engine is the asset, t
 the product, and the Android app is the shipping proof.** Work that makes the engine portable
 and the domain model right comes before work that makes screens.
 
-Current position (updated 2026-08-17 after Stage 1.1): the **engine core is 74% portable**
-(59% of the whole module), 401 JVM tests green, the four specification documents exist, and no
-scope deviation is open. `ScheduleAnalysis` is the last root blocker in `core/`.
+Current position (updated 2026-08-17): **Stage 1 is complete.** The engine core is **100%
+portable** (99% of the whole module — 11 lines of JVM `actual` remain), purity is
+compiler-enforced via a `linuxX64` target, 422 JVM tests green, the specification set exists, and
+no scope deviation is open.
+
+**Next: Stage 2** — the multi-tenant domain model and a frozen planner contract. Execution detail
+in `08-work-packages.md`, WP-10 onward.
 
 ---
 

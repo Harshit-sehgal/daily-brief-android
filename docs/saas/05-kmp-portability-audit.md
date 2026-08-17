@@ -18,66 +18,39 @@ SKIPPED, because Kotlin only produces a metadata compilation once some target ne
 which is worse than absent, which is why the test exists. Adding a non-JVM target (Kotlin/Native
 is roughly a gigabyte, and not in the pinned toolchain) would hand the job back to the compiler.
 
-## Two denominators, reconciled
-
-This document tracks the **engine core** (`core/`). `CommonMainPurityTest` prints a **whole-module**
-figure, which also counts the domain model, the journal codecs and the mapper. They differ, and both
-are quoted in places, so:
+## Stage 1 is complete — the engine is portable
 
 | Scope | `commonMain` | `jvmShared` | Portable |
 | --- | ---: | ---: | ---: |
-| Engine core (`core/` only — this document) | 3,892 | 1,343 | **74%** |
-| Whole module (what the test prints) | 4,657 | 3,136 | **59%** |
+| Engine core (`core/`) | 5,319 | 0 | **100%** |
+| Whole module | 7,873 | 11 | **99%** |
 
-Neither is wrong; quote the scope with the number.
+`core/` has no files left outside `commonMain`. The 11 remaining lines are the JVM `actual` for
+`LegacyNameKeys` — `Normalizer` NFKC and name-based `UUID`, which are stored-identity functions
+that must not be approximated (see below).
 
-## Already portable — engine core in `commonMain`, 3,892 lines
+The path was 22% → 33% → 59% → 74% → 100% of the engine core. Two files were the levers:
+`WorkingCalendar` released 1,633 lines behind it, and `ScheduleAnalysis` released the remaining
+861.
 
-| File | Lines | Notes |
-| --- | ---: | --- |
-| `CriticalPathEngine` | 764 | `PriorityQueue` → private lexicographic min-heap; `Math.*Exact` → `GuardedArithmetic` |
-| `MultiSchedulePlanHealth` | 608 | the max-flow capacity engine; needed nothing but `WorkingCalendar` |
-| `PlanHealth` | 349 | as above |
-| `WorkingCalendar` | 302 | `Calendar`/`SimpleDateFormat` → `kotlinx-datetime`; DST policy named in `AmbiguousLocalTime` |
-| `AutoPlan` | 282 | `Math.floorMod` → `Long.mod` |
-| `DependencyAnalysis` | 257 | `Math.*Exact` → `GuardedArithmetic` |
-| `PlanBlockPreview` | 237 | `Math.floorMod` → `Long.mod` |
-| `PlanScenarios` | 157 | |
-| `WeeklyReview` | 144 | |
-| `PlanExport` | 133 | |
-| `IsoDates` | 120 | `SimpleDateFormat` pattern list → one regex + `kotlinx-datetime` |
-| `BaselineVariance` | 116 | |
-| `GanttDependencyPaths` | 105 | |
-| `MiniMarkdown` | 91 | |
-| `PortfolioRollup` | 83 | |
-| `Fuzzy` | 60 | |
-| `AmbiguousLocalTime` | 53 | the DST resolution policy, written down rather than inherited |
-| `GuardedArithmetic` | 31 | guarded `addExact`/`subtractExact`/`multiplyExact` |
+### Purity is now compiler-enforced
 
-**74% of the engine core is portable**, up from 34.7%. `WorkingCalendar` was the lever: moving
-it released `PlanHealth`, `MultiSchedulePlanHealth`, `AutoPlan`, `PlanBlockPreview` and
-`PlanScenarios` — 1,633 lines that needed nothing else.
+`compileCommonMainKotlinMetadata` used to be registered and **SKIPPED**, because Kotlin only
+builds common metadata once a non-JVM target consumes it, and `jvm` + `androidTarget` are both
+JVM-family. It failed *open*: a planted `java.util.Calendar` import compiled green.
 
-## Still in `jvmShared`, 1,343 lines of engine core
+Adding `linuxX64` gave the metadata compilation a consumer. The task now executes as part of
+`scripts/verify.sh`, and the same planted import fails with `Unresolved reference 'java'`.
+Verified by planting one, because the guard it replaced had to be caught the same way.
 
-| File | Lines | Own JVM dependency | Also blocked via |
-| --- | ---: | --- | --- |
-| `ScheduleAnalysis` | 374 | `Calendar`, `TimeZone`; `MessageDigest` + `ByteBuffer` for `signature` | — |
-| `GanttLayout` | 287 | `BigDecimal`, `BigInteger`, `MathContext`, `RoundingMode`, `Calendar`, `TimeZone` | `ScheduleAnalysis` |
-| `PlanGanttLayout` | 154 | `Math.subtractExact` | `GanttLayout`, `ScheduleAnalysis` |
-| `TimelineLayout` | 131 | `Calendar`, `TimeZone` | `ScheduleAnalysis` |
-| `DayPulse` | 122 | `TimeZone` | `ScheduleAnalysis` |
-| `GanttInteraction` | 108 | `Serializable` (draft state) | — |
-| `GanttZoom` | 98 | — | `ScheduleAnalysis` |
-| `PortfolioGantt` | 69 | — | `GanttLayout`, `ScheduleAnalysis` |
+The native target **compiles but does not run**: `LegacyNameKeys`'s native `actual` throws rather
+than approximate NFKC, since a reimplementation differing by one character would corrupt stored
+name keys. Android and the JVM server both resolve the `jvmShared` actual. Cost: ~1.8 GB in
+`~/.konan`, fetched by one `verify.sh --online` run; `--offline` holds afterwards.
 
-**`ScheduleAnalysis` is now the only root blocker in `core/`**, gating 861 lines behind it.
-Clearing it and `GanttInteraction`'s `Serializable` takes the engine core to ~100%.
-
-It carries one decision that is not mechanical: `signature` is SHA-256 over length-prefixed
-fields and is the **daily-brief cache key**. A common-Kotlin SHA-256 that differs by a byte
-invalidates every cached brief once. That is acceptable, but it should be chosen rather than
-discovered — expect one cache miss per user at the upgrade, not a bug report.
+`CommonMainPurityTest` survives as a faster duplicate with a better message, and it now catches
+the class of violation that is *not* an import and therefore sailed past the original scan:
+`toSortedMap`/`toSortedSet`, `@JvmOverloads`, `String.format`, `System.currentTimeMillis`.
 
 ### Non-`core/` files in the module
 
@@ -219,3 +192,9 @@ audit:
   33% → **59%**. The DST tie-break is now `AmbiguousLocalTime`, named and tested, instead of
   whatever `java.util.Calendar` happened to do. Cost: `:app` needs core library desugaring,
   because `kotlinx-datetime` is `java.time`-backed and `minSdk` is 24.
+- 2026-08-17 (Stage 1 complete): `ScheduleAnalysis` ported and every call site converted to
+  `kotlinx-datetime`; the six Gantt geometry files, `GanttInteraction`, `WorkingCalendarMapper`
+  and the three journal codecs followed. `LegacyNameKeys` split `expect`/`actual` behind a
+  fixture test capturing the shipped JVM outputs. `linuxX64` added, making the purity guard
+  compiler-enforced. Engine core **100%**, whole module **99%**. 243 engine tests, 179 app tests,
+  zero failures.
