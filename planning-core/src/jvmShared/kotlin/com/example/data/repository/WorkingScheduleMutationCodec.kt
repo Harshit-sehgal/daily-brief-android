@@ -1,6 +1,6 @@
 package com.example.data.repository
 
-import com.example.data.database.LegacyPlanCatalogBuilder
+import com.example.data.database.LegacyNameKeys
 import com.example.data.model.PlanItemSchedule
 import com.example.data.model.WorkSchedule
 import com.example.data.model.WorkScheduleWindow
@@ -12,7 +12,7 @@ import com.example.data.model.WorkScheduleWindow
  * empty assignment set. Creation and archival track an empty set so a later task assignment makes
  * their Undo stale instead of allowing a foreign-key cascade or silently changing that assignment.
  */
-internal data class WorkingScheduleMutationState(
+data class WorkingScheduleMutationState(
   val scopeId: String,
   val schedules: Map<String, WorkSchedule?>,
   val windows: Map<String, List<WorkScheduleWindow>>,
@@ -22,7 +22,7 @@ internal data class WorkingScheduleMutationState(
 }
 
 /** Strict, bounded aggregate codec for durable working-schedule Undo. */
-internal object WorkingScheduleMutationCodec {
+object WorkingScheduleMutationCodec {
   fun encode(state: WorkingScheduleMutationState): EncodedPlanMutationState {
     validate(state)
     val records = linkedMapOf<String, String>()
@@ -241,7 +241,7 @@ internal object WorkingScheduleMutationCodec {
         require(schedule.name.none(Char::isISOControl)) {
           "Working-schedule name contains a control character"
         }
-        require(LegacyPlanCatalogBuilder.nameKey(schedule.name) == schedule.nameKey) {
+        require(LegacyNameKeys.nameKey(schedule.name) == schedule.nameKey) {
           "Working-schedule name key is not canonical"
         }
         require(schedule.archivedAt == null || !schedule.isDefault) {

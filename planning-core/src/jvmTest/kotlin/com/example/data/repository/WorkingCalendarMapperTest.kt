@@ -4,8 +4,8 @@ import com.example.core.WorkingCalendarSpec
 import com.example.core.WorkingDateOverride
 import com.example.core.WorkingDayWindow
 import com.example.core.WorkingWeekWindow
-import com.example.data.database.LegacyPlanCatalogBuilder
-import com.example.data.database.PlanMigrations
+import com.example.data.database.LegacyNameKeys
+import com.example.data.database.WorkScheduleDefaults
 import com.example.data.model.WorkSchedule
 import com.example.data.model.WorkScheduleWindow
 import com.example.data.model.WorkScheduleWindowKind
@@ -207,10 +207,10 @@ class WorkingCalendarMapperTest {
   fun `fresh install seed exactly matches the migration contract`() {
     val seeded = WorkingCalendarMapper.defaultSchedule(timeZoneId = "UTC", now = 42L)
 
-    assertEquals(PlanMigrations.DEFAULT_WORK_SCHEDULE_ID, seeded.schedule.id)
-    assertEquals(PlanMigrations.DEFAULT_WORK_SCHEDULE_NAME, seeded.schedule.name)
+    assertEquals(WorkScheduleDefaults.ID, seeded.schedule.id)
+    assertEquals(WorkScheduleDefaults.NAME, seeded.schedule.name)
     assertEquals(
-      LegacyPlanCatalogBuilder.nameKey(PlanMigrations.DEFAULT_WORK_SCHEDULE_NAME),
+      LegacyNameKeys.nameKey(WorkScheduleDefaults.NAME),
       seeded.schedule.nameKey,
     )
     assertEquals("UTC", seeded.schedule.timeZoneId)
@@ -223,7 +223,7 @@ class WorkingCalendarMapperTest {
     assertEquals((Calendar.MONDAY..Calendar.FRIDAY).toList(), seeded.spec.weeklyWindows.map { it.dayOfWeek })
     seeded.windows.forEachIndexed { index, row ->
       assertEquals(
-        "${PlanMigrations.DEFAULT_WORK_SCHEDULE_ID}-weekday-${Calendar.MONDAY + index}",
+        "${WorkScheduleDefaults.ID}-weekday-${Calendar.MONDAY + index}",
         row.id,
       )
       assertEquals(9 * 60, row.startMinute)

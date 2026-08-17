@@ -5,8 +5,8 @@ import com.example.core.WorkingCalendarSpec
 import com.example.core.WorkingDateOverride
 import com.example.core.WorkingDayWindow
 import com.example.core.WorkingWeekWindow
-import com.example.data.database.LegacyPlanCatalogBuilder
-import com.example.data.database.PlanMigrations
+import com.example.data.database.LegacyNameKeys
+import com.example.data.database.WorkScheduleDefaults
 import com.example.data.model.WorkSchedule
 import com.example.data.model.WorkScheduleWindow
 import com.example.data.model.WorkScheduleWindowKind
@@ -190,9 +190,9 @@ object WorkingCalendarMapper {
   fun defaultSchedule(timeZoneId: String, now: Long): PersistedWorkingCalendar {
     val schedule =
       WorkSchedule(
-        id = PlanMigrations.DEFAULT_WORK_SCHEDULE_ID,
-        name = PlanMigrations.DEFAULT_WORK_SCHEDULE_NAME,
-        nameKey = LegacyPlanCatalogBuilder.nameKey(PlanMigrations.DEFAULT_WORK_SCHEDULE_NAME),
+        id = WorkScheduleDefaults.ID,
+        name = WorkScheduleDefaults.NAME,
+        nameKey = LegacyNameKeys.nameKey(WorkScheduleDefaults.NAME),
         timeZoneId = timeZoneId,
         isDefault = true,
         minimumChunkMinutes = 30,
@@ -206,8 +206,8 @@ object WorkingCalendarMapper {
     val windows =
       (Calendar.MONDAY..Calendar.FRIDAY).mapIndexed { index, dayOfWeek ->
         WorkScheduleWindow(
-          id = "${PlanMigrations.DEFAULT_WORK_SCHEDULE_ID}-weekday-$dayOfWeek",
-          scheduleId = PlanMigrations.DEFAULT_WORK_SCHEDULE_ID,
+          id = "${WorkScheduleDefaults.ID}-weekday-$dayOfWeek",
+          scheduleId = WorkScheduleDefaults.ID,
           kind = WorkScheduleWindowKind.WEEKLY,
           dayOfWeek = dayOfWeek,
           localDate = null,

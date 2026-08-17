@@ -481,17 +481,17 @@ object PlanMutationCodec {
   }
 
   /** Baselines reuse these record encoders so they decode under the journal's own rules. */
-  internal fun encodeStateRecord(state: PlanMutationState): String =
+  fun encodeStateRecord(state: PlanMutationState): String =
     when (state) {
       is PlanItemState -> Fields.encode(state.fields())
       is PlanBlockState -> Fields.encode(state.fields())
       else -> error("Only tasks and blocks are stored as standalone records")
     }
 
-  internal fun decodeItemRecordFor(id: String, record: String): PlanItemState =
+  fun decodeItemRecordFor(id: String, record: String): PlanItemState =
     decodeItemRecord(id, record)
 
-  internal fun decodeBlockRecordFor(id: String, record: String): PlanBlockState =
+  fun decodeBlockRecordFor(id: String, record: String): PlanBlockState =
     decodeBlockRecord(id, record)
 
   private fun decodeBlockRecord(id: String, record: String): PlanBlockState {
@@ -750,7 +750,7 @@ object PlanMutationCodec {
   private const val MAX_RECORD_LENGTH = 128_000
 }
 
-internal fun PlanItem.toMutationState(): PlanItemState =
+  fun PlanItem.toMutationState(): PlanItemState =
   PlanItemState(
     id = id,
     boardId = boardId,
@@ -774,7 +774,7 @@ internal fun PlanItem.toMutationState(): PlanItemState =
     updatedAt = updatedAt,
   )
 
-internal fun PlanBlock.toMutationState(): PlanBlockState =
+  fun PlanBlock.toMutationState(): PlanBlockState =
   PlanBlockState(
     id = id,
     planItemId = planItemId,
@@ -787,7 +787,7 @@ internal fun PlanBlock.toMutationState(): PlanBlockState =
     updatedAt = updatedAt,
   )
 
-internal fun PlanDependency.toMutationState(): PlanDependencyState =
+  fun PlanDependency.toMutationState(): PlanDependencyState =
   PlanDependencyState(
     id = id,
     boardId = boardId,
@@ -799,7 +799,7 @@ internal fun PlanDependency.toMutationState(): PlanDependencyState =
     updatedAt = updatedAt,
   )
 
-internal fun PlanItemSchedule.toMutationState(): PlanItemScheduleState =
+  fun PlanItemSchedule.toMutationState(): PlanItemScheduleState =
   PlanItemScheduleState(
     planItemId = planItemId,
     workScheduleId = workScheduleId,

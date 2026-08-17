@@ -13,7 +13,7 @@ import com.example.data.model.PlanItem
  * row as an absent snapshot. The command scope is the journal target; individual database IDs stay
  * inside this aggregate because a board rename can atomically affect several entity kinds.
  */
-internal data class PlanCatalogState(
+data class PlanCatalogState(
   val scopeId: String,
   val boards: Map<String, PlanBoard?> = emptyMap(),
   val columns: Map<String, PlanColumn?> = emptyMap(),
@@ -25,7 +25,7 @@ internal data class PlanCatalogState(
 }
 
 /** Strict aggregate codec for catalog mutations; arbitrary Unicode round-trips by character count. */
-internal object PlanCatalogMutationCodec {
+object PlanCatalogMutationCodec {
   fun encode(state: PlanCatalogState): EncodedPlanMutationState {
     validate(state)
     val records = linkedMapOf<String, String>()

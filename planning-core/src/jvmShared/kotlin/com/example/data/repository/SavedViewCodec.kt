@@ -102,18 +102,18 @@ object SavedViewCodec {
     require(value.none(Char::isISOControl)) { "$label contains a control character" }
   }
 
-  /** Shared by the mutation codec; still internal to the repository layer. */
-  internal fun encodeStringArray(values: Collection<String>): String =
+  /** Shared by the mutation codec across the repository layer. */
+  fun encodeStringArray(values: Collection<String>): String =
     values.joinToString(prefix = "[", postfix = "]") { quote(it) }
 
-  internal fun encodeStringObject(values: Map<String, String>): String =
+  fun encodeStringObject(values: Map<String, String>): String =
     values.toSortedMap().entries.joinToString(prefix = "{", postfix = "}") { (key, value) ->
       "${quote(key)}:${quote(value)}"
     }
 
-  internal fun decodeStringArray(value: String): List<String> = JsonStrings(value).readArray()
+  fun decodeStringArray(value: String): List<String> = JsonStrings(value).readArray()
 
-  internal fun decodeStringObject(value: String): Map<String, String> = JsonStrings(value).readObject()
+  fun decodeStringObject(value: String): Map<String, String> = JsonStrings(value).readObject()
 
   private fun quote(value: String): String =
     buildString(value.length + 2) {
