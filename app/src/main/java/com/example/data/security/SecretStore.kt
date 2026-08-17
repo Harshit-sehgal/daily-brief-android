@@ -75,6 +75,41 @@ class SecretStore(context: Context) {
     preferences.edit { remove(key) }
   }
 
+  /**
+   * Encrypts an arbitrary document (the backup) with the same Keystore key as the credential
+   * store, bound to a different purpose so one ciphertext can never decrypt as the other.
+   */
+  fun encryptBackup(plaintext: String): String =
+    synchronized(lock) {
+      val cipher = Cipher.getInstance(TRANSFORMATION)
+      cipher.init(Cipher.ENCRYPT_MODE, encryptionKey())
+      cipher.updateAAD(BACKUP_AAD)
+      val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
+      val ciphertext =
+        Base64.encodeToString(
+          cipher.doFinal(plaintext.toByteArray(StandardCharsets.UTF_8)),
+          Base64.NO_WRAP,
+        )
+      "$iv:$ciphertext"
+    }
+
+  fun decryptBackup(encoded: String): String? =
+    synchronized(lock) {
+      try {
+        val separator = encoded.indexOf(':')
+        require(separator > 0 && separator < encoded.lastIndex)
+        val iv = Base64.decode(encoded.substring(0, separator), Base64.NO_WRAP)
+        val ciphertext = Base64.decode(encoded.substring(separator + 1), Base64.NO_WRAP)
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, encryptionKey(), GCMParameterSpec(TAG_BITS, iv))
+        cipher.updateAAD(BACKUP_AAD)
+        String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8)
+      } catch (e: Exception) {
+        Log.e(TAG, "Could not decrypt backup", e)
+        null
+      }
+    }
+
   fun flow(key: String): Flow<String?> =
     callbackFlow {
         val listener =
@@ -118,5 +153,6 @@ class SecretStore(context: Context) {
     const val TRANSFORMATION = "AES/GCM/NoPadding"
     const val TAG_BITS = 128
     val KEY_LOCK = Any()
+    val BACKUP_AAD = "daily-brief.backup.v1".toByteArray(StandardCharsets.UTF_8)
   }
 }

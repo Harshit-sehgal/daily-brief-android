@@ -91,6 +91,9 @@ import com.example.ui.theme.UiDensity
 import com.example.ui.viewmodel.TodaySection
 import com.example.ui.viewmodel.ActiveWorkingCalendarsState
 import com.example.ui.viewmodel.BriefingViewModel
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import com.example.ui.viewmodel.HomeCard
 import java.text.Normalizer
 import java.util.Locale
@@ -227,7 +230,7 @@ fun SettingsScreen(
           onToggle = { toggleCategory(CATEGORY_DATA) },
           gutter = gutter,
         ) {
-          stateHolder.SaveableStateProvider(CATEGORY_DATA) { DataSection(viewModel, formatter) }
+          stateHolder.SaveableStateProvider(CATEGORY_DATA) { DataSection(viewModel, formatter, gutter) }
         }
       }
     }
@@ -1459,7 +1462,7 @@ private fun AppearanceSection(viewModel: BriefingViewModel, isDarkTheme: Boolean
 }
 
 @Composable
-private fun DataSection(viewModel: BriefingViewModel, formatter: TimeFormatter) {
+private fun DataSection(viewModel: BriefingViewModel, formatter: TimeFormatter, gutter: Dp) {
   val lastSync by viewModel.lastSyncAt.collectAsStateWithLifecycle()
   val syncing by viewModel.isSyncing.collectAsStateWithLifecycle()
   val syncProblem by viewModel.syncProblem.collectAsStateWithLifecycle()
@@ -1503,6 +1506,95 @@ private fun DataSection(viewModel: BriefingViewModel, formatter: TimeFormatter) 
         Text("Remove")
       }
     }
+
+    Spacer(Modifier.height(Space.md))
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Spacer(Modifier.height(Space.md))
+
+    BackupDisclosure(viewModel, gutter)
+  }
+}
+
+/**
+ * Encrypted backup and restore. Restore is a replacement, not a merge, so it asks before doing
+ * anything and says afterwards what the journal lost with it.
+ */
+@Composable
+private fun BackupDisclosure(viewModel: BriefingViewModel, gutter: Dp) {
+  val context = LocalContext.current
+  var pendingRestore by remember { mutableStateOf<ByteArray?>(null) }
+  var expanded by rememberSaveable { mutableStateOf(false) }
+  val exportLauncher =
+    rememberLauncherForActivityResult(
+      ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+      if (uri != null) {
+        viewModel.exportBackup { bytes ->
+          context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+        }
+      }
+    }
+  val openLauncher =
+    rememberLauncherForActivityResult(
+      ActivityResultContracts.OpenDocument()
+    ) { uri ->
+      if (uri != null) {
+        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        if (bytes != null) pendingRestore = bytes
+      }
+    }
+
+  SettingsDisclosure(
+    title = "Backup",
+    summary = "Encrypted export and restore of the plan workspace",
+    expanded = expanded,
+    onToggle = { expanded = !expanded },
+    gutter = gutter,
+  ) {
+    Column {
+      Text(
+        text =
+          "One encrypted file with your schedules, boards, tasks, blocks and saved views. " +
+            "Restoring replaces what is here now.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      Spacer(Modifier.height(Space.sm))
+      Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+        OutlinedButton(
+          onClick = { exportLauncher.launch("daily-brief-backup.dbb") },
+          modifier = Modifier.weight(1f),
+        ) { Text("Export") }
+        OutlinedButton(
+          onClick = { openLauncher.launch(arrayOf("application/octet-stream")) },
+          modifier = Modifier.weight(1f),
+        ) { Text("Restore") }
+      }
+    }
+  }
+
+  pendingRestore?.let { bytes ->
+    AlertDialog(
+      onDismissRequest = { pendingRestore = null },
+      title = { Text("Restore this backup?") },
+      text = {
+        Text(
+          "Your current schedules, boards and tasks will be replaced by the file's, " +
+            "and undo history is cleared. Device events are not in backups and return on sync."
+        )
+      },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            pendingRestore = null
+            viewModel.restoreBackup(bytes) {}
+          }
+        ) { Text("Restore") }
+      },
+      dismissButton = {
+        TextButton(onClick = { pendingRestore = null }) { Text("Cancel") }
+      },
+    )
   }
 }
 

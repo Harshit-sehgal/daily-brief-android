@@ -30,6 +30,7 @@ import com.example.core.PlanScenario
 import com.example.core.BaselineVariance
 import com.example.core.BaselineComparison
 import android.content.Intent
+import com.example.data.backup.BackupManager
 import com.example.export.PdfPlanLayout
 import com.example.export.PdfPlanExporter
 import com.example.export.PdfRow
@@ -66,6 +67,7 @@ import com.example.receiver.BriefingAndReminderReceiver
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1059,6 +1061,41 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
         throw e
       } catch (e: Exception) {
         message(e.message ?: "That plan could not be exported")
+      }
+    }
+  }
+
+  /**
+   * The whole app-owned workspace in one encrypted file. The heavy work (a full-table dump,
+   * codec and cipher) runs on the main thread's dispatcher only as cheap as a single pass is —
+   * in practice a few hundred rows, so this stays a background launch in the shared scope.
+   */
+  fun exportBackup(onReady: (ByteArray) -> Unit) {
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        onReady(BackupManager(appContext).exportBackup())
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The backup could not be written")
+      }
+    }
+  }
+
+  /**
+   * Replaces the plan workspace with the file's rows. The journal is wiped with it, so undo
+   * cannot reach across a restore; the message says so.
+   */
+  fun restoreBackup(bytes: ByteArray, onRestored: (Int) -> Unit) {
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        val written = BackupManager(appContext).restoreBackup(bytes)
+        onRestored(written)
+        message("Restored $written rows. Device events return on the next sync.")
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That file could not be restored")
       }
     }
   }
