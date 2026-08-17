@@ -26,55 +26,58 @@ are quoted in places, so:
 
 | Scope | `commonMain` | `jvmShared` | Portable |
 | --- | ---: | ---: | ---: |
-| Engine core (`core/` only — this document) | 1,784 | 3,364 | **34.7%** |
-| Whole module (what the test prints) | 2,549 | 5,157 | **33%** |
+| Engine core (`core/` only — this document) | 3,892 | 1,343 | **74%** |
+| Whole module (what the test prints) | 4,657 | 3,136 | **59%** |
 
 Neither is wrong; quote the scope with the number.
 
-## Already portable — engine core in `commonMain`, 1,784 lines
+## Already portable — engine core in `commonMain`, 3,892 lines
 
 | File | Lines | Notes |
 | --- | ---: | --- |
-| `CriticalPathEngine` | 764 | `PriorityQueue` replaced by a private lexicographic min-heap (`MinStringHeap`); `Math.*Exact` → `GuardedArithmetic` |
+| `CriticalPathEngine` | 764 | `PriorityQueue` → private lexicographic min-heap; `Math.*Exact` → `GuardedArithmetic` |
+| `MultiSchedulePlanHealth` | 608 | the max-flow capacity engine; needed nothing but `WorkingCalendar` |
+| `PlanHealth` | 349 | as above |
+| `WorkingCalendar` | 302 | `Calendar`/`SimpleDateFormat` → `kotlinx-datetime`; DST policy named in `AmbiguousLocalTime` |
+| `AutoPlan` | 282 | `Math.floorMod` → `Long.mod` |
 | `DependencyAnalysis` | 257 | `Math.*Exact` → `GuardedArithmetic` |
-| `BaselineVariance` | 116 | |
-| `PlanExport` | 133 | |
+| `PlanBlockPreview` | 237 | `Math.floorMod` → `Long.mod` |
+| `PlanScenarios` | 157 | |
 | `WeeklyReview` | 144 | |
-| `PortfolioRollup` | 83 | |
-| `MiniMarkdown` | 91 | |
+| `PlanExport` | 133 | |
+| `IsoDates` | 120 | `SimpleDateFormat` pattern list → one regex + `kotlinx-datetime` |
+| `BaselineVariance` | 116 | |
 | `GanttDependencyPaths` | 105 | |
+| `MiniMarkdown` | 91 | |
+| `PortfolioRollup` | 83 | |
 | `Fuzzy` | 60 | |
-| `GuardedArithmetic` | 31 | the guarded `addExact`/`subtractExact`/`multiplyExact` helper |
+| `AmbiguousLocalTime` | 53 | the DST resolution policy, written down rather than inherited |
+| `GuardedArithmetic` | 31 | guarded `addExact`/`subtractExact`/`multiplyExact` |
 
-34.7% of the engine core (1,784 / 5,148 lines) is portable — up from ~25% at the end of the
-Phase 1 extraction (`3d05da8`). The share dipped from the 35.5% reported earlier in the day
-without anything moving backwards: `PortfolioGantt` (+69) was added to `jvmShared`, and
-`AutoPlan` (+36) and `ScheduleAnalysis` (+11) grew with the deadline fix. A growing denominator
-is the normal way this number falls.
+**74% of the engine core is portable**, up from 34.7%. `WorkingCalendar` was the lever: moving
+it released `PlanHealth`, `MultiSchedulePlanHealth`, `AutoPlan`, `PlanBlockPreview` and
+`PlanScenarios` — 1,633 lines that needed nothing else.
 
-## Still in `jvmShared`, 3,364 lines
+## Still in `jvmShared`, 1,343 lines of engine core
 
 | File | Lines | Own JVM dependency | Also blocked via |
 | --- | ---: | --- | --- |
-| `ScheduleAnalysis` | 374 | `ByteBuffer`, `MessageDigest`, `Calendar`, `TimeZone` | `WorkingCalendar` |
-| `WorkingCalendar` | 309 | `ParsePosition`, `SimpleDateFormat`, `Calendar`, `Locale`, `TimeZone` | — |
+| `ScheduleAnalysis` | 374 | `Calendar`, `TimeZone`; `MessageDigest` + `ByteBuffer` for `signature` | — |
 | `GanttLayout` | 287 | `BigDecimal`, `BigInteger`, `MathContext`, `RoundingMode`, `Calendar`, `TimeZone` | `ScheduleAnalysis` |
-| `AutoPlan` | 282 | `Math.floorMod` | `WorkingCalendar` |
-| `PlanBlockPreview` | 237 | `Math.floorMod` | `DependencyAnalysis`*, `WorkingCalendar` |
-| `PlanScenarios` | 157 | — | `AutoPlan`, `WorkingCalendar` |
 | `PlanGanttLayout` | 154 | `Math.subtractExact` | `GanttLayout`, `ScheduleAnalysis` |
 | `TimelineLayout` | 131 | `Calendar`, `TimeZone` | `ScheduleAnalysis` |
 | `DayPulse` | 122 | `TimeZone` | `ScheduleAnalysis` |
-| `GanttInteraction` | 108 | `Serializable` (draft state) | `WorkingCalendar` |
+| `GanttInteraction` | 108 | `Serializable` (draft state) | — |
 | `GanttZoom` | 98 | — | `ScheduleAnalysis` |
-| `IsoDates` | 79 | `ParsePosition`, `SimpleDateFormat`, `Date`, `Locale`, `TimeZone` | — |
-| `MultiSchedulePlanHealth` | 608 | — | `DependencyAnalysis`*, `WorkingCalendar` |
-| `PlanHealth` | 349 | — | `DependencyAnalysis`*, `WorkingCalendar` |
-| `PortfolioGantt` | 69 | — | `GanttLayout`, `ScheduleAnalysis`, `WorkingCalendar` |
+| `PortfolioGantt` | 69 | — | `GanttLayout`, `ScheduleAnalysis` |
 
-\* Only via the schedule engine they compose, not through JVM APIs.
+**`ScheduleAnalysis` is now the only root blocker in `core/`**, gating 861 lines behind it.
+Clearing it and `GanttInteraction`'s `Serializable` takes the engine core to ~100%.
 
-`DependencyAnalysis` and `CriticalPathEngine` no longer appear — they moved to `commonMain`.
+It carries one decision that is not mechanical: `signature` is SHA-256 over length-prefixed
+fields and is the **daily-brief cache key**. A common-Kotlin SHA-256 that differs by a byte
+invalidates every cached brief once. That is acceptable, but it should be chosen rather than
+discovered — expect one cache miss per user at the upgrade, not a bug report.
 
 ### Non-`core/` files in the module
 
@@ -211,3 +214,8 @@ audit:
   backup codec is not planning logic (`06-scope-deviations.md` D3). Module 32% → 33%. Attempted
   to move the journal codecs to `commonMain`; the compiler refused on the sealed hierarchy, and
   the "cheapest unblock" claim above was corrected as a result.
+- 2026-08-17 (Stage 1.1): `kotlinx-datetime` 0.8.0 adopted; `IsoDates`, then `WorkingCalendar`
+  and everything it gated, moved to `commonMain`. Engine core 34.7% → **74%**, whole module
+  33% → **59%**. The DST tie-break is now `AmbiguousLocalTime`, named and tested, instead of
+  whatever `java.util.Calendar` happened to do. Cost: `:app` needs core library desugaring,
+  because `kotlinx-datetime` is `java.time`-backed and `minSdk` is 24.

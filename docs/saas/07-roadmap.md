@@ -8,8 +8,9 @@ Sequencing principle, unchanged since the teardown: **the engine is the asset, t
 the product, and the Android app is the shipping proof.** Work that makes the engine portable
 and the domain model right comes before work that makes screens.
 
-Current position: `:planning-core` is 33% portable, 401 JVM tests green, the four specification
-documents exist, and no scope deviation is open.
+Current position (updated 2026-08-17 after Stage 1.1): the **engine core is 74% portable**
+(59% of the whole module), 401 JVM tests green, the four specification documents exist, and no
+scope deviation is open. `ScheduleAnalysis` is the last root blocker in `core/`.
 
 ---
 
@@ -19,9 +20,20 @@ documents exist, and no scope deviation is open.
 cluster moves, "one engine" is an intention rather than a fact, and the Ktor service in Stage 3
 would be built against a `jvmShared` engine that iOS can never load.
 
-### 1.1 The date-time cluster — the whole job in one piece
+### 1.1 The date-time cluster — mostly done
 
-1,282 lines across six files, and the only remaining structural blocker in the engine.
+**`IsoDates` and `WorkingCalendar` are ported** (`b436b1e`, `e440cd3`). `WorkingCalendar` was
+the lever: it released `PlanHealth`, `MultiSchedulePlanHealth`, `AutoPlan`, `PlanBlockPreview`
+and `PlanScenarios` — 1,633 lines needing nothing else. The DST policy is written down in
+`AmbiguousLocalTime` and both pinned tests pass unchanged.
+
+**What is left: `ScheduleAnalysis` (374 lines), the last root blocker**, gating `GanttLayout`,
+`TimelineLayout`, `DayPulse`, `GanttZoom`, `PlanGanttLayout` and `PortfolioGantt` — 861 lines.
+Plus `GanttInteraction`'s `java.io.Serializable` (108 lines, independent).
+
+One decision inside it is not mechanical, and is called out in 1.2 below.
+
+Original scope, for the record — 1,282 lines across six files:
 
 | File | Lines | What it needs |
 | --- | ---: | --- |
