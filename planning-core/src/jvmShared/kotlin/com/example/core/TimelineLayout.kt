@@ -1,8 +1,9 @@
 package com.example.core
 
 import com.example.data.model.BriefingEvent
-import java.util.Calendar
-import java.util.TimeZone
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * Places events side by side on a day timeline.
@@ -40,7 +41,7 @@ object TimelineLayout {
   fun layout(
     events: List<BriefingEvent>,
     dayStart: Long,
-    timeZone: TimeZone = TimeZone.getDefault(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
   ): List<Slot> {
     val dayEnd = ScheduleAnalysis.startOfDayOffset(dayStart, 1, timeZone)
 
@@ -110,7 +111,7 @@ object TimelineLayout {
   fun nowMinute(
     nowMs: Long,
     dayStart: Long,
-    timeZone: TimeZone = TimeZone.getDefault(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
   ): Int? {
     val dayEnd = ScheduleAnalysis.startOfDayOffset(dayStart, 1, timeZone)
     if (nowMs < dayStart || nowMs >= dayEnd) return null
@@ -125,7 +126,7 @@ object TimelineLayout {
 
   /** Position an instant by the clock label people see, not elapsed time since midnight. */
   private fun wallClockMinute(timeMs: Long, timeZone: TimeZone): Int {
-    val local = Calendar.getInstance(timeZone).apply { timeInMillis = timeMs }
-    return local.get(Calendar.HOUR_OF_DAY) * 60 + local.get(Calendar.MINUTE)
+    val local = Instant.fromEpochMilliseconds(timeMs).toLocalDateTime(timeZone)
+    return local.hour * 60 + local.minute
   }
 }

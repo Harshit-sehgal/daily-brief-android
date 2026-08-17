@@ -2,7 +2,7 @@ package com.example.ui.viewmodel
 
 import com.example.core.ScheduleAnalysis
 import java.util.Calendar
-import java.util.TimeZone
+import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,7 +10,7 @@ import org.junit.Test
 
 class EventDraftEditsTest {
 
-  private val newYork: TimeZone = TimeZone.getTimeZone("America/New_York")
+  private val newYork: TimeZone = TimeZone.of("America/New_York")
 
   private fun instant(
     year: Int,
@@ -20,7 +20,7 @@ class EventDraftEditsTest {
     minute: Int = 0,
     zone: TimeZone = newYork,
   ): Long =
-    Calendar.getInstance(zone)
+    Calendar.getInstance(java.util.TimeZone.getTimeZone(zone.id))
       .apply {
         clear()
         set(year, month - 1, day, hour, minute, 0)
@@ -74,7 +74,7 @@ class EventDraftEditsTest {
   fun `moving to another day keeps the clock time and the length`() {
     val timed = draft(instant(2026, 3, 10, 14, 30), instant(2026, 3, 10, 15, 15))
     // The date picker reports UTC midnight for the chosen calendar date.
-    val pickedUtc = instant(2026, 3, 12, zone = TimeZone.getTimeZone("UTC"))
+    val pickedUtc = instant(2026, 3, 12, zone = TimeZone.of("UTC"))
 
     val moved = EventDraftEdits.movedToDay(timed, pickedUtc, newYork)
 
@@ -85,7 +85,7 @@ class EventDraftEditsTest {
   @Test
   fun `moving an all-day event lands on one whole local day`() {
     val allDay = draft(instant(2026, 3, 10), instant(2026, 3, 11), isAllDay = true)
-    val pickedUtc = instant(2026, 3, 12, zone = TimeZone.getTimeZone("UTC"))
+    val pickedUtc = instant(2026, 3, 12, zone = TimeZone.of("UTC"))
 
     val moved = EventDraftEdits.movedToDay(allDay, pickedUtc, newYork)
 

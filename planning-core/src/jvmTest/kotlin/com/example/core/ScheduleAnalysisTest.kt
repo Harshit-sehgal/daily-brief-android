@@ -2,7 +2,7 @@ package com.example.core
 
 import com.example.data.model.BriefingEvent
 import java.util.Calendar
-import java.util.TimeZone
+import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -11,7 +11,7 @@ import org.junit.Test
 
 class ScheduleAnalysisTest {
 
-  private val utc = TimeZone.getTimeZone("UTC")
+  private val utc = TimeZone.of("UTC")
 
   private fun instant(
     year: Int,
@@ -21,7 +21,7 @@ class ScheduleAnalysisTest {
     minute: Int = 0,
     zone: TimeZone = utc,
   ): Long =
-    Calendar.getInstance(zone)
+    Calendar.getInstance(java.util.TimeZone.getTimeZone(zone.id))
       .apply {
         clear()
         set(year, month - 1, day, hour, minute, 0)
@@ -166,7 +166,7 @@ class ScheduleAnalysisTest {
 
   @Test
   fun `day offsets survive a daylight saving transition`() {
-    val london = TimeZone.getTimeZone("Europe/London")
+    val london = TimeZone.of("Europe/London")
     // 29 March 2026 is the UK clock change; naive +24h arithmetic skips a day.
     val saturday = instant(2026, 3, 28, 12, zone = london)
 
@@ -179,7 +179,7 @@ class ScheduleAnalysisTest {
 
   @Test
   fun `moving timed events preserves wall time across spring DST`() {
-    val newYork = TimeZone.getTimeZone("America/New_York")
+    val newYork = TimeZone.of("America/New_York")
     val event =
       event(
         "spring",
@@ -196,7 +196,7 @@ class ScheduleAnalysisTest {
 
   @Test
   fun `moving into a spring DST gap normalizes forward on the target day`() {
-    val newYork = TimeZone.getTimeZone("America/New_York")
+    val newYork = TimeZone.of("America/New_York")
     val event =
       event(
         "gap",
@@ -214,7 +214,7 @@ class ScheduleAnalysisTest {
 
   @Test
   fun `moving timed events preserves wall time across fall DST`() {
-    val newYork = TimeZone.getTimeZone("America/New_York")
+    val newYork = TimeZone.of("America/New_York")
     val event =
       event(
         "fall",
@@ -231,7 +231,7 @@ class ScheduleAnalysisTest {
 
   @Test
   fun `moving all-day events preserves their calendar span across DST`() {
-    val newYork = TimeZone.getTimeZone("America/New_York")
+    val newYork = TimeZone.of("America/New_York")
     val spring =
       event(
         "spring days",
@@ -258,7 +258,7 @@ class ScheduleAnalysisTest {
 
   @Test
   fun `moving to an exact local date preserves wall time across DST and year boundaries`() {
-    val newYork = TimeZone.getTimeZone("America/New_York")
+    val newYork = TimeZone.of("America/New_York")
     val event =
       event(
         "year boundary",
@@ -279,7 +279,7 @@ class ScheduleAnalysisTest {
 
   @Test
   fun `picker dates round trip through UTC`() {
-    val kolkata = TimeZone.getTimeZone("Asia/Kolkata")
+    val kolkata = TimeZone.of("Asia/Kolkata")
     val localDay = ScheduleAnalysis.startOfDay(instant(2026, 3, 5, 23, 30, kolkata), kolkata)
 
     val asUtc = ScheduleAnalysis.utcMillisFromLocalDay(localDay, kolkata)
@@ -291,7 +291,7 @@ class ScheduleAnalysisTest {
 
   @Test
   fun `setting a time of day keeps the date`() {
-    val kolkata = TimeZone.getTimeZone("Asia/Kolkata")
+    val kolkata = TimeZone.of("Asia/Kolkata")
     val day = ScheduleAnalysis.startOfDay(instant(2026, 3, 5, 2, 0, kolkata), kolkata)
 
     val at1745 = ScheduleAnalysis.withTimeOfDay(day, 17, 45, kolkata)
@@ -303,7 +303,7 @@ class ScheduleAnalysisTest {
 
   @Test
   fun `suggested event starts stay on the day being viewed`() {
-    val kolkata = TimeZone.getTimeZone("Asia/Kolkata")
+    val kolkata = TimeZone.of("Asia/Kolkata")
     val day = instant(2026, 8, 9, zone = kolkata)
     val morning = instant(2026, 8, 9, 10, 7, kolkata)
     val lateNight = instant(2026, 8, 9, 23, 48, kolkata)
@@ -358,7 +358,7 @@ class ScheduleAnalysisTest {
 
   @Test
   fun `UTC all-day dates are rebuilt at local DST-aware midnights`() {
-    val losAngeles = TimeZone.getTimeZone("America/Los_Angeles")
+    val losAngeles = TimeZone.of("America/Los_Angeles")
     val utcStart = instant(2026, 3, 8)
     val utcEnd = instant(2026, 3, 9)
 
@@ -393,7 +393,7 @@ class ScheduleAnalysisTest {
   }
 
   private fun dayOfMonth(timeMs: Long, zone: TimeZone): Int =
-    Calendar.getInstance(zone).apply { timeInMillis = timeMs }.get(Calendar.DAY_OF_MONTH)
+    Calendar.getInstance(java.util.TimeZone.getTimeZone(zone.id)).apply { timeInMillis = timeMs }.get(Calendar.DAY_OF_MONTH)
 
   private companion object {
     const val MINUTE = 60L * 1000

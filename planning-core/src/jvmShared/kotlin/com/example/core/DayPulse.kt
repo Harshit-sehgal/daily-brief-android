@@ -1,7 +1,7 @@
 package com.example.core
 
 import com.example.data.model.BriefingEvent
-import java.util.TimeZone
+import kotlinx.datetime.TimeZone
 
 /**
  * The state of a day at a moment in time.
@@ -53,7 +53,7 @@ object DayPulse {
     events: List<BriefingEvent>,
     nowMs: Long,
     dayStart: Long,
-    timeZone: TimeZone = TimeZone.getDefault(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
   ): Snapshot {
     val dayEnd = ScheduleAnalysis.startOfDayOffset(dayStart, 1, timeZone)
     val live = nowMs in dayStart until dayEnd

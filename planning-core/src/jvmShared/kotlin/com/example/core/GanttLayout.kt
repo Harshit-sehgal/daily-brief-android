@@ -5,8 +5,9 @@ import java.math.BigDecimal
 import java.math.BigInteger
 import java.math.MathContext
 import java.math.RoundingMode
-import java.util.Calendar
-import java.util.TimeZone
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * Framework-independent geometry for a horizontally scrolling Gantt view.
@@ -187,7 +188,7 @@ object GanttLayout {
    */
   fun dayTicks(
     range: VisibleRange,
-    timeZone: TimeZone = TimeZone.getDefault(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
     minimumStepDays: Int = 1,
     maximumTicks: Int = 256,
   ): List<Tick> {
@@ -228,7 +229,7 @@ object GanttLayout {
   fun today(
     range: VisibleRange,
     nowMs: Long = System.currentTimeMillis(),
-    timeZone: TimeZone = TimeZone.getDefault(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
   ): Today? {
     val dayStart = ScheduleAnalysis.startOfDay(nowMs, timeZone)
     val nextDayStart = ScheduleAnalysis.startOfDayOffset(dayStart, 1, timeZone)
@@ -275,10 +276,10 @@ object GanttLayout {
   }
 
   private fun tickKind(timeMs: Long, timeZone: TimeZone): TickKind {
-    val calendar = Calendar.getInstance(timeZone).apply { timeInMillis = timeMs }
+    val local = Instant.fromEpochMilliseconds(timeMs).toLocalDateTime(timeZone)
     return when {
-      calendar.get(Calendar.DAY_OF_MONTH) != 1 -> TickKind.DAY
-      calendar.get(Calendar.MONTH) == Calendar.JANUARY -> TickKind.YEAR
+      local.dayOfMonth != 1 -> TickKind.DAY
+      local.monthNumber == 1 -> TickKind.YEAR
       else -> TickKind.MONTH
     }
   }

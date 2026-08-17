@@ -2,7 +2,7 @@ package com.example.core
 
 import com.example.data.model.BriefingEvent
 import java.util.Calendar
-import java.util.TimeZone
+import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -11,10 +11,10 @@ import org.junit.Test
 
 class DayPulseTest {
 
-  private val utc = TimeZone.getTimeZone("UTC")
+  private val utc = TimeZone.of("UTC")
 
   private val dayStart =
-    Calendar.getInstance(utc)
+    Calendar.getInstance(java.util.TimeZone.getTimeZone(utc.id))
       .apply {
         clear()
         set(2026, 2, 5, 0, 0, 0)
@@ -154,7 +154,7 @@ class DayPulseTest {
 
   @Test
   fun `spring-forward pulse stops at the next local midnight`() {
-    val zone = TimeZone.getTimeZone("America/New_York")
+    val zone = TimeZone.of("America/New_York")
     val start = localAt(zone, 2026, Calendar.MARCH, 8, 0, 0)
     val late =
       event(
@@ -185,7 +185,7 @@ class DayPulseTest {
 
   @Test
   fun `fall-back pulse includes the final local hour of the 25 hour day`() {
-    val zone = TimeZone.getTimeZone("America/New_York")
+    val zone = TimeZone.of("America/New_York")
     val start = localAt(zone, 2026, Calendar.NOVEMBER, 1, 0, 0)
     val late =
       event(
@@ -215,7 +215,7 @@ class DayPulseTest {
     hour: Int,
     minute: Int,
   ): Long =
-    Calendar.getInstance(zone).apply {
+    Calendar.getInstance(java.util.TimeZone.getTimeZone(zone.id)).apply {
       clear()
       set(year, month, day, hour, minute, 0)
     }.timeInMillis

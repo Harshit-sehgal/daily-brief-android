@@ -1,7 +1,7 @@
 package com.example.ui.viewmodel
 
 import com.example.core.ScheduleAnalysis
-import java.util.TimeZone
+import kotlinx.datetime.TimeZone
 
 /**
  * Every edit the event sheet can make to a draft.
@@ -24,7 +24,7 @@ object EventDraftEdits {
   fun movedToDay(
     draft: EventDraft,
     pickedUtcDayMs: Long,
-    timeZone: TimeZone = TimeZone.getDefault(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
   ): EventDraft {
     val newDay = ScheduleAnalysis.localDayFromUtcMillis(pickedUtcDayMs, timeZone)
     if (draft.isAllDay) {
@@ -45,7 +45,7 @@ object EventDraftEdits {
   }
 
   /** Turns the draft into a whole-day entry, covering exactly one local day. */
-  fun asAllDay(draft: EventDraft, timeZone: TimeZone = TimeZone.getDefault()): EventDraft {
+  fun asAllDay(draft: EventDraft, timeZone: TimeZone = TimeZone.currentSystemDefault()): EventDraft {
     val day = ScheduleAnalysis.startOfDay(draft.startMs, timeZone)
     return draft.copy(
       startMs = day,
@@ -65,7 +65,7 @@ object EventDraftEdits {
     draft: EventDraft,
     restoreStartMs: Long? = null,
     restoreEndMs: Long? = null,
-    timeZone: TimeZone = TimeZone.getDefault(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
   ): EventDraft {
     val day = ScheduleAnalysis.startOfDay(draft.startMs, timeZone)
     if (restoreStartMs == null || restoreEndMs == null || restoreEndMs <= restoreStartMs) {
@@ -93,7 +93,7 @@ object EventDraftEdits {
     draft: EventDraft,
     hour: Int,
     minute: Int,
-    timeZone: TimeZone = TimeZone.getDefault(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
   ): EventDraft {
     val length = (draft.endMs - draft.startMs).coerceAtLeast(MIN_LENGTH_MS)
     val start = ScheduleAnalysis.withTimeOfDay(draft.startMs, hour, minute, timeZone)
@@ -105,7 +105,7 @@ object EventDraftEdits {
     draft: EventDraft,
     hour: Int,
     minute: Int,
-    timeZone: TimeZone = TimeZone.getDefault(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
   ): EventDraft {
     val sameDay = ScheduleAnalysis.withTimeOfDay(draft.startMs, hour, minute, timeZone)
     val end =

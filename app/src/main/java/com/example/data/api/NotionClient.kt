@@ -85,7 +85,7 @@ internal fun parseNotionDateWindow(
     if (lastDay == 0L || lastDay < startMs) return null
     return NotionDateWindow(
       startMs = startMs,
-      endExclusiveMs = ScheduleAnalysis.startOfDayOffset(lastDay, 1, zone),
+      endExclusiveMs = ScheduleAnalysis.startOfDayOffset(lastDay, 1, commonZone),
       isAllDay = true,
     )
   }

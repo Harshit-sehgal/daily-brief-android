@@ -2,7 +2,7 @@ package com.example.core
 
 import com.example.data.model.BriefingEvent
 import java.util.Calendar
-import java.util.TimeZone
+import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -12,7 +12,7 @@ import org.junit.Test
 
 class GanttLayoutTest {
 
-  private val utc = TimeZone.getTimeZone("UTC")
+  private val utc = TimeZone.of("UTC")
 
   private fun instant(
     year: Int,
@@ -22,7 +22,7 @@ class GanttLayoutTest {
     minute: Int = 0,
     timeZone: TimeZone = utc,
   ): Long =
-    Calendar.getInstance(timeZone)
+    Calendar.getInstance(java.util.TimeZone.getTimeZone(timeZone.id))
       .apply {
         clear()
         set(year, month - 1, day, hour, minute, 0)
@@ -197,7 +197,7 @@ class GanttLayoutTest {
 
   @Test
   fun `calendar ticks cross spring DST without assuming 24 hour days`() {
-    val newYork = TimeZone.getTimeZone("America/New_York")
+    val newYork = TimeZone.of("America/New_York")
     val start = instant(2026, 3, 7, timeZone = newYork)
     val end = instant(2026, 3, 11, timeZone = newYork)
 
@@ -219,7 +219,7 @@ class GanttLayoutTest {
 
   @Test
   fun `today band has the real DST day width and exposes now only when visible`() {
-    val newYork = TimeZone.getTimeZone("America/New_York")
+    val newYork = TimeZone.of("America/New_York")
     val rangeStart = instant(2026, 3, 7, timeZone = newYork)
     val rangeEnd = instant(2026, 3, 10, timeZone = newYork)
     val now = instant(2026, 3, 8, 12, timeZone = newYork)

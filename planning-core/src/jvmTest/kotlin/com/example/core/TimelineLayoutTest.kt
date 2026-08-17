@@ -2,7 +2,7 @@ package com.example.core
 
 import com.example.data.model.BriefingEvent
 import java.util.Calendar
-import java.util.TimeZone
+import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -11,10 +11,10 @@ import org.junit.Test
 
 class TimelineLayoutTest {
 
-  private val utc = TimeZone.getTimeZone("UTC")
+  private val utc = TimeZone.of("UTC")
 
   private val dayStart =
-    Calendar.getInstance(utc)
+    Calendar.getInstance(java.util.TimeZone.getTimeZone(utc.id))
       .apply {
         clear()
         set(2026, 2, 5, 0, 0, 0)
@@ -31,7 +31,7 @@ class TimelineLayoutTest {
     hour: Int,
     minute: Int = 0,
   ): Long =
-    Calendar.getInstance(timeZone)
+    Calendar.getInstance(java.util.TimeZone.getTimeZone(timeZone.id))
       .apply {
         clear()
         set(year, month, day, hour, minute, 0)
@@ -154,7 +154,7 @@ class TimelineLayoutTest {
 
   @Test
   fun `spring-forward uses local day bounds and wall-clock positions`() {
-    val newYork = TimeZone.getTimeZone("America/New_York")
+    val newYork = TimeZone.of("America/New_York")
     val springStart = localAt(newYork, 2026, Calendar.MARCH, 8, 0)
     val springEnd = ScheduleAnalysis.startOfDayOffset(springStart, 1, newYork)
     val afterGapStart = localAt(newYork, 2026, Calendar.MARCH, 8, 3, 30)
@@ -189,7 +189,7 @@ class TimelineLayoutTest {
 
   @Test
   fun `fall-back uses local day bounds and wall-clock positions`() {
-    val newYork = TimeZone.getTimeZone("America/New_York")
+    val newYork = TimeZone.of("America/New_York")
     val fallStart = localAt(newYork, 2026, Calendar.NOVEMBER, 1, 0)
     val fallEnd = ScheduleAnalysis.startOfDayOffset(fallStart, 1, newYork)
     val lateStart = localAt(newYork, 2026, Calendar.NOVEMBER, 1, 23, 30)
