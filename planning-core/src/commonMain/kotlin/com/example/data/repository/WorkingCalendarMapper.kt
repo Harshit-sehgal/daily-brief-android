@@ -5,12 +5,12 @@ import com.example.core.WorkingCalendarSpec
 import com.example.core.WorkingDateOverride
 import com.example.core.WorkingDayWindow
 import com.example.core.WorkingWeekWindow
-import com.example.data.database.LegacyNameKeys
+import com.example.data.database.nameKey
+import com.example.data.database.stableId
 import com.example.data.database.WorkScheduleDefaults
 import com.example.data.model.WorkSchedule
 import com.example.data.model.WorkScheduleWindow
 import com.example.data.model.WorkScheduleWindowKind
-import java.util.Calendar
 
 /** A database schedule and its windows after strict conversion to the pure planning contract. */
 data class PersistedWorkingCalendar(
@@ -192,7 +192,7 @@ object WorkingCalendarMapper {
       WorkSchedule(
         id = WorkScheduleDefaults.ID,
         name = WorkScheduleDefaults.NAME,
-        nameKey = LegacyNameKeys.nameKey(WorkScheduleDefaults.NAME),
+        nameKey = nameKey(WorkScheduleDefaults.NAME),
         timeZoneId = timeZoneId,
         isDefault = true,
         minimumChunkMinutes = 30,
@@ -203,8 +203,10 @@ object WorkingCalendarMapper {
         createdAt = now,
         updatedAt = now,
       )
+    // Stored weekday numbers keep java.util.Calendar's convention — Sunday is 1 — so
+    // Monday..Friday are 2..6, and the default schedule is simply the working week.
     val windows =
-      (Calendar.MONDAY..Calendar.FRIDAY).mapIndexed { index, dayOfWeek ->
+      (CALENDAR_MONDAY..CALENDAR_FRIDAY).mapIndexed { index, dayOfWeek ->
         WorkScheduleWindow(
           id = "${WorkScheduleDefaults.ID}-weekday-$dayOfWeek",
           scheduleId = WorkScheduleDefaults.ID,
@@ -235,5 +237,7 @@ object WorkingCalendarMapper {
     )
 
   private const val MINUTES_PER_DAY = 24 * 60
+  private const val CALENDAR_MONDAY = 2
+  private const val CALENDAR_FRIDAY = 6
   private const val RANK_GAP = 1_000_000L
 }
