@@ -1,10 +1,9 @@
 package com.example.core
 
 import com.example.data.model.BriefingEvent
-import java.math.BigDecimal
-import java.math.BigInteger
-import java.math.MathContext
-import java.math.RoundingMode
+import kotlin.math.roundToLong
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -16,6 +15,7 @@ import kotlinx.datetime.toLocalDateTime
  * same layout. Calendar concepts remain in epoch milliseconds until that final conversion: local
  * day boundaries are not a fixed 24 hours around daylight-saving transitions.
  */
+@OptIn(ExperimentalTime::class)
 object GanttLayout {
 
   /** A half-open visible interval: [startInclusiveMs, endExclusiveMs). */
@@ -34,17 +34,18 @@ object GanttLayout {
       if (timeMs <= startInclusiveMs) return 0.0
       if (timeMs >= endExclusiveMs) return 1.0
 
-      val offset = BigInteger.valueOf(timeMs).subtract(BigInteger.valueOf(startInclusiveMs))
-      val span = BigInteger.valueOf(endExclusiveMs).subtract(BigInteger.valueOf(startInclusiveMs))
-      return BigDecimal(offset)
-        .divide(BigDecimal(span), MathContext.DECIMAL64)
-        .toDouble()
-        .coerceIn(0.0, 1.0)
+      // Unsigned subtraction keeps the fraction exact even when the range straddles Long's
+      // sign boundary; both differences are guaranteed non-negative and non-wrapping inside
+      // the clamped interval above.
+      val delta = timeMs.toULong() - startInclusiveMs.toULong()
+      val span = endExclusiveMs.toULong() - startInclusiveMs.toULong()
+      return (delta.toDouble() / span.toDouble()).coerceIn(0.0, 1.0)
     }
 
     /**
      * Maps a viewport position back to time, clamping overscroll and rounding to the nearest
-     * millisecond. Big-integer arithmetic keeps narrow ranges stable even near Long's limits.
+     * millisecond. The offset is accumulated unsigned so narrow ranges stay stable even near
+     * Long's limits, where Double alone would round both endpoints to the same value.
      */
     fun timeAt(position: Double): Long {
       require(position.isFinite()) { "A Gantt position must be finite." }
@@ -52,16 +53,11 @@ object GanttLayout {
       if (clamped == 0.0) return startInclusiveMs
       if (clamped == 1.0) return endExclusiveMs
 
-      val start = BigInteger.valueOf(startInclusiveMs)
-      val span = BigInteger.valueOf(endExclusiveMs).subtract(start)
-      val offset =
-        BigDecimal(span)
-          .multiply(BigDecimal.valueOf(clamped))
-          .setScale(0, RoundingMode.HALF_UP)
-          .toBigIntegerExact()
-      // Clamping keeps the sum between the two Long endpoints, so this conversion
-      // is exact without BigInteger.longValueExact(), which is Android API 31+.
-      return start.add(offset).toLong()
+      val span = endExclusiveMs.toULong() - startInclusiveMs.toULong()
+      val offset = (span.toDouble() * clamped).roundToLong().toULong()
+      // The interior result is strictly between the endpoints, so the unsigned sum always
+      // fits in a Long; the clamp only absorbs Double rounding at the edges.
+      return (startInclusiveMs.toULong() + offset).toLong().coerceIn(startInclusiveMs, endExclusiveMs)
     }
 
     fun contains(timeMs: Long): Boolean =
@@ -228,7 +224,7 @@ object GanttLayout {
 
   fun today(
     range: VisibleRange,
-    nowMs: Long = System.currentTimeMillis(),
+    nowMs: Long = Clock.System.now().toEpochMilliseconds(),
     timeZone: TimeZone = TimeZone.currentSystemDefault(),
   ): Today? {
     val dayStart = ScheduleAnalysis.startOfDay(nowMs, timeZone)

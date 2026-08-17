@@ -144,10 +144,10 @@ object PlanGanttLayout {
   private fun distanceFromRange(block: PlanBlock, range: GanttLayout.VisibleRange): Long =
     when {
       block.endAt <= range.startInclusiveMs ->
-        runCatching { Math.subtractExact(range.startInclusiveMs, block.endAt) }
+        runCatching { GuardedArithmetic.subtractExact(range.startInclusiveMs, block.endAt) }
           .getOrDefault(Long.MAX_VALUE)
       block.startAt >= range.endExclusiveMs ->
-        runCatching { Math.subtractExact(block.startAt, range.endExclusiveMs) }
+        runCatching { GuardedArithmetic.subtractExact(block.startAt, range.endExclusiveMs) }
           .getOrDefault(Long.MAX_VALUE)
       else -> 0L
     }
