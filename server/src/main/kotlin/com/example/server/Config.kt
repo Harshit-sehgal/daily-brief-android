@@ -21,6 +21,8 @@ data class Config(
   val googleClientSecret: String? = null,
   val googleCalendarId: String? = null,
   val fixtureProvider: Boolean = false,
+  /** The web client's origin; CORS admits exactly this host. */
+  val webOrigin: String = "http://localhost:3000",
 ) {
   companion object {
     fun fromEnv(env: Map<String, String> = System.getenv()): Config =

@@ -7,8 +7,10 @@ import com.example.server.db.Db.execute
 import com.example.server.db.Db.newId
 import com.example.server.db.Db.query
 import com.example.server.db.Db.queryOne
+import com.example.server.db.Envelope
 import com.example.server.google.FixtureCalendarProvider
 import com.example.server.google.GoogleCalendarProvider
+import com.example.server.google.GoogleOAuth
 import com.example.server.plan.Journal
 import com.example.server.plan.Mapping
 import com.example.server.reconcile.ReconcileWorker
@@ -55,6 +57,26 @@ fun Application.routes(config: Config) {
           val workspaceId = FixtureWorld.ensure(call)
           call.respond(SessionResponse(workspaceId, sessions.issue(workspaceId)))
         }
+      } else {
+        // The real-account leg: the web client redirects to Google, then trades the code for
+        // a server-side token (envelope-encrypted in calendar_connections) and a session.
+        get("/auth/start") {
+          val redirectUri = call.request.queryParameters["redirect_uri"] ?: config.webOrigin
+          call.respond(
+            mapOf(
+              "url" to GoogleOAuth.authorizeUrl(config, redirectUri),
+              "redirectUri" to redirectUri,
+            ),
+          )
+        }
+
+        post("/auth/callback") {
+          val body = call.receive<AuthCallback>()
+          val tokens = GoogleOAuth.exchangeCode(config, body.code, body.redirectUri)
+          val workspaceId = FixtureWorld.ensure(call, email = "google@dailybrief.dev", name = "Google User")
+          GoogleOAuth.storeToken(config, workspaceId, "google", "google-account", GoogleOAuth.json.encodeToString(tokens))
+          call.respond(SessionResponse(workspaceId, sessions.issue(workspaceId)))
+        }
       }
 
       authenticate("session") {
@@ -93,6 +115,41 @@ fun Application.routes(config: Config) {
             )
           }
           call.respond(mapOf("ok" to true))
+        }
+
+        get("/tasks") {
+          val session = sessions.require(call)
+          val projectId = FixtureWorld.projectId(session.workspaceId)
+          val tasks =
+            Db.dataSource.connection.use { conn ->
+              conn.query(
+                "SELECT id, parent_id, title, notes, rank, start_constraint, due_at, effort_minutes, progress, priority, owner, scheduling_mode, locked, is_milestone, completed_at, archived_at " +
+                  "FROM tasks WHERE workspace_id = ? AND project_id = ? AND archived_at IS NULL ORDER BY rank",
+                listOf(session.workspaceId, projectId),
+              ) { rs ->
+                com.example.contract.TaskWire(
+                  id = rs.getString("id"),
+                  boardId = projectId,
+                  columnId = null,
+                  parentId = rs.getString("parent_id"),
+                  title = rs.getString("title"),
+                  notes = rs.getString("notes"),
+                  rank = rs.getLong("rank"),
+                  startConstraint = rs.getLong("start_constraint").takeIf { !rs.wasNull() },
+                  dueAt = rs.getLong("due_at").takeIf { !rs.wasNull() },
+                  effortMinutes = rs.getInt("effort_minutes").takeIf { !rs.wasNull() },
+                  progress = rs.getInt("progress"),
+                  priority = rs.getString("priority"),
+                  owner = rs.getString("owner"),
+                  schedulingMode = rs.getString("scheduling_mode"),
+                  locked = rs.getBoolean("locked"),
+                  isMilestone = rs.getBoolean("is_milestone"),
+                  completedAt = rs.getLong("completed_at").takeIf { !rs.wasNull() },
+                  archivedAt = rs.getLong("archived_at").takeIf { !rs.wasNull() },
+                )
+              }
+            }
+          call.respond(tasks)
         }
 
         post("/reconcile") {
@@ -172,6 +229,9 @@ data class PlanRunResponse(val runId: String, val result: PlanningResult)
 @Serializable
 data class ApplyResponse(val blocks: Int, val entryId: String)
 
+@Serializable
+data class AuthCallback(val code: String, val redirectUri: String)
+
 /**
  * Stateless sessions: HMAC(sessionSecret, workspaceId + expiry). No sessions table — the
  * schema is frozen; sessions are tokens, not rows.
@@ -215,7 +275,7 @@ fun Sessions.require(call: ApplicationCall): Session =
 object FixtureWorld {
   private const val PROJECT_NAME = "My Plan"
 
-  fun ensure(call: ApplicationCall): String {
+  fun ensure(call: ApplicationCall, email: String = "fixture@dailybrief.dev", name: String = "Fixture User"): String {
     val workspaceId =
       Db.dataSource.connection.use { conn ->
         conn.queryOne("SELECT id FROM workspaces ORDER BY created_at LIMIT 1") { it.getString(1) }
@@ -224,7 +284,7 @@ object FixtureWorld {
         val ws = newId()
         conn.execute(
           "INSERT INTO users (id, email, name, tier, created_at, updated_at) VALUES (?, ?, ?, 'free', ?, ?)",
-          listOf(userId, "fixture@dailybrief.dev", "Fixture User", System.currentTimeMillis(), System.currentTimeMillis()),
+          listOf(userId, email, name, System.currentTimeMillis(), System.currentTimeMillis()),
         )
         conn.execute(
           "INSERT INTO workspaces (id, name, owner_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -261,7 +321,12 @@ fun providerFor(config: Config, workspaceId: String): com.example.server.google.
         listOf(workspaceId),
       ) { rs -> rs.getString("id") to rs.getString("token_ciphertext") }
     } ?: error("no connected calendar for workspace $workspaceId")
-  return GoogleCalendarProvider(config, connection.first, "token")
+  val stored = Envelope.unwrap(config.envelopeKeyHex, workspaceId, "calendar_connection_${connection.first}", connection.second)
+    ?: error("could not unwrap the stored token for workspace $workspaceId")
+  val token = GoogleOAuth.json.decodeFromString<GoogleOAuth.TokenResponse>(stored)
+  // The slice does not refresh: a short-lived access token expires during a long demo, and
+  // the runbook says so. Refresh handling is WP-14 hardening.
+  return GoogleCalendarProvider(config, connection.first, token.access_token)
 }
 
 object PlanStore {

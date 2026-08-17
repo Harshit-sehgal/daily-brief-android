@@ -28,6 +28,7 @@ dependencies {
   implementation("io.ktor:ktor-server-content-negotiation-jvm:3.4.1")
   implementation("io.ktor:ktor-serialization-kotlinx-json-jvm:3.4.1")
   implementation("io.ktor:ktor-server-auth-jvm:3.4.1")
+  implementation("io.ktor:ktor-server-cors-jvm:3.4.1")
   implementation("io.ktor:ktor-server-call-logging-jvm:3.4.1")
   implementation("org.postgresql:postgresql:42.7.7")
   implementation("com.zaxxer:HikariCP:7.0.2")

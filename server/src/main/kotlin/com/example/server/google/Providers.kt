@@ -160,8 +160,23 @@ private fun String.encodeURL(): String =
   java.net.URLEncoder.encode(this, Charsets.UTF_8).replace("+", "%20")
 
 object GoogleOAuth {
-  private val json = Json { ignoreUnknownKeys = true }
+  val json = Json { ignoreUnknownKeys = true }
   private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).build()
+
+  /** The web client's consent URL: identity + calendar scopes, PKCE-less for the slice. */
+  fun authorizeUrl(config: Config, redirectUri: String): String {
+    val base = "https://accounts.google.com/o/oauth2/v2/auth"
+    val params =
+      listOf(
+        "client_id" to config.googleClientId!!,
+        "redirect_uri" to redirectUri,
+        "response_type" to "code",
+        "scope" to "openid email https://www.googleapis.com/auth/calendar.readonly",
+        "access_type" to "offline",
+        "prompt" to "consent",
+      )
+    return base + "?" + params.joinToString("&") { (k, v) -> "$k=${v.encodeURL()}" }
+  }
 
   @Serializable
   data class TokenResponse(
