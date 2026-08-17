@@ -58,32 +58,40 @@ baselines, scenarios, portfolio rollups, journal + Undo.
   9.7.0 (SHA-256 pinned), Kotlin/Compose compiler 2.4.10, KSP 2.3.11, Compose BOM
   2026.06.01, Room 2.8.4, compileSdk 37.1, minSdk 24, targetSdk 37.
 
-### Engine defects recorded but deliberately unfixed (behaviour preservation)
-1. `AutoPlan` does not treat `dueAt` as a hard constraint (top of backlog; needs
-   explicit approval, it is a behaviour change).
-2. `AutoPlan` ignores `item.startConstraint`.
+### Engine defects recorded in the plans (fix status as of 2026-08-17)
+1. `AutoPlan` does not treat `dueAt` as a hard constraint — **fixed** (`b11ad72`:
+   `DeadlinePolicy.SOFT/HARD`, HARD default, placement clamped via
+   `nextSlot(..., notAfter)`).
+2. `AutoPlan` ignores `item.startConstraint` — **fixed** (`b11ad72`: per-task
+   `notBefore` in placement).
 3. Only FINISH_TO_START dependencies are scheduled around (others named as
-   `UnplacedTask`, disclosed).
-4. All-day events become full-day hard blocks in `fixedCommitments`.
+   `UnplacedTask`, disclosed) — still open.
+4. All-day events become full-day hard blocks in `fixedCommitments` — **fixed**
+   (`b11ad72`: `ScheduleAnalysis.fixedCommitments()` filters them out, all three
+   ViewModel call sites).
 5. `AutoPlan` is O(tasks × chunks × free × taken) — fine for a week, concern for
-   multi-tenant server.
+   multi-tenant server — still open.
 6. Two buffer code paths (`AutoPlan` applies `bufferMinutes` itself; `PlanHealth` via
-   `freeIntervals`).
+   `freeIntervals`) — **fixed** (`b11ad72`: AutoPlan's buffer path unified on
+   `WorkingCalendar.freeIntervals`).
 7. Test coverage inverted against product value: `AutoPlan` 5 tests / 246 lines vs
-   `MultiSchedulePlanHealth` 17 tests / 608 lines.
+   `MultiSchedulePlanHealth` 17 tests / 608 lines — still open.
 
-### HCI evidence (last recorded, 2026-08-12)
-- 378 JVM tests, 128/128 instrumentation (API 36 `dailybrief` AVD), both lints zero
-  issues, all three APK assemblies, R8 analysis, minified release smoke (2551 KiB,
-  debug 15,121,984 B, android-test 1,978,432 B, release 2,612,685 B).
+### HCI evidence (last recorded, 2026-08-17)
+- 401 JVM tests (227 planning-core + 174 app), 129/129 instrumentation (API 36
+  `dailybrief` AVD), both lints zero issues, all three APK assemblies, R8 analysis.
 - `scripts/verify.sh --device` is the gate; `scripts/emulator.sh` boots the `dailybrief`
-  AVD from snapshot (API 36; API 37.1/16 KB AVD `dailybrief_api37_1_16k` also exists,
-  needs a fresh recorded run).
+  AVD from snapshot. The API 37.1/16 KB AVD (`dailybrief_api37_1_16k`) is **not**
+  recordable on this host: system_server crash-loops during APK installs and
+  mid-instrumentation (Binder `DeadObjectException`, "System has crashed"), regardless
+  of fresh cold boot, snapshot-less runs, or manual `pm install-*` sessions; the one
+  complete pass ran 129 tests with 125 green, the 4 failures being the documented
+  locked-user launch condition. The API 36 gate (129/129) is the recorded evidence.
 - All 24 HCI-principle fixes (P1–P24) are done and guarded by named tests. Still open:
   manual TalkBack/Switch/Voice passes, physical providers, API 24 rendered inspection,
-  API 37.1/16 KB execution, boundary matrix at 599/600…1599/1600 dp, 200% text beyond
-  named components, task-based usability (T1–T11), RTL/long-localized text, process
-  death at every edit point.
+  API 37.1/16 KB execution (needs a healthier host), boundary matrix at
+  599/600…1599/1600 dp, 200% text beyond named components, task-based usability
+  (T1–T11), RTL/long-localized text, process death at every edit point.
 - Capture harness: `scripts/capture-preview.sh` + `embed-preview-plates.py`; ends with
   `pm clear` (leaving seeded state breaks the next `verify.sh --device` in misleading
   ways). Harness is `@CaptureOnly`, never part of the gate.
@@ -193,13 +201,21 @@ source orders it. Checkboxes are for tracking here, not in the canonical docs.
 
 ### E. SaaS programme — Phase 6: engine defects (with user approval)
 
-- [ ] Defect 1: `AutoPlan` treats `dueAt` as a hard constraint — explicitly approved
-      behaviour change, tests first. (Top of the backlog; open question 1.)
-- [ ] Defect 2: `AutoPlan` honours `item.startConstraint`.
-- [ ] Defect 4: all-day events no longer become full-day hard blocks (ViewModel feeds
+- [x] Defect 1: `AutoPlan` treats `dueAt` as a hard constraint — explicitly approved
+      behaviour change, tests first. (`b11ad72`: `DeadlinePolicy` SOFT/HARD, HARD
+      default; placement clamped via `nextSlot(..., notAfter = dueAt)`; remainder named
+      "…past its due date". Contract tests in `EngineContractTest`.)
+- [x] Defect 2: `AutoPlan` honours `item.startConstraint`. (`b11ad72`: per-task
+      `notBefore` fed into placement; contract test covers a task that must not start
+      before noon.)
+- [x] Defect 4: all-day events no longer become full-day hard blocks (ViewModel feeds
       every calendar row into `fixedCommitments`; filter like
-      `ScheduleAnalysis.findConflicts` does).
-- [ ] Defect 6: one buffer code path (`AutoPlan` vs `PlanHealth.freeIntervals`).
+      `ScheduleAnalysis.findConflicts` does). (`b11ad72`: new
+      `ScheduleAnalysis.fixedCommitments()` filter + tests; all three ViewModel call
+      sites switched.)
+- [x] Defect 6: one buffer code path (`AutoPlan` vs `PlanHealth.freeIntervals`).
+      (`b11ad72`: AutoPlan's buffer path now consumes `WorkingCalendar.freeIntervals`
+      with the same min-space logic.)
 - (Defect 3: SS/FF/SF scheduling; Defect 5: O(tasks × chunks × free × taken); Defect 7:
   inverted test coverage — recorded, no committed order.)
 
@@ -212,21 +228,28 @@ source orders it. Checkboxes are for tracking here, not in the canonical docs.
 
 ### G. Product — PREMIUM_PRODUCT_PLAN open phase items
 
-- [ ] Phase 2: pinch zoom, minimap, Timeline/minimap Today jump, dependency creation
-      on the canvas. *(Most of the rest of Phase 2 is marked done.)*
 - [ ] Phase 3: explainable scheduling engine proposals, scenario comparison, change
       digest, weekly review. *(Capacity slice done.)*
-- [ ] Phase 4 (all): cross-board portfolio Gantt and rollups; baselines, change log,
-      restore points, audit UI; baseline-variance + timestamped PDF/image exports and
-      print layouts; widgets, shortcuts, notification actions, encrypted
-      backup/restore with deterministic restore preview.
+- [x] Phase 4 (partial): cross-board portfolio Gantt and rollups (`181f4cb` —
+      `PortfolioGantt` projector + tests, ViewModel `portfolioTimeline`, Portfolio
+      dialog Rollup/Timeline tabs, 14-day range); widgets (`a5bc8c1` — home-screen
+      Today widget, refresh broadcast from `sync()`); PDF export (`a5bc8c1` —
+      `PdfPlanExporter`/`PdfPlanLayout`, A4, CreateDocument launcher); encrypted
+      backup/restore (`43dea69` — `RowBackupCodec`, `BackupManager`, purpose-bound
+      SecretStore AES-GCM, `.dbb` files, restore preview via full wipe preview).
+      Still open: change log / restore points / audit UI, timestamped exports + print
+      layouts, shortcuts, notification actions, deterministic restore preview.
+- [ ] Phase 2: pinch zoom, minimap, Timeline/minimap Today jump, dependency creation
+      on the canvas. *(Most of the rest of Phase 2 is marked done.)*
 - [ ] Typography: Atkinson Hyperlegible / IBM Plex Mono remain candidates only after
       font licensing, glyph, weight, fallback, rendering and 200% text QA.
 
 ### H. HCI evidence still open (REDESIGN §8D/§12 PENDING rows, PRINCIPLES §5)
 
-- [ ] API 37.1 / 16 KB execution on `dailybrief_api37_1_16k` AVD — needs a fresh
-      recorded run (README documents the exact emulator invocation).
+- [ ] API 37.1 / 16 KB execution on `dailybrief_api37_1_16k` AVD — attempted
+      2026-08-17; host cannot hold it (system_server crash-looping during installs and
+      mid-run; one complete pass saw 125/129, the failures being the locked-user
+      launch condition). Needs a healthier host; the API 36 AVD is the recorded gate.
 - [ ] Rendered inspection at API 24 (CI runs instrumentation there, local proof does not).
 - [ ] Physical-device calendar read/write for supported providers + read-only/refused
       calendars; provider refusal wording on a real provider.
@@ -268,7 +291,8 @@ source orders it. Checkboxes are for tracking here, not in the canonical docs.
 
 ### Open questions for the user (programme plan §9)
 
-1. Approve `AutoPlan` treating `dueAt` as a hard constraint (behaviour change)?
+1. ~~Approve `AutoPlan` treating `dueAt` as a hard constraint (behaviour change)?~~
+   **Approved and implemented** (`b11ad72`, Defect 1; open question closed).
 2. Kotlin/Native target (~1 GB) for compiler-enforced `commonMain`, or source scan
    test until iOS work starts?
 3. Monorepo reshuffle ordering — deferred until the web app exists; confirm.
@@ -277,6 +301,58 @@ source orders it. Checkboxes are for tracking here, not in the canonical docs.
 
 (Updates from here on. Each entry: date, what changed, evidence — same discipline as
 the canonical docs: name the test or command that proves a claim.)
+### 2026-08-17 (second) — engine defects 1/2/4/6 + Phase 4 features + device gate
+
+**Engine defects (`b11ad72`).**
+- `AutoPlan`: `DeadlinePolicy { SOFT, HARD }`, HARD default — placement clamped with
+  `nextSlot(..., notAfter = dueAt)`, remainder reason names "…past its due date";
+  `item.startConstraint` honoured as per-task `notBefore`. `EngineContractTest` gains
+  HARD-default, SOFT-disclosure and start-constraint tests (characterisation test
+  rewritten from "not yet a constraint" to the approved behaviour).
+- `ScheduleAnalysis.fixedCommitments()` filters all-day events (like `findConflicts`
+  does); all three ViewModel call sites (`eventSnapshot`, `moveToEmptySlot`,
+  `planDayOverlay`) switch to it.
+- Buffer unification: AutoPlan's gap-selection path now consumes
+  `WorkingCalendar.freeIntervals` (same min-space logic as `PlanHealth`).
+- `ScheduleAnalysisTest` gains all-day-blocked vs all-day-not-blocked tests;
+  existing AutoPlanTest buffer tests stay green.
+
+**Product features.**
+- `a5bc8c1` — home-screen widget (`TodayWidgetProvider`/`TodayWidgetContent`,
+  `today_widget.xml`, `today_widget_info.xml`, manifest receiver; refresh broadcast
+  `com.example.dailybrief.action.REFRESH_WIDGET` sent from `sync()`) and PDF export
+  (`PdfPlanExporter`/`PdfPlanLayout` A4 via framework `PdfDocument`, no new
+  dependency; PlanScreen `CreateDocument("application/pdf")` →
+  `daily-brief-plan.pdf`; overflow item "Export plan (PDF)").
+- `43dea69` — encrypted backup/restore: `RowBackupCodec` (MAGIC `dailybrief-backup`
+  v1, single-pass escape/unescape) + 5 tests; `SecretStore.encryptBackup`/
+  `decryptBackup` (AES-GCM, purpose-bound AAD); `BackupManager` (whitelisted
+  export tables, child-first delete incl. `plan_mutations`, FK off during restore
+  transaction, events deliberately not backed up); ViewModel `exportBackup`/
+  `restoreBackup`; Settings DataSection `BackupDisclosure` with confirm dialog;
+  `.dbb` files.
+- `181f4cb` — cross-board portfolio Gantt: pure `PortfolioGantt` projector (block
+  rows per board over a 14-day range) + 3 tests; ViewModel `portfolioTimeline`
+  (`PORTFOLIO_TIMELINE_DAYS = 14`); Portfolio dialog gains Rollup/Timeline tabs with
+  board-colour bars, day ticks and a today line. `Radius.block` used (UiConsistencyTest).
+- `b446d11` — instrumented tests updated for the new surfaces
+  (`PlanOverflowMenu.onExportPdf`, `PortfolioDialog(result, timeline, onDismiss)`).
+
+**Verification.**
+- `scripts/verify.sh --fast` and full `scripts/verify.sh`: green. JVM suite now 401
+  tests, 0 failures (227 planning-core + 174 app).
+- `scripts/verify.sh --device` on the `dailybrief` AVD: 129/129 instrumented tests
+  green (first attempt had one cold-start flake —
+  `cancellingEventAfterTaskOnlyEditsRequiresDiscardConfirmation` timed out waiting
+  for `event_editor`; clean re-run green).
+- 16 KB AVD: not recordable on this host — see section "HCI evidence". One complete
+  pass ran 125/129 (4 locked-user failures); system_server crash-loops on installs
+  thereafter.
+
+**Not done:** Phase 5 date-time cluster (kotlinx-datetime absent), Phase 7 slice,
+manual/HCI evidence, Kotlin/Native, remaining Phase 4 items (change log/restore
+points/audit UI, print layouts, shortcuts, notification actions).
+
 ### 2026-08-17 — SaaS Phases 2/3/4 + Phase 5 mechanical + Gantt axis pinning
 
 **SaaS Phase 2 (complete, uncommitted).**
