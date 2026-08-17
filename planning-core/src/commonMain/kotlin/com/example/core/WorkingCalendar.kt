@@ -1,10 +1,13 @@
 package com.example.core
 
-import java.text.ParsePosition
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Locale
-import java.util.TimeZone
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.plus
+import kotlinx.datetime.toLocalDateTime
 
 data class WorkingDayWindow(val startMinute: Int, val endMinute: Int)
 
@@ -54,10 +57,15 @@ data class WorkingPlan(
  *
  * Fixed calendar commitments enter only as [busy] intervals. This object never rewrites those
  * commitments and never performs a database mutation, so scheduling can be previewed before Apply.
+ *
+ * Two things survived the move off `java.util.Calendar` unchanged, because both are stored or
+ * pinned rather than internal: weekday numbers keep `Calendar`'s Sunday-is-1 convention (they sit
+ * in `work_schedule_windows.dayOfWeek` in every existing database), and daylight-saving edges keep
+ * `Calendar`'s resolution — see [AmbiguousLocalTime].
  */
 object WorkingCalendar {
   fun validate(spec: WorkingCalendarSpec) {
-    require(spec.zoneId in availableZoneIds) { "Unknown working-calendar time zone" }
+    require(spec.zoneId in TimeZone.availableZoneIds) { "Unknown working-calendar time zone" }
     require(spec.minimumChunkMinutes in 1..MINUTES_PER_DAY) {
       "Minimum work chunk must be between 1 minute and 24 hours"
     }
@@ -69,7 +77,7 @@ object WorkingCalendar {
     }
 
     spec.weeklyWindows.forEach { window ->
-      require(window.dayOfWeek in Calendar.SUNDAY..Calendar.SATURDAY) {
+      require(window.dayOfWeek in CALENDAR_SUNDAY..CALENDAR_SATURDAY) {
         "Working-calendar weekday is invalid"
       }
       validateWindow(window.startMinute, window.endMinute)
@@ -80,13 +88,11 @@ object WorkingCalendar {
       }
     )
 
-    val zone = TimeZone.getTimeZone(spec.zoneId)
-    val parser = dateFormatter(zone).apply { isLenient = false }
     require(spec.overrides.map { it.localDate }.distinct().size == spec.overrides.size) {
       "A working-calendar date can have only one override"
     }
     spec.overrides.forEach { override ->
-      require(isExactLocalDate(override.localDate, parser)) {
+      require(isExactLocalDate(override.localDate)) {
         "Working-calendar override date must use YYYY-MM-DD"
       }
       override.windows.forEach { validateWindow(it.startMinute, it.endMinute) }
@@ -101,7 +107,7 @@ object WorkingCalendar {
   ): List<WorkingInterval> {
     require(endExclusive > startInclusive) { "Working-calendar range must end after it starts" }
     validate(spec)
-    val zone = TimeZone.getTimeZone(spec.zoneId)
+    val zone = TimeZone.of(spec.zoneId)
     val overrideByDate = spec.overrides.associateBy { it.localDate }
     val weeklyByDay =
       spec.weeklyWindows
@@ -111,21 +117,21 @@ object WorkingCalendar {
             .map { WorkingDayWindow(it.startMinute, it.endMinute) }
             .sortedBy { it.startMinute }
         }
-    val formatter = dateFormatter(zone)
-    val day = localDay(startInclusive, zone)
+    var date = localDay(startInclusive, zone)
     val result = mutableListOf<WorkingInterval>()
 
-    while (day.timeInMillis < endExclusive) {
-      val date = formatter.format(day.timeInMillis)
-      val windows = overrideByDate[date]?.windows ?: weeklyByDay[day.get(Calendar.DAY_OF_WEEK)].orEmpty()
+    // Walk local days, never fixed millisecond steps: a DST day is 23 or 25 hours long.
+    while (date.atStartOfDayIn(zone).toEpochMilliseconds() < endExclusive) {
+      val key = date.toString()
+      val windows = overrideByDate[key]?.windows ?: weeklyByDay[date.calendarDayOfWeek()].orEmpty()
       windows.sortedBy { it.startMinute }.forEach { window ->
-        val start = atLocalMinute(day, window.startMinute)
-        val end = atLocalMinute(day, window.endMinute)
+        val start = atLocalMinute(date, window.startMinute, zone)
+        val end = atLocalMinute(date, window.endMinute, zone)
         val clippedStart = maxOf(start, startInclusive)
         val clippedEnd = minOf(end, endExclusive)
         if (clippedEnd > clippedStart) result += WorkingInterval(clippedStart, clippedEnd)
       }
-      day.add(Calendar.DATE, 1)
+      date = date.plus(1, DateTimeUnit.DAY)
     }
     return merge(result)
   }
@@ -230,34 +236,25 @@ object WorkingCalendar {
     }
   }
 
-  private fun localDay(epochMs: Long, zone: TimeZone): Calendar =
-    Calendar.getInstance(zone).apply {
-      timeInMillis = epochMs
-      set(Calendar.HOUR_OF_DAY, 0)
-      set(Calendar.MINUTE, 0)
-      set(Calendar.SECOND, 0)
-      set(Calendar.MILLISECOND, 0)
-    }
+  private fun localDay(epochMs: Long, zone: TimeZone): LocalDate =
+    kotlin.time.Instant.fromEpochMilliseconds(epochMs).toLocalDateTime(zone).date
 
   /**
-   * Calendar intentionally normalizes a daylight-saving gap to the next valid wall-clock minute.
-   * When a fall-back transition repeats a wall time, [Calendar] resolves it to the later,
-   * standard-time occurrence. This deliberately keeps that deterministic Calendar policy instead
-   * of guessing the earlier occurrence; focused JVM coverage locks the choice to an exact instant.
+   * Stored weekday numbers are `java.util.Calendar`'s — Sunday is 1 — and they are in every
+   * existing `work_schedule_windows` row, so the ISO numbering has to be translated rather than
+   * adopted. ISO Monday 1 becomes 2, ISO Sunday 7 becomes 1.
    */
-  private fun atLocalMinute(day: Calendar, minute: Int): Long {
-    val value = day.clone() as Calendar
-    if (minute == MINUTES_PER_DAY) {
-      value.add(Calendar.DATE, 1)
-      value.set(Calendar.HOUR_OF_DAY, 0)
-      value.set(Calendar.MINUTE, 0)
-    } else {
-      value.set(Calendar.HOUR_OF_DAY, minute / 60)
-      value.set(Calendar.MINUTE, minute % 60)
-    }
-    value.set(Calendar.SECOND, 0)
-    value.set(Calendar.MILLISECOND, 0)
-    return value.timeInMillis
+  private fun LocalDate.calendarDayOfWeek(): Int = dayOfWeek.isoDayNumber % 7 + 1
+
+  /**
+   * Minute-of-local-day to an instant, with [AmbiguousLocalTime] deciding the daylight-saving
+   * edges. Minute 1440 is midnight *tomorrow*, which is how a window may end at 24:00.
+   */
+  private fun atLocalMinute(date: LocalDate, minute: Int, zone: TimeZone): Long {
+    val day = if (minute == MINUTES_PER_DAY) date.plus(1, DateTimeUnit.DAY) else date
+    val minuteOfDay = if (minute == MINUTES_PER_DAY) 0 else minute
+    val local = LocalDateTime(day.year, day.month, day.day, minuteOfDay / 60, minuteOfDay % 60)
+    return AmbiguousLocalTime.resolve(local, zone).toEpochMilliseconds()
   }
 
   private fun subtract(
@@ -291,19 +288,15 @@ object WorkingCalendar {
     return result
   }
 
-  private fun dateFormatter(zone: TimeZone) =
-    SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply { timeZone = zone }
-
-  private fun isExactLocalDate(value: String, parser: SimpleDateFormat): Boolean {
+  private fun isExactLocalDate(value: String): Boolean {
     if (!EXACT_LOCAL_DATE.matches(value)) return false
-    val position = ParsePosition(0)
-    val parsed = parser.parse(value, position)
-    return parsed != null && position.index == value.length && position.errorIndex < 0
+    // The regex accepts 2026-13-45; LocalDate does not, which is the real check.
+    return runCatching { LocalDate.parse(value) }.isSuccess
   }
-
-  private val availableZoneIds by lazy { TimeZone.getAvailableIDs().toSet() }
 }
 
 private const val MINUTES_PER_DAY = 24 * 60
 private const val MILLIS_PER_MINUTE = 60_000L
+private const val CALENDAR_SUNDAY = 1
+private const val CALENDAR_SATURDAY = 7
 private val EXACT_LOCAL_DATE = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")

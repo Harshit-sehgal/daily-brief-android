@@ -267,7 +267,7 @@ object AutoPlan {
   }
 
   private fun ceilToMinute(value: Long): Long {
-    val remainder = Math.floorMod(value, 60_000L)
+    val remainder = value.mod(60_000L)
     return if (remainder == 0L) value else value + (60_000L - remainder)
   }
 

@@ -79,7 +79,7 @@ object PlanBlockPreview {
     }
 
     val minuteAligned =
-      Math.floorMod(proposedStart, MINUTE_MS) == 0L && Math.floorMod(proposedEnd, MINUTE_MS) == 0L
+      proposedStart.mod(MINUTE_MS) == 0L && proposedEnd.mod(MINUTE_MS) == 0L
     if (!minuteAligned ||
       durationMs < workSchedule.minimumChunkMinutes * MINUTE_MS ||
       durationMs > workSchedule.maximumChunkMinutes * MINUTE_MS
