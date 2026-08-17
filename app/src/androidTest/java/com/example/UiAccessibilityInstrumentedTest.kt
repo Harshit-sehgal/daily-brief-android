@@ -438,6 +438,7 @@ class UiAccessibilityInstrumentedTest {
                   ),
                 note = "1 open task states no effort, so every effort total here is a floor rather than a total.",
               ),
+            timeline = null,
             onDismiss = {},
           )
         }

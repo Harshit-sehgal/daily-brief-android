@@ -319,6 +319,7 @@ class PlanAdaptiveWorkspaceInstrumentedTest {
             onTools = {},
             onHistory = {},
             onExport = {},
+            onExportPdf = {},
           )
         }
       }

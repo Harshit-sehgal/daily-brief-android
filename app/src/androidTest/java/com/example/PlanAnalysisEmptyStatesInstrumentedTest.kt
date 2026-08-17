@@ -60,6 +60,7 @@ class PlanAnalysisEmptyStatesInstrumentedTest {
       DailyBriefTheme {
         PortfolioDialog(
           result = PortfolioRollupResult(rows = emptyList(), note = "No plans yet."),
+          timeline = null,
           onDismiss = {},
         )
       }
