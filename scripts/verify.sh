@@ -62,14 +62,17 @@ PURITY_GUARD=(:planning-core:compileCommonMainKotlinMetadata)
 # :planning-contract is a plain JVM module, so it has a plain `test` task; it must be named
 # explicitly or the gate would silently skip the frozen wire contract.
 CONTRACT_TESTS=(:planning-contract:test)
+# The SaaS server is a plain JVM module with a plain `test` task, same reason.
+SERVER_TESTS=(:server:test)
 if [ "$FAST" = 1 ]; then
-  TASKS=(:planning-core:jvmTest "${PURITY_GUARD[@]}" "${CONTRACT_TESTS[@]}" testDebugUnitTest)
+  TASKS=(:planning-core:jvmTest "${PURITY_GUARD[@]}" "${CONTRACT_TESTS[@]}" "${SERVER_TESTS[@]}" testDebugUnitTest)
 else
   # Mirrors .github/workflows: JVM tests, both lints, both APKs, R8 config.
   TASKS=(
     :planning-core:jvmTest
     "${PURITY_GUARD[@]}"
     "${CONTRACT_TESTS[@]}"
+    "${SERVER_TESTS[@]}"
     testDebugUnitTest
     lintDebug
     assembleDebug
