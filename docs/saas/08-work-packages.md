@@ -425,11 +425,23 @@ Design in `docs/saas/09-server-invariants.md`; the four code sites carry `REDESI
    `gemini_usage` ledger (lands with its consumer, WP-13); reserve-then-refuse. The device
    keeps its local BYOK path.
 
-## WP-12 — Freeze the planner API
+## WP-12 — Freeze the planner API  ✅ done (`<TBD>`)
 
-Make `04-planner-api-contract.md` executable: `PlanningRequest` / `PlanningResult` /
-`PlanProposal` / `PlanConflict` / `PlanHealth` as a versioned wire contract with round-trip
-tests. **Nothing in Stage 3 starts until this is frozen.**
+`04-planner-api-contract.md` is **FROZEN at v1**. The `:planning-contract` module (new, plain
+JVM, kotlinx-serialization-json 1.8.1) turns it into executable bytes:
+
+- Wire DTOs for `PlanningRequest` (+ Task/ScheduledBlock/Interval/Dependency/WorkSchedule/
+  WorkScheduleWindow), `PlanningResult` (+ Proposal/Unplaced/Health/Conflict/ExternalEvent).
+- Every top-level message carries `v`; `PlannerApi.checkVersion` refuses anything newer with
+  `ApiVersionNotSupported` before fields are read; unknown fields are ignored (forward
+  compat), missing fields default (backward compat).
+- Golden files `request-v1.json` / `result-v1.json` — a re-encode must be byte-identical, so
+  a rename/reorder/default change fails loudly instead of silently renegotiating the wire.
+- Contract rules as code: `refusalReason()` for the range contract ("end must be > start;
+  otherwise a refusal, never a plan"), whole-minute + forward-span `init` checks on
+  proposals, all-day as carried state, string enums with the device's stored spellings.
+- 19 tests across golden / version / round-trip suites; `:planning-contract:test` joined the
+  verify.sh gate explicitly (a plain JVM module has no app-style task name to inherit).
 
 ---
 

@@ -1,5 +1,11 @@
 # Planner API contract
 
+**Status: FROZEN at v1 by `:planning-contract` (WP-12).** Every type below exists as a wire
+DTO in `planning-contract/src/main/kotlin/com/example/contract/`, with golden byte-identical
+files in `planning-contract/src/test/resources/golden/` and tolerance rules in
+`ApiVersionTest`. Changing a field here without changing the module and its goldens is a
+breaking change; bump `PlannerApi.VERSION` and this status block instead.
+
 Derived from the real engine signatures (`AutoPlan.propose`, `WorkingCalendar.propose`,
 `CriticalPathEngine.analyze`, `PlanHealth.evaluate`, `MultiSchedulePlanHealth.evaluate`,
 `ScheduleAnalysis.findConflicts`). The server exposes these as its planning API; the app's

@@ -202,9 +202,10 @@ Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
   claim-the-entry + FOR UPDATE (SERIALIZABLE rejected); SecretStore → KMS envelope
   (AAD = workspace + key, keep ciphertext on failed read); Gemini platform key +
   per-tenant quota (reserve-then-refuse). Code sites carry REDESIGN markers.
-- **WP-12** freeze the planner API: `PlanningRequest`/`PlanningResult`/
-  `PlanProposal`/`PlanConflict`/`PlanHealth` as a versioned wire contract with
-  round-trip tests. Nothing in Stage 3 starts until frozen.
+- [x] **WP-12** the planner API contract is FROZEN at v1: `:planning-contract` (plain JVM,
+  kotlinx-serialization-json 1.8.1) with wire DTOs, per-message versioning (newer refused,
+  unknown fields ignored), golden byte-identical files, whole-minute proposal rules, range
+  refusal as data. 19 tests; joined the verify.sh gate.
 - **WP-13..16** vertical slice (90-second magic moment is the acceptance test),
   Google Calendar sync worker, depth + paid tier, Expo mobile. Summarised in `08`;
   plan properly when Stage 2 closes.

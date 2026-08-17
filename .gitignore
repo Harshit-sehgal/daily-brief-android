@@ -22,3 +22,6 @@ keystore.properties
 
 # local tool scratch
 .commandcode/
+
+# per-module build output (root /build only covers the root project)
+**/build

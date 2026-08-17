@@ -4,13 +4,15 @@ A local-first Android app: device calendar + Notion in one schedule, overlap
 detection, and an optional Gemini summary. Compose UI, Room storage, no DI
 framework.
 
-Two Gradle modules. `:app` is the Android app. `:planning-core` is the scheduling
+Three Gradle modules. `:app` is the Android app. `:planning-core` is the scheduling
 engine and the domain model it works on — extracted so a server can run the same
 code the phone runs. It is a Kotlin Multiplatform module: `commonMain` holds the
 portable half, `jvmShared` holds everything still needing JVM APIs, and both the
 `jvm` target and Android depend on `jvmShared`. Moving a file from `jvmShared` to
 `commonMain` is the unit of porting work; `docs/saas/05-kmp-portability-audit.md`
-tracks what is left and why.
+tracks what is left and why. `:planning-contract` is the frozen wire contract
+(docs/saas/04-planner-api-contract.md): plain JVM, kotlinx-serialization only, golden
+byte-identical files — nothing in the SaaS stages starts until it is stable.
 
 **`commonMain` purity is enforced by the compiler, with a fast scan in reserve.** The
 `linuxX64` target (WP-7) gives the metadata compilation a consumer, so

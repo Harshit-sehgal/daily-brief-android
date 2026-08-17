@@ -59,13 +59,17 @@ done
 # toolchain cached under ~/.konan (1.8 GB) — one `verify.sh --online` run fetches it; the
 # offline promise holds afterwards.
 PURITY_GUARD=(:planning-core:compileCommonMainKotlinMetadata)
+# :planning-contract is a plain JVM module, so it has a plain `test` task; it must be named
+# explicitly or the gate would silently skip the frozen wire contract.
+CONTRACT_TESTS=(:planning-contract:test)
 if [ "$FAST" = 1 ]; then
-  TASKS=(:planning-core:jvmTest "${PURITY_GUARD[@]}" testDebugUnitTest)
+  TASKS=(:planning-core:jvmTest "${PURITY_GUARD[@]}" "${CONTRACT_TESTS[@]}" testDebugUnitTest)
 else
   # Mirrors .github/workflows: JVM tests, both lints, both APKs, R8 config.
   TASKS=(
     :planning-core:jvmTest
     "${PURITY_GUARD[@]}"
+    "${CONTRACT_TESTS[@]}"
     testDebugUnitTest
     lintDebug
     assembleDebug
