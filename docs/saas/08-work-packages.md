@@ -449,6 +449,13 @@ JVM, kotlinx-serialization-json 1.8.1) turns it into executable bytes:
 
 ## WP-13 — The vertical slice  (in progress)
 
+Progress (commit `f9f0d24`): `:server` module complete — Ktor service, Flyway V1
+from `db/schema.sql`, `SyncMergePolicy` in `planning-core` (commit `e3fe951`), sessions,
+tasks, reconcile, plan/apply/reject/undo/today, `Envelope` dev-key wrapping, all unit
+tests green and wired into `verify.sh`. Automated acceptance `scripts/journey.sh` passes
+in ~3 s against docker Postgres + fixture provider. Remaining: the `web/` client and the
+real-Google runbook, then the gate runs the journey.
+
 The journey, nothing else: **sign in → connect a calendar → add tasks → "Plan my week" → see a
 proposal with reasons → apply → see it on Today.** One user, one Google account, one weekend of
 schedule. The 90-second magic moment is the acceptance test, literally: signup to an
