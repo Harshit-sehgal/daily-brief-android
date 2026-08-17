@@ -54,7 +54,7 @@ internal object LegacyPlanCatalogBuilder {
     val boards =
       boardNames.mapIndexed { boardIndex, boardName ->
         val boardKey = boardKeys.getValue(boardName)
-        val boardId = LegacyNameKeys.stableId("legacy-board:$boardKey")
+        val boardId = stableId("legacy-board:$boardKey")
         val configured = SettingKeys.decodeList(encodedColumns(boardName))
         val eventColumns =
           eventDestinations
@@ -70,7 +70,7 @@ internal object LegacyPlanCatalogBuilder {
           columnNames.mapIndexed { columnIndex, columnName ->
             val columnKey = columnKeys.getValue(columnName)
             LegacyPlanColumn(
-              id = LegacyNameKeys.stableId("legacy-column:$boardId:$columnKey"),
+              id = stableId("legacy-column:$boardId:$columnKey"),
               boardId = boardId,
               name = columnName,
               nameKey = columnKey,
@@ -82,24 +82,24 @@ internal object LegacyPlanCatalogBuilder {
           name = boardName,
           nameKey = boardKey,
           rank = rankFor(boardIndex),
-          isDefault = boardKey == LegacyNameKeys.nameKey(SettingKeys.DEFAULT_BOARD),
+          isDefault = boardKey == nameKey(SettingKeys.DEFAULT_BOARD),
           columns = columns,
         )
       }
 
     val requestedName = validDisplayName(activeBoardName)
-    val requestedKey = requestedName?.let(LegacyNameKeys::nameKey)
+    val requestedKey = requestedName?.let(::nameKey)
     val active =
       boards.firstOrNull { it.name == requestedName }
-        ?: boards.firstOrNull { LegacyNameKeys.nameKey(it.name) == requestedKey }
+        ?: boards.firstOrNull { nameKey(it.name) == requestedKey }
         ?: boards.firstOrNull { it.isDefault }
         ?: boards.first()
     return LegacyPlanCatalog(boards = boards, activeBoardId = active.id)
   }
 
-  fun nameKey(value: String): String = LegacyNameKeys.nameKey(value)
+  fun nameKey(value: String): String = com.example.data.database.nameKey(value)
 
-  fun stableId(seed: String): String = LegacyNameKeys.stableId(seed)
+  fun stableId(seed: String): String = com.example.data.database.stableId(seed)
 
   /**
    * Room requires unique normalized keys, but v5 allowed visually similar Unicode names such as
@@ -110,7 +110,7 @@ internal object LegacyPlanCatalogBuilder {
     names: List<String>,
     preferredCanonical: String? = null,
   ): Map<String, String> {
-    val byBase = names.groupBy(LegacyNameKeys::nameKey)
+    val byBase = names.groupBy(::nameKey)
     val canonicalByBase =
       byBase.mapValues { (_, collisions) ->
         preferredCanonical?.takeIf { it in collisions }

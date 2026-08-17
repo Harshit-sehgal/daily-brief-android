@@ -1,6 +1,7 @@
 package com.example.data.repository
 
-import com.example.data.database.LegacyNameKeys
+import com.example.data.database.nameKey
+import com.example.data.database.stableId
 import com.example.data.model.PlanItemSchedule
 import com.example.data.model.WorkSchedule
 import com.example.data.model.WorkScheduleWindow
@@ -241,7 +242,7 @@ object WorkingScheduleMutationCodec {
         require(schedule.name.none(Char::isISOControl)) {
           "Working-schedule name contains a control character"
         }
-        require(LegacyNameKeys.nameKey(schedule.name) == schedule.nameKey) {
+        require(nameKey(schedule.name) == schedule.nameKey) {
           "Working-schedule name key is not canonical"
         }
         require(schedule.archivedAt == null || !schedule.isDefault) {

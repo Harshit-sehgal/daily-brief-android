@@ -1,6 +1,7 @@
 package com.example.data.repository
 
-import com.example.data.database.LegacyNameKeys
+import com.example.data.database.nameKey
+import com.example.data.database.stableId
 import com.example.data.model.PlanItemSchedule
 import com.example.data.model.WorkSchedule
 import com.example.data.model.WorkScheduleWindow
@@ -94,7 +95,7 @@ class WorkingScheduleMutationCodecTest {
     WorkSchedule(
       id = id,
       name = name,
-      nameKey = LegacyNameKeys.nameKey(name),
+      nameKey = nameKey(name),
       timeZoneId = zoneId,
       isDefault = isDefault,
       minimumChunkMinutes = 30,

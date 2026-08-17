@@ -4,7 +4,8 @@ import com.example.core.WorkingCalendarSpec
 import com.example.core.WorkingDateOverride
 import com.example.core.WorkingDayWindow
 import com.example.core.WorkingWeekWindow
-import com.example.data.database.LegacyNameKeys
+import com.example.data.database.nameKey
+import com.example.data.database.stableId
 import com.example.data.database.WorkScheduleDefaults
 import com.example.data.model.WorkSchedule
 import com.example.data.model.WorkScheduleWindow
@@ -210,7 +211,7 @@ class WorkingCalendarMapperTest {
     assertEquals(WorkScheduleDefaults.ID, seeded.schedule.id)
     assertEquals(WorkScheduleDefaults.NAME, seeded.schedule.name)
     assertEquals(
-      LegacyNameKeys.nameKey(WorkScheduleDefaults.NAME),
+      nameKey(WorkScheduleDefaults.NAME),
       seeded.schedule.nameKey,
     )
     assertEquals("UTC", seeded.schedule.timeZoneId)
