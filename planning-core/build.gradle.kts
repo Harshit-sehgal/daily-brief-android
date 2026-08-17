@@ -19,6 +19,14 @@ plugins {
 kotlin {
   jvm()
 
+  // The whole point of this module: with a non-JVM target present, Kotlin finally has a
+  // consumer for common metadata, so compileCommonMainKotlinMetadata stops being SKIPPED
+  // and a stray java.* import in commonMain fails the build instead of the source-scan test.
+  // linuxX64 is the cheapest non-JVM target on this machine; iosArm64 is the real one but
+  // needs macOS to build. The ~1 GB native toolchain needs one connected run to fetch; the
+  // gate stays --offline afterwards (scripts/verify.sh --online for that first run).
+  linuxX64()
+
   androidLibrary {
     namespace = "com.example.planning"
     // Must match the app exactly. This toolchain has platform 37.1 installed and nothing

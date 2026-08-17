@@ -53,13 +53,19 @@ done
 
 # The engine's tests are a separate task: :planning-core is a Kotlin Multiplatform
 # module, so it has jvmTest rather than the app's testDebugUnitTest, and an unqualified
-# task name would skip it silently.
+# task name would skip it silently. compileCommonMainKotlinMetadata is the WP-7 compiler
+# guard for commonMain purity: without it the gate would not notice a stray java.* import,
+# because neither jvmTest nor the app tasks ask for it. It needs the Kotlin/Native
+# toolchain cached under ~/.konan (1.8 GB) — one `verify.sh --online` run fetches it; the
+# offline promise holds afterwards.
+PURITY_GUARD=(:planning-core:compileCommonMainKotlinMetadata)
 if [ "$FAST" = 1 ]; then
-  TASKS=(:planning-core:jvmTest testDebugUnitTest)
+  TASKS=(:planning-core:jvmTest "${PURITY_GUARD[@]}" testDebugUnitTest)
 else
   # Mirrors .github/workflows: JVM tests, both lints, both APKs, R8 config.
   TASKS=(
     :planning-core:jvmTest
+    "${PURITY_GUARD[@]}"
     testDebugUnitTest
     lintDebug
     assembleDebug

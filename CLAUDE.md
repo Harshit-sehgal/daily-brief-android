@@ -12,16 +12,17 @@ portable half, `jvmShared` holds everything still needing JVM APIs, and both the
 `commonMain` is the unit of porting work; `docs/saas/05-kmp-portability-audit.md`
 tracks what is left and why.
 
-**`commonMain` purity is enforced by a test, not by the compiler.** This is
-counter-intuitive and worth knowing before trusting a green build:
-`compileCommonMainKotlinMetadata` exists but is **SKIPPED**, because Kotlin only
-produces a metadata compilation once some target needs one, and `jvm` plus
-`androidTarget` are both JVM-family. A file importing `java.util.Calendar` in
-`commonMain` therefore compiles without complaint — confirmed by planting one.
-The check fails *open*, which is worse than absent, so `CommonMainPurityTest`
-reads the sources instead, the way `UiConsistencyTest` reads the UI. Adding a
-non-JVM target (Kotlin/Native is roughly a gigabyte, and not in the pinned
-toolchain) would hand the job back to the compiler.
+**`commonMain` purity is enforced by the compiler, with a fast scan in reserve.** The
+`linuxX64` target (WP-7) gives the metadata compilation a consumer, so
+`compileCommonMainKotlinMetadata` executes and a stray `java.util.Calendar` import fails
+the build — the gate runs it (`verify.sh`), and the acceptance was proven by planting one.
+It is worth knowing the target only *compiles*: `LegacyNameKeys` has a native `actual`
+that throws rather than approximate NFKC, because Android and the JVM server are the only
+surfaces that run the engine. `CommonMainPurityTest` remains as the fast duplicate with the
+better error message, and it scans for the JVM-only stdlib class the compiler caught first:
+`toSortedMap`/`toSortedSet`, `@JvmOverloads`, `String.format` and `java.lang.System` are
+not imports, so they need explicit rules. The native toolchain (~1.8 GB in `~/.konan`)
+wants one `verify.sh --online` run; `--offline` holds afterwards.
 
 ## Build and test
 

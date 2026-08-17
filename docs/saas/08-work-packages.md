@@ -307,22 +307,28 @@ numbering), not ISO. `WorkingCalendar.calendarDayOfWeek()` already shows the tra
 
 ---
 
-## WP-7 — Compiler-enforced `commonMain` purity
+## WP-7 — Compiler-enforced `commonMain` purity  ✅ done
 
-**Size:** medium, mostly waiting on a download. **Do last in Stage 1.**
+**Size:** medium, mostly waiting on a download. **Do last in Stage 1.** Done; the acceptance
+was verified by planting `import java.util.Calendar` in `GuardedArithmetic.kt` — the native
+compile rejects it.
 
-Add a non-JVM target so `compileCommonMainKotlinMetadata` stops being SKIPPED. On Linux,
-`linuxX64()` is the cheap option; `iosArm64()` is the real one and needs macOS to build.
-Roughly 1 GB of Kotlin/Native toolchain — **this machine has no `~/.konan`**, and
-`scripts/verify.sh` runs `--offline`, so expect one connected run and update the script's
-documentation if the offline promise changes.
+The one surprise: `room-common` 2.8.4 does publish a `linuxX64` variant, so `linuxX64()`
+survives where the plan feared it would not — but the first real compile then caught what the
+source-scan test had sailed past for months. `commonMain` held JVM-only stdlib extensions that
+are not imports, so no scan rule saw them: `toSortedMap`/`toSortedSet` (CriticalPathEngine,
+WorkingScheduleMutationCodec, MultiSchedulePlanHealth, SavedViewCodec), `@JvmOverloads`
+(TimelineLayout), `String.format` (SavedViewCodec) and `java.lang.System.currentTimeMillis`
+(DailyBriefing). All were replaced with portable equivalents, and `CommonMainPurityTest` now
+scans for the whole class. `LegacyNameKeys` needed a native `actual`; it throws on linuxX64
+rather than approximate NFKC, because this target exists to compile the engine, not run it —
+Android and the JVM server both resolve the byte-identical JVM actual, and the fixture test
+pins the split.
 
-Once the compiler enforces it, `CommonMainPurityTest`'s first test becomes a fast duplicate —
-keep it (it gives a better error message) but note the change in its doc comment.
-
-**Acceptance:** planting `import java.util.Calendar` in a `commonMain` file **fails the build**.
-Verify by actually planting one; the guard this replaces failed open, and so might its
-replacement.
+The gate now runs `:planning-core:compileCommonMainKotlinMetadata` (it was not reachable from
+jvmTest, so CI would never have fired the guard). The ~1.8 GB toolchain in `~/.konan` needs one
+`verify.sh --online` run; `--offline` works afterwards. `CommonMainPurityTest`'s first test is
+kept as the fast duplicate with the better error message, per the plan.
 
 ---
 

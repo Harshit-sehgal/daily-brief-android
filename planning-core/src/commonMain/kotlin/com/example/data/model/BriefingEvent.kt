@@ -2,6 +2,8 @@ package com.example.data.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
 /** Sources an event can come from. Stored as plain strings for schema stability. */
 object EventSource {
@@ -46,7 +48,7 @@ data class BriefingEvent(
 data class DailyBriefing(
   @PrimaryKey val dateString: String,
   val briefText: String,
-  val createdAt: Long = System.currentTimeMillis(),
+  @OptIn(ExperimentalTime::class) val createdAt: Long = Clock.System.now().toEpochMilliseconds(),
   /** Fingerprint of the events the text was generated from; drives cache reuse. */
   val signature: String = "",
 )

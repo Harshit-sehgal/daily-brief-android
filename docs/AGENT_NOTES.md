@@ -179,9 +179,13 @@ Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
       `PlanMutationState` cannot span source sets. Needs WP-4 + WP-6.
 - [ ] **WP-6** `WorkingCalendarMapper` off `Calendar` (239 lines; Sunday-is-1
       convention preserved). Can precede WP-4; WP-5 needs both.
-- [ ] **WP-7** Non-JVM target (linuxX64 ~1 GB) so `compileCommonMainKotlinMetadata`
-      stops being SKIPPED. Offline cache risk; do last; keep
-      `CommonMainPurityTest` as the fast duplicate.
+- [x] **WP-7** `linuxX64` target added (room-common publishes linuxX64, so it works);
+      metadata compile is real and wired into `verify.sh`; planting a `java.util` import
+      fails the build (verified). Caught real JVM-only pollution the scan had missed —
+      `toSortedMap`/`toSortedSet`, `@JvmOverloads`, `String.format`, `java.lang.System` —
+      all replaced; `CommonMainPurityTest` scans the class now; `LegacyNameKeys` native
+      actual throws (compile-only target; JVM actual stays byte-identical). Toolchain
+      (~1.8 GB in `~/.konan`) needs one `--online` run, then `--offline` holds.
 - [ ] **WP-8** Delete the `NotionClient` `commonZone` bridge (line ~76) once
       `ScheduleAnalysis` speaks kotlinx-datetime. Trivial.
 - [x] **WP-9** Defects 3 (SS/FF/SF — confirmed wanted, then built), 5 (benchmark

@@ -107,7 +107,9 @@ object CriticalPathEngine {
       }
     val byId =
       itemGroups
-        .toSortedMap()
+        .toList()
+        .sortedBy { it.first }
+        .toMap()
         .mapValues { (_, duplicates) -> duplicates.minBy { it.toString() } }
 
     val duplicateBlockIds =
@@ -115,7 +117,7 @@ object CriticalPathEngine {
         .groupBy(PlanBlock::id)
         .filterValues { it.size > 1 }
         .keys
-        .toSortedSet()
+        .sorted()
     duplicateBlockIds.forEach { blockId ->
       issues +=
         CriticalPathIssue(
@@ -171,7 +173,7 @@ object CriticalPathEngine {
         }
       }
 
-    validBlocksByItem.toSortedMap().forEach { (itemId, taskBlocks) ->
+    validBlocksByItem.toList().sortedBy { it.first }.forEach { (itemId, taskBlocks) ->
       taskBlocks
         .sortedWith(compareBy<PlanBlock> { it.startAt }.thenBy { it.endAt }.thenBy { it.id })
         .zipWithNext()
@@ -288,7 +290,7 @@ object CriticalPathEngine {
         .groupBy(PlanDependency::id)
         .filterValues { it.size > 1 }
         .keys
-        .toSortedSet()
+        .sorted()
     duplicateDependencyIds.forEach { dependencyId ->
       issues +=
         CriticalPathIssue(

@@ -107,7 +107,7 @@ object SavedViewCodec {
     values.joinToString(prefix = "[", postfix = "]") { quote(it) }
 
   fun encodeStringObject(values: Map<String, String>): String =
-    values.toSortedMap().entries.joinToString(prefix = "{", postfix = "}") { (key, value) ->
+    values.toList().sortedBy { it.first }.joinToString(prefix = "{", postfix = "}") { (key, value) ->
       "${quote(key)}:${quote(value)}"
     }
 
@@ -128,7 +128,7 @@ object SavedViewCodec {
           '\r' -> append("\\r")
           '\t' -> append("\\t")
           else ->
-            if (character.code < 0x20) append("\\u%04x".format(character.code))
+            if (character.code < 0x20) append("\\u" + character.code.toString(16).padStart(4, '0'))
             else append(character)
         }
       }

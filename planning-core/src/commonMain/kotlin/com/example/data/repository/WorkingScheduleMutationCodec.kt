@@ -27,7 +27,7 @@ object WorkingScheduleMutationCodec {
   fun encode(state: WorkingScheduleMutationState): EncodedPlanMutationState {
     validate(state)
     val records = linkedMapOf<String, String>()
-    state.schedules.toSortedMap().forEach { (id, schedule) ->
+    state.schedules.toList().sortedBy { it.first }.forEach { (id, schedule) ->
       records[key(SCHEDULE, id)] =
         Fields.encode(
           listOf(
@@ -99,7 +99,7 @@ object WorkingScheduleMutationCodec {
         val schedules = linkedMapOf<String, WorkSchedule?>()
         val windows = linkedMapOf<String, MutableList<WorkScheduleWindow>>()
         val assignments = linkedMapOf<String, MutableList<PlanItemSchedule>>()
-        scheduleRecords.toSortedMap().forEach { (recordKey, record) ->
+        scheduleRecords.toList().sortedBy { it.first }.forEach { (recordKey, record) ->
           val id = recordId(recordKey)
           require(id !in schedules) { "Duplicate working schedule" }
           val decoded = decodeSchedule(id, record)
@@ -107,13 +107,13 @@ object WorkingScheduleMutationCodec {
           windows[id] = mutableListOf()
           if (decoded.tracksAssignments) assignments[id] = mutableListOf()
         }
-        windowRecords.toSortedMap().forEach { (recordKey, record) ->
+        windowRecords.toList().sortedBy { it.first }.forEach { (recordKey, record) ->
           val window = decodeWindow(recordId(recordKey), record)
           requireNotNull(windows[window.scheduleId]) {
             "Working window belongs to an untracked schedule"
           }.add(window)
         }
-        assignmentRecords.toSortedMap().forEach { (recordKey, record) ->
+        assignmentRecords.toList().sortedBy { it.first }.forEach { (recordKey, record) ->
           val assignment = decodeAssignment(recordId(recordKey), record)
           requireNotNull(assignments[assignment.workScheduleId]) {
             "Assignment belongs to an untracked schedule scope"

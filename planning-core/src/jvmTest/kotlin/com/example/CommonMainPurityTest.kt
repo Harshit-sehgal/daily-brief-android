@@ -5,20 +5,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * `commonMain` is the portable half of the engine, and this is what actually enforces it.
- *
- * The obvious mechanism — let `compileCommonMainKotlinMetadata` reject `java.util.Calendar` —
- * does not work here, and it fails open rather than closed, which is worse than not having it.
- * Kotlin only produces a metadata compilation once a target needs one; with `jvm` and
- * `androidTarget` both being JVM-family, the task is registered and then SKIPPED, so a file
- * importing `java.util.Calendar` compiles happily in `commonMain` and nothing says a word.
- * Verified by planting one: build still green.
- *
- * Earning the compiler check means adding a non-JVM target, and on Linux that is a Kotlin/Native
- * toolchain of about a gigabyte that this pinned, offline toolchain does not carry. So the rule is
- * enforced the way `UiConsistencyTest` enforces the radius scale: by reading the source. When an
- * iOS or wasm target is added later, the compiler takes over and this test becomes a fast
- * duplicate rather than the only guard.
+ * `commonMain` is the portable half of the engine. The compiler now enforces it — the
+ * `linuxX64` target (WP-7) made `compileCommonMainKotlinMetadata` real, and a `java.util`
+ * import there fails the build, verified by planting one — so this test is a fast duplicate
+ * with a better error message, not the only guard. Keep it green: the metadata compile is
+ * part of `scripts/verify.sh`, but a source-scan failure here points at the exact line.
  *
  * A file in `commonMain` may use the Kotlin common stdlib and nothing else. Anything needing JVM
  * APIs belongs in `jvmShared`, which both the server target and Android depend on.
@@ -54,6 +45,17 @@ class CommonMainPurityTest {
         "the engine is synchronous on purpose; concurrency belongs to the caller",
       Regex("""\bMath\.\w+""") to
         "java.lang.Math is implicit on the JVM only — use kotlin.math, a.mod(b), or guarded arithmetic",
+      // The linuxX64 compile caught these after the import scan sailed past them: JVM-only
+      // stdlib extensions and annotations are not imports, so the scan names them explicitly.
+      // (Clock.System is fine and must not match — the lookbehind excludes it.)
+      Regex("""\.toSortedMap\(|\.toSortedSet\(""") to
+        "JVM-only stdlib extensions — sort with toList().sortedBy { it.first } and friends",
+      Regex("""(?<!\.)\bSystem\.(currentTimeMillis|nanoTime|getProperty|getenv)""") to
+        "java.lang.System is implicit on the JVM only — use kotlin.time.Clock.System",
+      Regex("""@JvmOverloads""") to
+        "@JvmOverloads is JVM-only; default arguments already cover Kotlin callers",
+      Regex("""\.format\(""") to
+        "String.format is JVM-only — build the string with toString(16).padStart or similar",
     )
 
   @Test

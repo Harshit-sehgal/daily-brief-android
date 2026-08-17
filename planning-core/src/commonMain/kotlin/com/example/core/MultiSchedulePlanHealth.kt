@@ -396,7 +396,7 @@ object MultiSchedulePlanHealth {
     demandBySchedule: Map<String, Int>,
     freeBySchedule: Map<String, List<WorkingInterval>>,
   ): Int {
-    val positiveDemand = demandBySchedule.filterValues { it > 0 }.toSortedMap()
+    val positiveDemand = demandBySchedule.filterValues { it > 0 }.toList().sortedBy { it.first }.toMap()
     if (positiveDemand.isEmpty()) return 0
     val boundaries =
       freeBySchedule.values

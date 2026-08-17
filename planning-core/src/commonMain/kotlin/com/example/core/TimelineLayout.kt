@@ -37,7 +37,6 @@ object TimelineLayout {
    * @param timeZone zone whose wall clock labels the timeline
    * @return timed events only; all-day entries are the caller's problem to banner
    */
-  @JvmOverloads
   fun layout(
     events: List<BriefingEvent>,
     dayStart: Long,
@@ -107,7 +106,6 @@ object TimelineLayout {
     events.filter { ScheduleAnalysis.isAllDay(it) }.sortedBy { it.title }
 
   /** Minute of the day, or null when [nowMs] is not inside this day. */
-  @JvmOverloads
   fun nowMinute(
     nowMs: Long,
     dayStart: Long,
