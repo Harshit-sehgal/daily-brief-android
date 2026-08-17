@@ -2,6 +2,8 @@ package com.example.ui.screens
 
 import androidx.compose.ui.platform.LocalContext
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.ui.theme.InlineIconSize
 import com.example.ui.theme.Radius
 import androidx.compose.foundation.layout.Arrangement
@@ -142,6 +144,16 @@ fun PlanScreen(
   var baselineName by rememberSaveable { mutableStateOf("") }
   var pendingDeleteBaselineId by rememberSaveable { mutableStateOf<String?>(null) }
   val selectedSavedView = savedViews.firstOrNull { it.view.id == activeSavedViewId }
+  val pdfLauncher =
+    rememberLauncherForActivityResult(
+      ActivityResultContracts.CreateDocument("application/pdf"),
+    ) { uri ->
+      if (uri != null) {
+        viewModel.exportActivePlanPdf { bytes ->
+          context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+        }
+      }
+    }
   fun exportPlan(asCalendar: Boolean) {
     viewModel.exportActivePlan(asCalendar) { body, mime ->
       val send =
@@ -152,6 +164,10 @@ fun PlanScreen(
         }
       context.startActivity(Intent.createChooser(send, "Export plan"))
     }
+  }
+
+  fun exportPlanPdf() {
+    pdfLauncher.launch("daily-brief-plan.pdf")
   }
 
   val childPadding =
@@ -182,6 +198,7 @@ fun PlanScreen(
           onTools = { showTools = true },
           onHistory = { showHistory = true },
           onExport = ::exportPlan,
+          onExportPdf = ::exportPlanPdf,
         )
       },
       modifier = Modifier.padding(horizontal = gutter),

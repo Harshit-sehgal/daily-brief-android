@@ -29,6 +29,11 @@ import com.example.core.PlanScenarios
 import com.example.core.PlanScenario
 import com.example.core.BaselineVariance
 import com.example.core.BaselineComparison
+import android.content.Intent
+import com.example.export.PdfPlanLayout
+import com.example.export.PdfPlanExporter
+import com.example.export.PdfRow
+import com.example.widget.TodayWidgetProvider
 import com.example.core.WorkingCalendarSpec
 import com.example.data.api.WriteBack
 import com.example.data.database.PlanItemWithBlocks
@@ -1054,6 +1059,46 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
         throw e
       } catch (e: Exception) {
         message(e.message ?: "That plan could not be exported")
+      }
+    }
+  }
+
+  /**
+   * The same plan as a printable PDF. The document is paginated and rendered entirely off the
+   * main thread by [com.example.export.PdfPlanExporter]; the caller owns writing the bytes out.
+   */
+  fun exportActivePlanPdf(onReady: (ByteArray) -> Unit) {
+    val board = activePlanBoard.value
+    if (board == null) {
+      message("Choose a plan board before exporting it")
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val relations = planGanttItems.value
+        val items =
+          relations.map { it.item }.filter { it.archivedAt == null }.sortedBy { it.rank }
+        val blocks = relations.flatMap { it.blocks }
+        val blocksByItem = blocks.groupBy(PlanBlock::planItemId)
+        val rows =
+          items.map { item ->
+            val itemBlocks = blocksByItem[item.id].orEmpty().sortedBy(PlanBlock::startAt)
+            val detail =
+              listOfNotNull(
+                item.effortMinutes?.let { "$it min" },
+                "${item.progress}%",
+                item.dueAt?.let { "due ${IsoDates.isoUtc(it)}" },
+                itemBlocks.size.let { n -> "$n block${if (n == 1) "" else "s"}" },
+              ).joinToString(" · ")
+            PdfRow(item.title, detail)
+          }
+        val generatedAt = IsoDates.isoUtc(System.currentTimeMillis())
+        val pages = PdfPlanLayout.pages("${board.name} — plan ($generatedAt)", generatedAt, rows)
+        onReady(PdfPlanExporter.render(pages))
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That plan could not be exported as a PDF")
       }
     }
   }
@@ -2307,6 +2352,7 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
               ScheduleAnalysis.startOfDayOffset(now, -SYNC_DAYS_BACK),
               ScheduleAnalysis.startOfDayOffset(now, SYNC_DAYS_FORWARD),
             )
+          appContext.sendBroadcast(Intent(TodayWidgetProvider.ACTION_REFRESH).setPackage(appContext.packageName))
           _needsCalendarPermission.value = outcome.calendarPermissionMissing
 
           AlarmScheduler.cancelEventReminders(appContext, outcome.removedEvents)
