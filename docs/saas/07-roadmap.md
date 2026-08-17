@@ -4,6 +4,10 @@ Written 2026-08-17, after the extraction, the specification set and the deviatio
 closed. This is the forward plan: what to build, in what order, and what has to be true before
 each step starts.
 
+**Execution detail is in `08-work-packages.md`** — discrete units with files, steps, acceptance
+tests and traps, written to be handed to other agents. This document is the why and the order;
+that one is the what and the how.
+
 Sequencing principle, unchanged since the teardown: **the engine is the asset, the web app is
 the product, and the Android app is the shipping proof.** Work that makes the engine portable
 and the domain model right comes before work that makes screens.
