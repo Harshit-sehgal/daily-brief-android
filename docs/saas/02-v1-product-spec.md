@@ -77,9 +77,16 @@ unlocks *multiple* engagements so the max-flow question becomes real.
 
 ## Explicitly not in V1
 
+> ⚠️ **Three items on this list have since been built in the Android app** — PDF export and a
+> home-screen widget (`a5bc8c1`), encrypted backup/restore (`43dea69`) — within half an hour of
+> this document being committed. See `06-scope-deviations.md` **D1**. Until that is resolved,
+> this section describes the intended V1 and not the shipped app, and one of the two has to
+> change.
+
 - Voice/free-form intent (the replan loop makes it redundant)
-- PDF export (server-side after launch; teardown marks LATER)
-- Mobile widgets, encrypted backup/restore (LATER; `SecretStore` design carries over)
+- PDF export (server-side after launch; teardown marks LATER) — **built anyway, see D1**
+- Mobile widgets, encrypted backup/restore (LATER; `SecretStore` design carries over) —
+  **built anyway, see D1**
 - Multi-window / tablet layout polish
 - Recurring tasks (Notion repeats via connectors only)
 - Slack/Teams connectors (calendar connection is the funnel)

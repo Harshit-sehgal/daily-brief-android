@@ -48,3 +48,16 @@ kotlin {
     getByName("jvmTest").dependencies { implementation(libs.junit) }
   }
 }
+
+// CommonMainPurityTest reads the source tree at runtime rather than through the compiler
+// (see its doc comment for why). Gradle cannot infer that, so moving a file between source
+// sets left the task UP-TO-DATE and the guard reported stale numbers from the previous
+// layout. Declaring both trees as inputs is what makes the check trustworthy.
+tasks.named("jvmTest") {
+  inputs.dir(layout.projectDirectory.dir("src/commonMain/kotlin")).withPathSensitivity(
+    org.gradle.api.tasks.PathSensitivity.RELATIVE,
+  )
+  inputs.dir(layout.projectDirectory.dir("src/jvmShared/kotlin")).withPathSensitivity(
+    org.gradle.api.tasks.PathSensitivity.RELATIVE,
+  )
+}

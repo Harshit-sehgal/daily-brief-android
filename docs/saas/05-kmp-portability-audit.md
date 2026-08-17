@@ -18,7 +18,20 @@ SKIPPED, because Kotlin only produces a metadata compilation once some target ne
 which is worse than absent, which is why the test exists. Adding a non-JVM target (Kotlin/Native
 is roughly a gigabyte, and not in the pinned toolchain) would hand the job back to the compiler.
 
-## Already portable — `commonMain`, 1,784 lines
+## Two denominators, reconciled
+
+This document tracks the **engine core** (`core/`). `CommonMainPurityTest` prints a **whole-module**
+figure, which also counts the domain model, the journal codecs and the mapper. They differ, and both
+are quoted in places, so:
+
+| Scope | `commonMain` | `jvmShared` | Portable |
+| --- | ---: | ---: | ---: |
+| Engine core (`core/` only — this document) | 1,784 | 3,364 | **34.7%** |
+| Whole module (what the test prints) | 2,547 | 5,311 | **32%** |
+
+Neither is wrong; quote the scope with the number.
+
+## Already portable — engine core in `commonMain`, 1,784 lines
 
 | File | Lines | Notes |
 | --- | ---: | --- |
@@ -33,17 +46,20 @@ is roughly a gigabyte, and not in the pinned toolchain) would hand the job back 
 | `Fuzzy` | 60 | |
 | `GuardedArithmetic` | 31 | the guarded `addExact`/`subtractExact`/`multiplyExact` helper |
 
-35.5% of the engine core (1,784 / 5,032 lines) is now portable — up from ~25% at the end of
-the Phase 1 extraction (`3d05da8`).
+34.7% of the engine core (1,784 / 5,148 lines) is portable — up from ~25% at the end of the
+Phase 1 extraction (`3d05da8`). The share dipped from the 35.5% reported earlier in the day
+without anything moving backwards: `PortfolioGantt` (+69) was added to `jvmShared`, and
+`AutoPlan` (+36) and `ScheduleAnalysis` (+11) grew with the deadline fix. A growing denominator
+is the normal way this number falls.
 
-## Still in `jvmShared`, 3,248 lines
+## Still in `jvmShared`, 3,364 lines
 
 | File | Lines | Own JVM dependency | Also blocked via |
 | --- | ---: | --- | --- |
-| `ScheduleAnalysis` | 363 | `ByteBuffer`, `MessageDigest`, `Calendar`, `TimeZone` | — |
+| `ScheduleAnalysis` | 374 | `ByteBuffer`, `MessageDigest`, `Calendar`, `TimeZone` | `WorkingCalendar` |
 | `WorkingCalendar` | 309 | `ParsePosition`, `SimpleDateFormat`, `Calendar`, `Locale`, `TimeZone` | — |
 | `GanttLayout` | 287 | `BigDecimal`, `BigInteger`, `MathContext`, `RoundingMode`, `Calendar`, `TimeZone` | `ScheduleAnalysis` |
-| `AutoPlan` | 246 | `Math.floorMod` | `WorkingCalendar` |
+| `AutoPlan` | 282 | `Math.floorMod` | `WorkingCalendar` |
 | `PlanBlockPreview` | 237 | `Math.floorMod` | `DependencyAnalysis`*, `WorkingCalendar` |
 | `PlanScenarios` | 157 | — | `AutoPlan`, `WorkingCalendar` |
 | `PlanGanttLayout` | 154 | `Math.subtractExact` | `GanttLayout`, `ScheduleAnalysis` |
@@ -54,10 +70,30 @@ the Phase 1 extraction (`3d05da8`).
 | `IsoDates` | 79 | `ParsePosition`, `SimpleDateFormat`, `Date`, `Locale`, `TimeZone` | — |
 | `MultiSchedulePlanHealth` | 608 | — | `DependencyAnalysis`*, `WorkingCalendar` |
 | `PlanHealth` | 349 | — | `DependencyAnalysis`*, `WorkingCalendar` |
+| `PortfolioGantt` | 69 | — | `GanttLayout`, `ScheduleAnalysis`, `WorkingCalendar` |
 
 \* Only via the schedule engine they compose, not through JVM APIs.
 
 `DependencyAnalysis` and `CriticalPathEngine` no longer appear — they moved to `commonMain`.
+
+### Non-`core/` files in the module
+
+Counted by the purity test, not by the engine-core figure above.
+
+| File | Lines | Source set | Note |
+| --- | ---: | --- | --- |
+| `PlanningModels`, `BriefingEvent` | 501 | `commonMain` | Domain model; keeps its Room annotations because `room-common` is multiplatform |
+| `SavedViewCodec` | 252 | `commonMain` | Moved from `jvmShared` — nothing was blocking it |
+| `WorkScheduleDefaults` | 10 | `commonMain` | Moved from `jvmShared` — nothing was blocking it |
+| `PlanMutationCodec` | 808 | `jvmShared` | Via `LegacyNameKeys`, `WorkingCalendarMapper` |
+| `WorkingScheduleMutationCodec` | 363 | `jvmShared` | Via `LegacyNameKeys`, `WorkingCalendarMapper` |
+| `PlanCatalogMutationCodec` | 359 | `jvmShared` | Via `LegacyNameKeys`, `WorkingCalendarMapper` |
+| `WorkingCalendarMapper` | 239 | `jvmShared` | `Calendar` |
+| `LegacyNameKeys` | 22 | `jvmShared` | `Normalizer`, `StandardCharsets`, `Locale`, `UUID` — small, and it blocks all three codecs |
+| `RowBackupCodec` | 156 | `jvmShared` | **Does not belong in this module** — see `06-scope-deviations.md` D3 |
+
+`LegacyNameKeys` is 22 lines and gates 1,530 lines of codec. `Normalizer` is the only real
+obstacle; the rest have common equivalents. It is the cheapest remaining unblock in the module.
 
 ## Classification
 
@@ -137,3 +173,12 @@ audit:
   codec/`WorkingCalendarMapper`/`SavedViewCodec` untangled into `planning-core`; `GanttInteraction`
   split back into `:app`; `CommonMainPurityTest` added. All suites green (`scripts/verify.sh
   --fast`), 380 JVM tests.
+- 2026-08-17 (later): `SavedViewCodec` (252) and `WorkScheduleDefaults` (10) → `commonMain`;
+  they had no JVM dependency and nothing blocking them, and had simply been left behind by the
+  Phase 5 untangling. Whole module 29% → 32%. `PortfolioGantt` added to `jvmShared` (correctly
+  — it composes `GanttLayout`). Tables re-measured against the tree; the two denominators are
+  now reconciled at the top of this document.
+- 2026-08-17 (later): `jvmTest` now declares `src/commonMain/kotlin` and `src/jvmShared/kotlin`
+  as task inputs. `CommonMainPurityTest` reads the source tree at runtime, so Gradle could not
+  see that moving a file invalidates it — the task stayed UP-TO-DATE and the guard reported the
+  *previous* layout's percentage. The one number this effort is tracked by was silently stale.

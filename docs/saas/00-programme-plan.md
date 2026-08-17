@@ -71,29 +71,54 @@ renames**.
   name would have skipped the engine suite silently, because a KMP module has `jvmTest`, not
   `testDebugUnitTest`.
 
-**Phase 2 — first `commonMain` migration.** *Complete but uncommitted.*
+**Phase 2 — first `commonMain` migration.** `17cdc00`, `86e62ad`.
 
 - `androidx.room:room-common` turns out to be **fully multiplatform** — it publishes iOS, wasm,
   JS and JVM variants. The domain model therefore keeps its `@Entity` metadata *and* lives in
   `commonMain`. This removed the model as a blocker for every downstream file, which was the
   single biggest unlock available.
-- Moved to `commonMain`: the domain model plus `Fuzzy`, `GanttDependencyPaths`, `MiniMarkdown`,
-  `BaselineVariance`, `PlanExport`, `PortfolioRollup`, `WeeklyReview`.
+- Moved to `commonMain`: the domain model, `Fuzzy`, `GanttDependencyPaths`, `MiniMarkdown`,
+  `BaselineVariance`, `PlanExport`, `PortfolioRollup`, `WeeklyReview`, then `GuardedArithmetic`,
+  `DependencyAnalysis` and `CriticalPathEngine`.
 - `CommonMainPurityTest` added — see §3 for why it exists instead of a compiler check.
 
-### Current shape
+**Phase 5 — the portability project (brought forward).** `f87635b`.
+
+- Journal codecs untangled from the Room migration file: `PlanMutationCodec`,
+  `PlanCatalogMutationCodec`, `WorkingScheduleMutationCodec`, `SavedViewCodec` and
+  `WorkingCalendarMapper` now live in `planning-core`, with `LegacyNameKeys` extracted as the
+  pure part of the migration file.
+- `PriorityQueue` replaced by a private lexicographic min-heap in `CriticalPathEngine`,
+  preserving the determinism the tests pin.
+- `GanttInteraction` split 297 → 108 lines; the px/dp manipulation geometry went back to `:app`.
+
+**Phase 3 — engine contract tests.** `b649ac7`. Canonical scenarios across working calendars,
+dependencies, critical path, deadline feasibility, capacity, plan health and auto-plan.
+
+**Phase 4 — the specification set.** `b0ecbd3`. `01-product-teardown.md`,
+`02-v1-product-spec.md`, `03-domain-and-architecture.md`, `04-planner-api-contract.md`.
+
+**Engine defects 1, 2, 4 and 6 fixed.** `b11ad72` — see §6, and `06-scope-deviations.md` D2 for
+the process note.
+
+### Current shape (2026-08-17, `scripts/verify.sh` green)
 
 | | Files | Lines | Share |
 | --- | ---: | ---: | ---: |
-| `planning-core/commonMain` | 9 | 1,233 | **22%** |
-| `planning-core/jvmShared` | 16 | 4,410 | 78% |
-| `planning-core` tests | 23 | — | 192 tests, 0 failures |
-| `app/src/main` | 67 | 31,747 | — |
-| `app` tests | 41 suites | — | 188 tests, 0 failures |
+| `planning-core/commonMain` | 14 | 2,547 | **32%** of the module |
+| `planning-core/jvmShared` | 21 | 5,311 | 68% |
+| — of which engine core (`core/` only) | — | 1,784 / 5,148 | **34.7%** portable |
+| `planning-core` tests | 31 suites | — | 227 tests, 0 failures |
+| `app` tests | 39 suites | — | 174 tests, 0 failures |
 
-### Not started
+Two denominators, both quoted in places; `05-kmp-portability-audit.md` reconciles them.
 
-Phase 3 (engine contract tests) and Phase 4 (the five specification documents).
+### Scope deviations
+
+Five features and one behaviour change landed outside the agreed scope. They are catalogued in
+**`06-scope-deviations.md`**, which is the live issue register. The one needing a decision is
+**D1**: a home-screen widget, PDF export and encrypted backup/restore were built 14–32 minutes
+*after* the V1 spec listing them as "explicitly not in V1" was committed.
 
 ---
 
@@ -146,63 +171,20 @@ plugin marker and the `-metadata` artifact variants of `room-common`, `androidx.
 
 ## 4. The KMP portability audit
 
-Measured, not estimated. `core/` is one package, so intra-package references are invisible to
-import analysis; this is computed from a reference graph over declared symbols, then closed
-transitively.
+**Moved to `05-kmp-portability-audit.md`**, which is regenerated from the tree and is the single
+source of truth. It was duplicated here, and a table maintained in two documents plus a test's
+stdout drifts within a day — it did.
 
-### Already portable — `commonMain`, 1,233 lines
+Headline as of 2026-08-17: **34.7% of the engine core is portable** (1,784 / 5,148 lines), 32%
+of the whole module. Five files are root blockers — `WorkingCalendar`, `ScheduleAnalysis`,
+`IsoDates`, `GanttLayout` and `LegacyNameKeys`. `CriticalPathEngine` and `DependencyAnalysis`
+have already cleared.
 
-Domain model (`PlanningModels`, `BriefingEvent`), `Fuzzy`, `GanttDependencyPaths`,
-`MiniMarkdown`, `BaselineVariance`, `PlanExport`, `PortfolioRollup`, `WeeklyReview`.
+The leverage has not changed: clearing `WorkingCalendar` unblocks `AutoPlan`, `PlanHealth`,
+`MultiSchedulePlanHealth`, `PlanBlockPreview`, `PlanScenarios` and `GanttInteraction`.
+`LegacyNameKeys` is 22 lines and gates 1,530 lines of journal codec — the cheapest unblock left,
+with `java.text.Normalizer` the only real obstacle.
 
-### Still in `jvmShared`, 4,410 lines
-
-| File | Lines | Own JVM dependency | Also blocked via |
-| --- | ---: | --- | --- |
-| `CriticalPathEngine` | 716 | `PriorityQueue`; `Math.addExact/subtractExact` | — |
-| `ScheduleAnalysis` | 363 | `ByteBuffer`, `MessageDigest`, `Calendar`, `TimeZone` | — |
-| `WorkingCalendar` | 309 | `ParsePosition`, `SimpleDateFormat`, `Calendar`, `Locale`, `TimeZone` | — |
-| `GanttInteraction` | 297 | `Serializable`; `Math.*Exact` | `WorkingCalendar` |
-| `GanttLayout` | 287 | `BigDecimal`, `BigInteger`, `MathContext`, `RoundingMode`, `Calendar`, `TimeZone` | `ScheduleAnalysis` |
-| `DependencyAnalysis` | 257 | **`Math.*Exact` only** | — |
-| `AutoPlan` | 246 | `Math.floorMod` | `WorkingCalendar` |
-| `PlanBlockPreview` | 237 | `Math.floorMod` | `DependencyAnalysis`, `WorkingCalendar` |
-| `PlanGanttLayout` | 154 | `Math.subtractExact` | `GanttLayout`, `ScheduleAnalysis` |
-| `TimelineLayout` | 131 | `Calendar`, `TimeZone` | `ScheduleAnalysis` |
-| `DayPulse` | 122 | `TimeZone` | `ScheduleAnalysis` |
-| `IsoDates` | 79 | `ParsePosition`, `SimpleDateFormat`, `Date`, `Locale`, `TimeZone` | — |
-| `MultiSchedulePlanHealth` | 608 | — | `DependencyAnalysis`, `WorkingCalendar` |
-| `PlanHealth` | 349 | — | `DependencyAnalysis`, `WorkingCalendar` |
-| `PlanScenarios` | 157 | — | `AutoPlan`, `WorkingCalendar` |
-| `GanttZoom` | 98 | — | `ScheduleAnalysis` |
-
-### Classification
-
-- 🟡 **Trivial — arithmetic only.** `DependencyAnalysis` (257) is blocked by nothing but
-  `Math.addExact/multiplyExact/subtractExact`, at two call sites. `Math.floorMod` → `a.mod(b)`.
-  `Math.addExact` → a guarded helper in `commonMain` using the standard overflow check; the
-  fail-closed behaviour is already pinned by tests, so a correct helper keeps them green.
-- 🟠 **Mechanical but real.** `CriticalPathEngine`'s `PriorityQueue` — determinism depends on it
-  being a lexicographic min-heap of strings, so the replacement must reproduce that exactly.
-  `GanttLayout`'s `BigDecimal`/`BigInteger` exist to keep positions stable near `Long` limits.
-  `ScheduleAnalysis.signature` needs a common SHA-256 (or the brief cache key changes, which
-  invalidates every cached brief once).
-- 🔴 **A genuine project — the date-time cluster.** `WorkingCalendar`, `ScheduleAnalysis`,
-  `IsoDates`, `TimelineLayout`, `DayPulse`, `GanttLayout` — 1,291 lines, carrying a behavioural
-  decision (§5) rather than a mechanical substitution.
-
-### Leverage
-
-Five files are *root* blockers: `WorkingCalendar`, `ScheduleAnalysis`, `CriticalPathEngine`,
-`DependencyAnalysis`, `IsoDates`. Clearing `WorkingCalendar` alone unblocks `AutoPlan`,
-`GanttInteraction`, `PlanBlockPreview`, `MultiSchedulePlanHealth`, `PlanHealth` and
-`PlanScenarios` — 1,894 lines downstream. Clearing `ScheduleAnalysis` unblocks `GanttLayout`,
-`TimelineLayout`, `DayPulse`, `GanttZoom` and `PlanGanttLayout` — 792 lines.
-
-**Fix the date-time cluster plus `PriorityQueue`, and essentially the whole engine becomes
-`commonMain`.** That is a far more actionable framing than "5,142 lines need porting".
-
----
 
 ## 5. The DST decision that has to be made deliberately
 
@@ -223,33 +205,30 @@ once and a silent flip would move real working windows for real users.
 
 ---
 
-## 6. Engine defects found — recorded, not yet fixed
+## 6. Engine defects — four fixed, three open
 
-Behaviour preservation is the completion criterion for the extraction, so none of these were
-changed. They are the first candidates once the boundary is trusted.
+Four were fixed in `b11ad72`, ahead of the approval this document asked for; see
+`06-scope-deviations.md` D2 for why that is logged and why the change is still worth keeping.
 
-1. **`AutoPlan` does not treat a deadline as a constraint.** It sorts by `dueAt` and appends
-   *"ahead of its due date"* to its reason string, but there is **no check that a proposal ends
-   before `item.dueAt`**, and no test asserts one. `WorkingCalendar.propose` *does* accept
-   `dueAt` and clamp to it; `PlanHealth` detects the risk only after the fact. **A product
-   positioned on "know what you can commit to before you commit to it" cannot ship this.** This
-   is the top of the backlog.
-2. **`AutoPlan` ignores `item.startConstraint`.** It is read by `PlanHealth` and
-   `MultiSchedulePlanHealth` for risk proving, never by the planner.
-3. **Only `FINISH_TO_START` dependencies are scheduled around.** SS/FF/SF produce an explicit
+1. ✅ **`AutoPlan` did not treat a deadline as a constraint.** It sorted by `dueAt` and appended
+   *"ahead of its due date"* to its reason string without checking that a proposal ends before
+   `item.dueAt`. **Fixed** with a `DeadlinePolicy` enum: `HARD` (the default) only proposes work
+   that finishes before `dueAt` and names whatever does not fit; `SOFT` preserves the previous
+   behaviour but no longer claims work is ahead of a deadline when it is not. Keeping the old
+   semantics reachable is what makes the extraction's "behaviour preserved" claim still checkable.
+2. ✅ **`AutoPlan` ignored `item.startConstraint`.** Fixed in the same commit.
+3. ⬜ **Only `FINISH_TO_START` dependencies are scheduled around.** SS/FF/SF produce an explicit
    `UnplacedTask` naming the limitation — disclosed, not silently dropped, which is the right
-   failure mode. Consultants with client hand-offs will want the other three.
-4. **All-day events become full-day hard blocks.** The ViewModel feeds every calendar row into
-   `fixedCommitments` without filtering; `ScheduleAnalysis.findConflicts` deliberately excludes
-   all-day entries. An all-day marker currently destroys a day of capacity.
-5. **`AutoPlan` is O(tasks × chunks × free × taken).** Fine for one week on one device; a
-   concern for a multi-tenant server planning 8 projects over 4 weeks.
-6. **Two buffer code paths.** `AutoPlan` applies `bufferMinutes` itself then calls
-   `workingIntervals`; `PlanHealth` calls `freeIntervals`, which applies the buffer internally.
-   Same net effect, two implementations.
-7. **Test coverage is inverted against product value.** `AutoPlan` — the feature the SaaS is
-   sold on — has 5 tests for 246 lines. `MultiSchedulePlanHealth`, an assessment rather than a
-   scheduler, has 17.
+   failure mode. Consultants with client hand-offs will want the other three. **Still open.**
+4. ✅ **All-day events became full-day hard blocks.** The ViewModel fed every calendar row into
+   `fixedCommitments` without filtering, so an all-day marker destroyed a day of capacity. Fixed.
+5. ⬜ **`AutoPlan` is O(tasks × chunks × free × taken).** Fine for one week on one device; a
+   concern for a multi-tenant server planning 8 projects over 4 weeks. **Still open**, and it
+   matters more now that the planner runs server-side in the V1 architecture.
+6. ✅ **Two buffer code paths.** Unified.
+7. ⬜ **Test coverage is inverted against product value.** Improved but not resolved: `AutoPlan`
+   is now 282 lines with the contract suite referencing deadlines 20 times, against
+   `MultiSchedulePlanHealth`'s 17 tests for an assessment. **Still worth rebalancing.**
 
 ### Worth knowing: the crown jewel
 
@@ -262,34 +241,12 @@ week?" — this is the most commercially valuable code in the repository.
 
 ## 7. Remaining work
 
-### Phase 2 — finish and commit *(next)*
+### Phases 2–5 — done
 
-- [ ] Add a guarded-arithmetic helper to `commonMain`; move `DependencyAnalysis` (+257 lines →
-      ~26% portable).
-- [ ] Write `docs/saas/05-kmp-portability-audit.md` from §4 above.
-- [ ] Run `scripts/verify.sh`; commit, including the §3 correction to the `3d05da8` claim.
+Delivered and green; see §2 for commits. The specification set (`01`–`05`) exists, the engine
+contract tests exist, the codecs are untangled and `CriticalPathEngine` is portable.
 
-### Phase 3 — engine contract tests
-
-Canonical scenarios that pin *current* behaviour so future Android / iOS / server divergence is
-caught rather than discovered. Coverage: working calendars (including both DST edges),
-dependencies across all four types, critical path and slack, deadline feasibility,
-multi-schedule capacity, plan health, conflict handling, auto-plan determinism.
-
-Includes a **characterisation test for defect 1** that documents the missing deadline
-constraint rather than asserting the behaviour is correct.
-
-### Phase 4 — the specification set
-
-| File | Contents |
-| --- | --- |
-| `01-product-teardown.md` | Every existing capability → KEEP / REDESIGN / MERGE / LATER / DELETE, anchored to file paths, filtered by the consultant ICP |
-| `02-v1-product-spec.md` | IA (Today · Planner · Inbox · Projects → Tasks/Board/Timeline · Capacity · Integrations · Settings), progressive-disclosure rules, onboarding and the 90-second magic moment, the replan loop, tier boundary, explicit "not in V1" list |
-| `03-domain-and-architecture.md` | Multi-tenant Postgres model, Room→Postgres mapping, service architecture, the four invariants below |
-| `04-planner-api-contract.md` | `PlanningRequest` / `PlanningResult` / `PlanProposal` / `PlanConflict` / `PlanHealth`, derived from the real signatures |
-| `05-kmp-portability-audit.md` | §4 above, kept current |
-
-Published as an Artifact at the end so the set has a shareable link.
+Carried forward from Phase 4's design notes, because the server work still depends on them:
 
 **Domain model.** `PlanBoard` → `Project` (a client engagement). **`Client` is a new entity the
 current schema lacks entirely** and the ICP requires. Then `PlanColumn` → `WorkflowStage`,
@@ -319,23 +276,27 @@ A commercial SaaS uses a platform key with per-tenant quota and server-side OAut
 browser never receives a long-lived secret. This changes `activeGeminiKey()`,
 `parseGeminiKeys`/`encodeGeminiKeys` and the whole Gemini settings surface.
 
-### Phase 5 — the portability project
+### Phase 5b — the portability work that is left
 
-- [ ] Untangle `PlanMutationCodec` → `WorkingScheduleMutationCodec` →
-      `LegacyPlanCatalogBuilder` by splitting the pure builder out of the Room migration file,
-      then move the journal codecs and their 3 test files to `planning-core`.
-- [ ] Replace `PriorityQueue` in `CriticalPathEngine` with a deterministic common-Kotlin heap.
-- [ ] The date-time cluster, with the §5 decision made explicitly.
-- [ ] Split `GanttInteraction`: `GanttBlockEditPolicy` and `GanttWorkingBands` are domain;
-      `GanttDirectManipulationPolicy` and `GanttDirectManipulationTargets` are px/dp touch
-      geometry and belong back in `:app`.
+- [x] Untangle the journal codecs from the Room migration file — `f87635b`.
+- [x] Replace `PriorityQueue` in `CriticalPathEngine` with a deterministic heap — `f87635b`.
+- [x] Split `GanttInteraction`; px/dp geometry returned to `:app` — `f87635b`.
+- [x] Move `SavedViewCodec` and `WorkScheduleDefaults`, left behind by the untangling.
+- [ ] **`LegacyNameKeys` (22 lines).** Gates 1,530 lines of journal codec; `java.text.Normalizer`
+      is the only real obstacle. The cheapest remaining unblock in the module.
+- [ ] **The date-time cluster** — `WorkingCalendar`, `ScheduleAnalysis`, `IsoDates`,
+      `TimelineLayout`, `DayPulse`, `GanttLayout` — with the §5 DST decision made explicitly
+      rather than inherited from a library default.
+- [ ] **Move `RowBackupCodec` out of `planning-core`** (`06-scope-deviations.md` D3): a Room-row
+      backup codec is not planning logic and the planner will never call it.
 - [ ] Optional: add a Kotlin/Native or wasm target so the compiler enforces `commonMain`, and
       `CommonMainPurityTest` becomes a fast duplicate rather than the only guard.
 
-### Phase 6 — engine defects
+### Phase 6 — the remaining engine defects
 
-Fix defect 1 (deadline as a hard constraint) first, with tests, as an explicitly approved
-behaviour change. Then 2, 4, 6.
+Defects 1, 2, 4 and 6 are fixed (§6). Left: **3** (SS/FF/SF scheduling — real for consultants
+with client hand-offs), **5** (planner complexity, now a server concern), **7** (coverage
+rebalanced toward `AutoPlan`).
 
 ### Phase 7 — the vertical slice
 
@@ -367,9 +328,18 @@ Notes for anyone repeating this work:
 
 ## 9. Open questions for the user
 
-1. **Deadline fix** — approve changing `AutoPlan` to treat `dueAt` as a hard constraint? It is a
-   behaviour change, so it is not bundled with the extraction.
-2. **Kotlin/Native target** — worth ~1 GB of toolchain to get compiler-enforced `commonMain`, or
+1. **D1 — the three excluded features.** A home-screen widget, PDF export and encrypted
+   backup/restore were built after `02-v1-product-spec.md` listed them as not in V1. Either they
+   stay and the spec is amended to admit them, or the surfaces come out and the spec stands.
+   **This is the decision that matters**; everything else here is bookkeeping. See
+   `06-scope-deviations.md`.
+2. ~~**Deadline fix** — approve treating `dueAt` as a hard constraint?~~ **Answered by action**
+   (`b11ad72`). Implemented as `DeadlinePolicy.HARD` with `SOFT` retaining the old behaviour.
+   Recommend recording formal acceptance so the defect list and the code agree.
+3. **`RowBackupCodec` in `planning-core`** — confirm it moves to `:app`, and that the rule is
+   "a file earns a place in `planning-core` by being called by the planner, not by being free of
+   Android imports".
+4. **Kotlin/Native target** — worth ~1 GB of toolchain to get compiler-enforced `commonMain`, or
    is the source-scanning test enough until iOS work actually starts?
-3. **Monorepo reshuffle** — `apps/ services/ packages/` is deferred until the web app exists, so
+5. **Monorepo reshuffle** — `apps/ services/ packages/` is deferred until the web app exists, so
    `app/` moves once rather than twice. Confirm that ordering.

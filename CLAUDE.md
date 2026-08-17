@@ -82,6 +82,11 @@ for anything new. Date arithmetic especially: it is where midnight, DST and
   task progress, the build looks hung rather than failed — it sat for thirteen minutes
   before this was spotted. `:app` writes `compileSdk { version = release(37) { minorApiLevel = 1 } }`
   and `:planning-core` writes the same thing inside its `androidLibrary` block.
+- **A file earns a place in `:planning-core` by being called by the planner**, not by being free
+  of Android imports. `RowBackupCodec` is portable Kotlin and still does not belong there: it
+  encodes Room cursor rows for a device backup, and neither the planning service nor iOS will
+  ever call it. Portability is a property, not a purpose — apply the test "would the server run
+  this?" before moving anything in.
 - **Kotlin does not smart-cast a `val` it does not own.** Now that the domain model lives in
   `:planning-core`, `if (row.dayOfWeek != null) use(row.dayOfWeek)` no longer compiles in
   `:app` — the compiler will not assume a property from another module is stable. Bind a
