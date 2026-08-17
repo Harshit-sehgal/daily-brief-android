@@ -4,15 +4,20 @@ A local-first Android app: device calendar + Notion in one schedule, overlap
 detection, and an optional Gemini summary. Compose UI, Room storage, no DI
 framework.
 
-Three Gradle modules. `:app` is the Android app. `:planning-core` is the scheduling
-engine and the domain model it works on — extracted so a server can run the same
-code the phone runs. It is a Kotlin Multiplatform module: `commonMain` holds the
-portable half, `jvmShared` holds everything still needing JVM APIs, and both the
-`jvm` target and Android depend on `jvmShared`. Moving a file from `jvmShared` to
-`commonMain` is the unit of porting work; `docs/saas/05-kmp-portability-audit.md`
-tracks what is left and why. `:planning-contract` is the frozen wire contract
-(docs/saas/04-planner-api-contract.md): plain JVM, kotlinx-serialization only, golden
-byte-identical files — nothing in the SaaS stages starts until it is stable.
+Four Gradle modules. `:app` is the Android app. `:planning-core` is the scheduling
+engine and the domain model it works on — extracted so a server can run the same code
+the phone runs. It is a Kotlin Multiplatform module: `commonMain` holds the portable
+half, `jvmShared` holds everything still needing JVM APIs, and both the `jvm` target and
+Android depend on `jvmShared`. Moving a file from `jvmShared` to `commonMain` is the unit
+of porting work; `docs/saas/05-kmp-portability-audit.md` tracks what is left and why.
+`:planning-contract` is the frozen wire contract (docs/saas/04-planner-api-contract.md):
+plain JVM, kotlinx-serialization only, golden byte-identical files — nothing in the SaaS
+stages starts until it is stable. `:server` is the SaaS service (WP-13): Ktor + Flyway +
+Postgres, unit-tested (`:server:test` in the gate) and acceptance-tested by
+`scripts/journey.sh`, which runs the whole signup→plan→apply→undo loop against docker
+Postgres in ~1.5 s; `scripts/verify.sh --journey` is the gate plus that acceptance. The
+`web/` client (Next.js, Planner + Today only) talks to it; the server is authoritative
+for Apply.
 
 **`commonMain` purity is enforced by the compiler, with a fast scan in reserve.** The
 `linuxX64` target (WP-7) gives the metadata compilation a consumer, so
@@ -35,6 +40,7 @@ for you, and every dependency is cached, so Gradle runs `--offline`.
 ```bash
 scripts/verify.sh --fast      # unit tests — the inner loop, ~2s warm
 scripts/verify.sh             # the whole CI gate: tests, both lints, both APKs, R8
+scripts/verify.sh --journey   # the gate plus the WP-13 acceptance (needs docker)
 scripts/emulator.sh           # boot + unlock + wake an emulator (~10s from a snapshot)
 scripts/verify.sh --device    # the gate plus instrumentation on that emulator
 scripts/smoke-release.sh      # install and launch the *minified* build — catches R8 damage
