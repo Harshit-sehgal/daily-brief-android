@@ -4,6 +4,7 @@
 #   scripts/verify.sh              # the full CI gate, offline
 #   scripts/verify.sh --fast       # unit tests only — the inner-loop check
 #   scripts/verify.sh --device     # ...plus instrumentation on a running emulator
+#   scripts/verify.sh --journey    # ...plus the WP-13 acceptance (needs docker)
 #   scripts/verify.sh --online     # allow Gradle to reach the network
 #
 # Everything is one Gradle invocation with --continue, so a lint failure still
@@ -34,11 +35,13 @@ export JAVA_HOME
 
 FAST=0
 DEVICE=0
+JOURNEY=0
 NETWORK="--offline"
 for arg in "$@"; do
   case "$arg" in
     --fast) FAST=1 ;;
     --device) DEVICE=1 ;;
+    --journey) JOURNEY=1 ;;
     --online) NETWORK="" ;;
     -h | --help)
       sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -94,4 +97,13 @@ fi
 echo "verify: JAVA_HOME=$JAVA_HOME"
 echo "verify: ./gradlew ${NETWORK} --continue ${TASKS[*]}"
 # shellcheck disable=SC2086
-exec ./gradlew $NETWORK --continue "${TASKS[@]}"
+./gradlew $NETWORK --continue "${TASKS[@]}"
+
+if [ "$JOURNEY" = 1 ]; then
+  if command -v docker >/dev/null 2>&1; then
+    scripts/journey.sh
+  else
+    echo "verify: --journey needs docker (a real Postgres for the acceptance leg)" >&2
+    exit 1
+  fi
+fi
