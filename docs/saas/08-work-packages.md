@@ -425,7 +425,7 @@ Design in `docs/saas/09-server-invariants.md`; the four code sites carry `REDESI
    `gemini_usage` ledger (lands with its consumer, WP-13); reserve-then-refuse. The device
    keeps its local BYOK path.
 
-## WP-12 — Freeze the planner API  ✅ done (`<TBD>`)
+## WP-12 — Freeze the planner API  ✅ done (`b229dfd`)
 
 `04-planner-api-contract.md` is **FROZEN at v1**. The `:planning-contract` module (new, plain
 JVM, kotlinx-serialization-json 1.8.1) turns it into executable bytes:
