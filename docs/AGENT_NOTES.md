@@ -193,9 +193,10 @@ Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
 
 ### Stage 2+ (not started)
 
-- **WP-10** multi-tenant Postgres schema (tenancy from day one; `saved_views` unique
+- [x] **WP-10** multi-tenant Postgres schema (tenancy from day one; `saved_views` unique
   index + work_schedules partial unique index become real constraints; source column
-  types from `app/schemas/.../9.json`).
+  types from `app/schemas/.../9.json`). `db/schema.sql`; proven by `db/verify-schema.sh`
+  against docker postgres:16 (4 expected refusals or the script fails).
 - **WP-11** the four invariants redesigned: SCHEDULE_MUTEX → per-tenant advisory lock
   with fetch outside; Undo staleness → SERIALIZABLE/FOR UPDATE; SecretStore → KMS
   envelope (AAD bound to key, keep ciphertext on failed read); Gemini platform key +

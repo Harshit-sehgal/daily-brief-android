@@ -381,7 +381,7 @@ constraints, milestone exclusion, and empty ranges.
 Design-led; read `03-domain-and-architecture.md` and `04-planner-api-contract.md` first. These
 are briefs, not recipes.
 
-## WP-10 — Multi-tenant Postgres schema
+## WP-10 — Multi-tenant Postgres schema  ✅ done (`2c65d34`, `da4ad63`)
 
 `PlanBoard` → `Project` (a client engagement), plus **`Client`, which the current schema lacks
 entirely** and the consultant ICP requires. Then `PlanColumn` → `WorkflowStage`, `PlanItem` →
@@ -389,15 +389,19 @@ entirely** and the consultant ICP requires. Then `PlanColumn` → `WorkflowStage
 `AuditEntry`, `WorkSchedule` unchanged, plus `User`, `Workspace`, `Membership`,
 `CalendarConnection`, `PlanRun`, `PlanProposal`, `Subscription`.
 
-**Every row carries `tenant_id` from day one**, even though V1 is single-user. Retrofitting
-tenancy is the six-month rewrite this exists to avoid.
+**Every row carries `workspace_id` from day one**, even though V1 is single-user. Retrofitting
+tenancy is the six-month rewrite this exists to avoid. (The brief said `tenant_id`; the domain
+doc said `workspace_id`. They are the same thing — the workspace IS the tenant — and the column
+is named for the entity, documented in `db/schema.sql`.)
 
 Two constraints currently enforced only in application code must become real database
 constraints: `saved_views` unique on `(boardId, surface, nameKey)`, and `work_schedules`
 "exactly one non-archived default" as a partial unique index.
 
 Source the exact column types from `app/schemas/com.example.data.database.AppDatabase/9.json` —
-it is the authoritative current schema.
+it is the authoritative current schema. Both constraints, the per-workspace re-scoping of
+Room's global unique indexes, and the composite FKs are proven against a real Postgres 16 by
+`db/verify-schema.sh` — four refusals must appear or the script exits non-zero.
 
 ## WP-11 — The four invariants that need redesign, not translation
 
