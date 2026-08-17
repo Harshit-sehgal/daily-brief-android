@@ -105,20 +105,23 @@ the process note.
 
 | | Files | Lines | Share |
 | --- | ---: | ---: | ---: |
-| `planning-core/commonMain` | 14 | 2,547 | **32%** of the module |
-| `planning-core/jvmShared` | 21 | 5,311 | 68% |
+| `planning-core/commonMain` | 14 | 2,549 | **33%** of the module |
+| `planning-core/jvmShared` | 20 | 5,157 | 67% |
 | — of which engine core (`core/` only) | — | 1,784 / 5,148 | **34.7%** portable |
-| `planning-core` tests | 31 suites | — | 227 tests, 0 failures |
-| `app` tests | 39 suites | — | 174 tests, 0 failures |
+| `planning-core` tests | 30 suites | — | 222 tests, 0 failures |
+| `app` tests | 40 suites | — | 179 tests, 0 failures |
 
 Two denominators, both quoted in places; `05-kmp-portability-audit.md` reconciles them.
 
-### Scope deviations
+### Scope deviations — all closed
 
-Five features and one behaviour change landed outside the agreed scope. They are catalogued in
-**`06-scope-deviations.md`**, which is the live issue register. The one needing a decision is
-**D1**: a home-screen widget, PDF export and encrypted backup/restore were built 14–32 minutes
-*after* the V1 spec listing them as "explicitly not in V1" was committed.
+Seven entries, catalogued in **`06-scope-deviations.md`**. D1 (three features built against the
+V1 exclusion list) was resolved by amending `02` to separate the Android surface from web V1
+scope rather than deleting working code; D2 (the deadline change) accepted and recorded;
+D3/D4/D5/D7 fixed in code. The pattern is the useful part: **every entry was a document and the
+tree disagreeing, and in four of seven the document was what was wrong.**
+
+**Forward work is in `07-roadmap.md`.**
 
 ---
 
@@ -276,33 +279,15 @@ A commercial SaaS uses a platform key with per-tenant quota and server-side OAut
 browser never receives a long-lived secret. This changes `activeGeminiKey()`,
 `parseGeminiKeys`/`encodeGeminiKeys` and the whole Gemini settings surface.
 
-### Phase 5b — the portability work that is left
+### Everything after this
 
-- [x] Untangle the journal codecs from the Room migration file — `f87635b`.
-- [x] Replace `PriorityQueue` in `CriticalPathEngine` with a deterministic heap — `f87635b`.
-- [x] Split `GanttInteraction`; px/dp geometry returned to `:app` — `f87635b`.
-- [x] Move `SavedViewCodec` and `WorkScheduleDefaults`, left behind by the untangling.
-- [ ] **`LegacyNameKeys` (22 lines).** Gates 1,530 lines of journal codec; `java.text.Normalizer`
-      is the only real obstacle. The cheapest remaining unblock in the module.
-- [ ] **The date-time cluster** — `WorkingCalendar`, `ScheduleAnalysis`, `IsoDates`,
-      `TimelineLayout`, `DayPulse`, `GanttLayout` — with the §5 DST decision made explicitly
-      rather than inherited from a library default.
-- [ ] **Move `RowBackupCodec` out of `planning-core`** (`06-scope-deviations.md` D3): a Room-row
-      backup codec is not planning logic and the planner will never call it.
-- [ ] Optional: add a Kotlin/Native or wasm target so the compiler enforces `commonMain`, and
-      `CommonMainPurityTest` becomes a fast duplicate rather than the only guard.
+Moved to **`07-roadmap.md`**, sequenced with entry and exit criteria: finish the portability
+project (the date-time cluster, the journal codecs, compiler-enforced purity), then the
+multi-tenant domain model and a frozen planner contract, then the vertical slice, then depth
+and the paid tier, then mobile.
 
-### Phase 6 — the remaining engine defects
-
-Defects 1, 2, 4 and 6 are fixed (§6). Left: **3** (SS/FF/SF scheduling — real for consultants
-with client hand-offs), **5** (planner complexity, now a server concern), **7** (coverage
-rebalanced toward `AutoPlan`).
-
-### Phase 7 — the vertical slice
-
-Only after the domain model and engine boundary are frozen: login → connect calendar → create
-tasks → "Plan my week" → valid schedule → apply. Then the AI assistant (interprets and explains;
-deterministic code validates and commits), then billing, email, analytics, observability.
+The three engine defects still open (3, 5, 7) are scheduled there against the stage where each
+one starts to hurt.
 
 ---
 
@@ -328,18 +313,15 @@ Notes for anyone repeating this work:
 
 ## 9. Open questions for the user
 
-1. **D1 — the three excluded features.** A home-screen widget, PDF export and encrypted
-   backup/restore were built after `02-v1-product-spec.md` listed them as not in V1. Either they
-   stay and the spec is amended to admit them, or the surfaces come out and the spec stands.
-   **This is the decision that matters**; everything else here is bookkeeping. See
-   `06-scope-deviations.md`.
-2. ~~**Deadline fix** — approve treating `dueAt` as a hard constraint?~~ **Answered by action**
-   (`b11ad72`). Implemented as `DeadlinePolicy.HARD` with `SOFT` retaining the old behaviour.
-   Recommend recording formal acceptance so the defect list and the code agree.
-3. **`RowBackupCodec` in `planning-core`** — confirm it moves to `:app`, and that the rule is
-   "a file earns a place in `planning-core` by being called by the planner, not by being free of
-   Android imports".
-4. **Kotlin/Native target** — worth ~1 GB of toolchain to get compiler-enforced `commonMain`, or
-   is the source-scanning test enough until iOS work actually starts?
-5. **Monorepo reshuffle** — `apps/ services/ packages/` is deferred until the web app exists, so
-   `app/` moves once rather than twice. Confirm that ordering.
+All earlier questions are closed — see `06-scope-deviations.md` for how, and `07-roadmap.md`
+for what follows. Two judgement calls remain, and neither blocks Stage 1:
+
+1. **Kotlin/Native target** — roughly 1 GB of toolchain buys compiler-enforced `commonMain` and
+   retires a guard that currently exists only because the compiler check fails open. Worth doing
+   with the date-time work (Stage 1.4), or defer until iOS actually starts?
+2. **Monorepo reshuffle** — `apps/ services/ packages/` is deferred until the web app exists so
+   `app/` moves once rather than twice. Confirm that ordering before Stage 3.
+
+And one standing decision, recorded rather than asked: the three Android-only features from D1
+stay. `git revert a5bc8c1 43dea69` remains available if you would rather carry less Android
+surface through the rewrite — a product call, not a correctness one.

@@ -27,7 +27,7 @@ are quoted in places, so:
 | Scope | `commonMain` | `jvmShared` | Portable |
 | --- | ---: | ---: | ---: |
 | Engine core (`core/` only — this document) | 1,784 | 3,364 | **34.7%** |
-| Whole module (what the test prints) | 2,547 | 5,311 | **32%** |
+| Whole module (what the test prints) | 2,549 | 5,157 | **33%** |
 
 Neither is wrong; quote the scope with the number.
 
@@ -90,10 +90,36 @@ Counted by the purity test, not by the engine-core figure above.
 | `PlanCatalogMutationCodec` | 359 | `jvmShared` | Via `LegacyNameKeys`, `WorkingCalendarMapper` |
 | `WorkingCalendarMapper` | 239 | `jvmShared` | `Calendar` |
 | `LegacyNameKeys` | 22 | `jvmShared` | `Normalizer`, `StandardCharsets`, `Locale`, `UUID` — small, and it blocks all three codecs |
-| `RowBackupCodec` | 156 | `jvmShared` | **Does not belong in this module** — see `06-scope-deviations.md` D3 |
 
-`LegacyNameKeys` is 22 lines and gates 1,530 lines of codec. `Normalizer` is the only real
-obstacle; the rest have common equivalents. It is the cheapest remaining unblock in the module.
+**The three journal codecs are one unit, and it is not a cheap unblock.** An earlier version of
+this document called `LegacyNameKeys` "22 lines gating 1,530 lines of codec — the cheapest
+remaining unblock". That was wrong, and the compiler said so when it was attempted:
+
+- `PlanMutationCodec`, `PlanCatalogMutationCodec` and `WorkingScheduleMutationCodec` implement
+  one sealed `PlanMutationState` hierarchy. *Extending a sealed interface from another module or
+  source set is prohibited*, so all three move together or none do — 1,530 lines as a single
+  step.
+- The unit is gated on **both** `LegacyNameKeys` (NFKC `Normalizer`, name-based `UUID`) **and**
+  `WorkingCalendar`, which `WorkingScheduleMutationCodec` uses. So the codecs sit behind the
+  date-time cluster, not in front of it.
+- `LegacyNameKeys` also resists a straight port: `nameKey` is **stored on rows and compared on
+  Undo**, and `stableId` is how the v5 catalog import derives IDs that survive every later
+  migration. A reimplementation that differs by one character breaks existing databases. This is
+  an `expect`/`actual` job (JVM `Normalizer`; iOS `precomposedStringWithCompatibilityMapping`),
+  not a rewrite.
+
+### A note on method: only the compiler is authoritative
+
+Two cheaper methods were tried and both are unsafe here:
+
+| Method | Blind spot |
+| --- | --- |
+| Scan `import` lines | **Same-package references need no import.** `core/` is one package, and `PlanMutationCodec` reaches `WorkingScheduleMutationCodec` with no import at all. |
+| Regex for declared symbol names | **False positives** across packages, and it cannot see sealed-hierarchy or visibility constraints. |
+
+Both were used to produce earlier versions of this table, and each produced a wrong answer that
+survived until a file was actually moved. **Move the file, compile, read the error.** The tables
+here are now confirmed that way.
 
 ## Classification
 
@@ -181,4 +207,7 @@ audit:
 - 2026-08-17 (later): `jvmTest` now declares `src/commonMain/kotlin` and `src/jvmShared/kotlin`
   as task inputs. `CommonMainPurityTest` reads the source tree at runtime, so Gradle could not
   see that moving a file invalidates it — the task stayed UP-TO-DATE and the guard reported the
-  *previous* layout's percentage. The one number this effort is tracked by was silently stale.
+  *previous* layout's percentage. The one number this effort is tracked by was silently stale.- 2026-08-17 (later still): `RowBackupCodec` (156) and its test moved out to `:app` — a Room-row
+  backup codec is not planning logic (`06-scope-deviations.md` D3). Module 32% → 33%. Attempted
+  to move the journal codecs to `commonMain`; the compiler refused on the sealed hierarchy, and
+  the "cheapest unblock" claim above was corrected as a result.

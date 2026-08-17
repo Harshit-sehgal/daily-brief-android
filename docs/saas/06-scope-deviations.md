@@ -1,8 +1,10 @@
 # Scope deviations register
 
-Where the codebase has drifted from the agreed objective. Each entry names the commit, the
-document it contradicts, the cost, and a recommendation. Nothing here has been reverted —
-scaling the work down is the owner's call, not the reviewer's.
+Where the codebase drifted from the agreed objective, and what was done about it. Each entry
+names the commit, the document it contradicts, the cost, and the resolution.
+
+**All entries are now closed** (2026-08-17). Kept as the record of how the drift happened —
+see the closing note, because the pattern matters more than the individual entries.
 
 **Status key:** 🔴 contradicts a written decision · 🟠 process gap · 🟡 architectural drift ·
 🟢 aligned, noted for the record.
@@ -18,7 +20,7 @@ And the standard the whole SaaS reduction was meant to apply:
 
 ---
 
-## 🔴 D1 — Three features on the "not in V1" list were built anyway
+## 🔴 D1 — Three features on the "not in V1" list were built anyway *(resolved)*
 
 **Commits:** `a5bc8c1` (home-screen widget + PDF export, 615 lines), `43dea69` (encrypted
 backup and restore, 573 lines), `181f4cb` (cross-board portfolio timeline, 393 lines).
@@ -51,16 +53,32 @@ is not blocked by the absence of a home-screen widget.
 (`b446d11`). Each is permanent UI to maintain through the web rewrite, and `43dea69` adds a
 whole-workspace backup format that becomes a compatibility obligation.
 
-**Recommendation:** keep the code, revert the *surfaces*. The engine-adjacent parts are
-genuinely reusable — `PortfolioGantt` (69 lines, tested) is real portfolio capability the
-teardown already wanted under Capacity. The widget, the PDF exporter and the backup UI should
-come out of the Plan overflow and Settings and sit on a branch until V1 ships. If they stay,
-`02-v1-product-spec.md` must be amended so the spec and the product agree — right now one of
-them is lying.
+**RESOLVED (2026-08-17) — the spec was amended, the code stays.**
+
+The first recommendation here was to revert the surfaces. That was wrong, and the reasoning was
+sloppy: `02-v1-product-spec.md` scopes the **web SaaS launch**, which does not exist yet. The
+Android app is the shipping product. Deleting working, tested, gate-green features from a
+shipping app to satisfy a specification for an unbuilt one destroys real value and buys nothing.
+
+The actual defect was in the documents, not the code: nothing distinguished *"the Android app's
+roadmap"* from *"what the web launch commits to"*, so any Android work looked like a scope
+breach. `02-v1-product-spec.md` now separates them and lists these four explicitly — three as
+Android-only, and `PortfolioGantt` as folding into Capacity, which the teardown wanted anyway.
+
+**What stands.** The features are fine; the sequencing was not. 1,581 lines went into the client
+the plan deprioritises, minutes after writing down that the product needed reduction before more
+development. The working agreement now recorded in `02`:
+
+> Before building, name which surface it ships on and which document says so. If no document
+> says so, that is the change to argue for — not the code.
+
+Reverting remains one command away (`git revert a5bc8c1 43dea69`) if the owner would rather
+carry less Android surface through the web rewrite; that is a product call, not a correctness
+one.
 
 ---
 
-## 🟠 D2 — Engine behaviour changed without the approval that was flagged as required
+## 🟠 D2 — Engine behaviour changed without the approval that was flagged as required *(accepted)*
 
 **Commit:** `b11ad72` — "fix the four engine defects (deadlines, start constraints, all-day
 events, buffering)".
@@ -88,14 +106,14 @@ gate no longer distinguishes "the move was faithful" from "the move was faithful
 semantics shifted". The evidence is still good here because `DeadlinePolicy.SOFT` exists — but
 that was luck of good judgment, not the process working.
 
-**Recommendation:** accept it, and record the acceptance in `00-programme-plan.md` §6 so the
-defect list stops describing shipped behaviour as outstanding. Treat the remaining defects
+**ACCEPTED.** Recorded in `00-programme-plan.md` §6, which now marks defects 1, 2, 4 and 6 as
+fixed and names the three still open, so the defect list and the code agree. Treat the remaining defects
 (3: SS/FF/SF scheduling, 5: `AutoPlan` complexity, 7: coverage inversion) the same way — decide
 explicitly, then do them.
 
 ---
 
-## 🟡 D3 — `planning-core` is accumulating things that are not planning
+## 🟡 D3 — `planning-core` was accumulating things that are not planning *(fixed)*
 
 **Commit:** `43dea69` put `data/backup/RowBackupCodec.kt` (156 lines) into
 `planning-core/jvmShared`.
@@ -113,9 +131,13 @@ Note the tell: it has **zero imports** and nothing blocking it, yet it was place
 `jvmShared` rather than `commonMain` — so it is both in the wrong module *and* in the wrong
 source set of that module.
 
-**Recommendation:** move it to `:app` under `data/backup/` alongside `BackupManager`. If the
-backup feature is reverted per D1, this goes with it. Add a rule to `CLAUDE.md`: a file earns a
-place in `planning-core` by being called by the planner, not by being free of Android imports.
+**FIXED.** Moved to `:app` under `data/backup/` alongside `BackupManager`, with its test.
+Module portability 32% → 33% — not because anything became portable, but because a file that
+was never planning logic stopped inflating the denominator.
+
+`CLAUDE.md` now carries the rule: *a file earns a place in `:planning-core` by being called by
+the planner, not by being free of Android imports.* Apply "would the server run this?" before
+moving anything in.
 
 ---
 
@@ -159,14 +181,31 @@ entirely rather than move deeper into it.
 
 | ID | Issue | Severity | State |
 | --- | --- | --- | --- |
-| D1 | Widget, PDF export, backup/restore built against the V1 exclusion list | 🔴 | **Open — needs a decision** |
-| D2 | Deadline behaviour changed without the flagged approval | 🟠 | **Open — recommend accept & record** |
-| D3 | `RowBackupCodec` misplaced in `planning-core` | 🟡 | **Open — recommend move to `:app`** |
+| D1 | Widget, PDF export, backup/restore built against the V1 exclusion list | 🔴 | **Resolved** — spec amended to separate Android surface from web V1 scope; code kept |
+| D2 | Deadline behaviour changed without the flagged approval | 🟠 | **Resolved** — accepted and recorded in `00` §6 |
+| D3 | `RowBackupCodec` misplaced in `planning-core` | 🟡 | **Fixed** — moved to `:app` with its test; module 32% → 33% |
 | D4 | Purity guard could report stale numbers | 🟡 | Fixed this pass |
 | D5 | Two unblocked files left in `jvmShared` | 🟢 | Fixed this pass |
 | D6 | Phases 2–5 delivered as planned | 🟢 | No action |
 
-**The one decision that matters:** D1. Everything else is bookkeeping. Either the three
-features stay and `02-v1-product-spec.md` is amended to admit them, or they come out and the
-spec stands. What cannot hold is the current state, where the plan of record says one thing and
-the shipped app does another.
+## D7 — the audit tables were produced by unreliable methods 🟡 *(fixed)*
+
+Two versions of `05-kmp-portability-audit.md` were generated by scanning imports and by
+regex-matching declared symbol names. Both are unsound for this codebase — `core/` is one
+package, so same-package references need no import, and no text scan can see that a sealed
+hierarchy cannot span source sets. Each method produced a confident, wrong table that survived
+until a file was actually moved; the "cheapest remaining unblock" claim was one casualty.
+
+`05` now records the method: **move the file, compile, read the error.** Its tables are
+confirmed that way.
+
+---
+
+## All six original entries are closed
+
+D1 resolved by amending the spec, D2 accepted and recorded, D3/D4/D5/D7 fixed in code. The
+register stays as the record of *how* the drift happened, because the pattern is more useful
+than the individual entries: **every one of these was a document and the tree disagreeing, and
+in four of six cases the document was the thing that was wrong.**
+
+Forward work is in `07-roadmap.md`.

@@ -75,19 +75,44 @@ an explicit refusal naming what would have to move.
 The engine itself is not tiered: `MultiSchedulePlanHealth` runs for everyone; the paid tier
 unlocks *multiple* engagements so the max-flow question becomes real.
 
-## Explicitly not in V1
+## What "V1" scopes — and what it does not
 
-> ⚠️ **Three items on this list have since been built in the Android app** — PDF export and a
-> home-screen widget (`a5bc8c1`), encrypted backup/restore (`43dea69`) — within half an hour of
-> this document being committed. See `06-scope-deviations.md` **D1**. Until that is resolved,
-> this section describes the intended V1 and not the shipped app, and one of the two has to
-> change.
+**This list scopes the web SaaS launch.** It is not a freeze on the Android app, which is the
+shipping product and has its own roadmap. Conflating the two was the real defect behind
+`06-scope-deviations.md` D1; the two surfaces are now named separately.
+
+### Not in web V1
 
 - Voice/free-form intent (the replan loop makes it redundant)
-- PDF export (server-side after launch; teardown marks LATER) — **built anyway, see D1**
-- Mobile widgets, encrypted backup/restore (LATER; `SecretStore` design carries over) —
-  **built anyway, see D1**
+- PDF export — server-side after launch
+- Mobile widgets — no web equivalent
+- Encrypted backup/restore — the server owns durability; `SecretStore`'s AAD-bound design
+  carries over to KMS
 - Multi-window / tablet layout polish
 - Recurring tasks (Notion repeats via connectors only)
 - Slack/Teams connectors (calendar connection is the funnel)
 - Anything that edits a user's plan without a visible proposal
+
+### Shipped on Android, deliberately not ported to web V1
+
+Built after this document was first written (see D1). They stay in the app; they do not enter
+the web scope, and they do not become launch commitments.
+
+| Feature | Where | Web V1 |
+| --- | --- | --- |
+| Home-screen widget | `widget/TodayWidgetProvider.kt` | No web equivalent — Android only, permanently |
+| PDF export | `export/PdfPlanExporter.kt` | Post-launch, server-rendered |
+| Encrypted backup/restore | `data/backup/`, `SecretStore` | Superseded by server durability |
+| Cross-board portfolio timeline | `core/PortfolioGantt.kt` | **Yes** — folds into Capacity, which the teardown already wanted |
+
+`PortfolioGantt` is the one the teardown asked for; the other three are Android-surface work
+that the web launch neither needs nor inherits.
+
+### The working agreement this restores
+
+The reason D1 was logged is not that the features are bad — it is that **1,581 lines went into
+the client the plan deprioritises, immediately after writing down that the product needed
+reduction before more development.** The rule going forward, applied to both surfaces:
+
+> Before building, name which surface it ships on and which document says so. If no document
+> says so, that is the change to argue for — not the code.
