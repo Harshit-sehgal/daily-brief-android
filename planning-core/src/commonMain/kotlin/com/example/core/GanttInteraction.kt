@@ -1,7 +1,5 @@
 package com.example.core
 
-import java.io.Serializable
-
 /** Exact, saveable state for creating or editing one app-owned Plan block. */
 data class GanttBlockDraft(
   val itemId: String,
@@ -9,7 +7,7 @@ data class GanttBlockDraft(
   val startAt: Long,
   val endAt: Long,
   val locked: Boolean = false,
-) : Serializable {
+) {
   init {
     require(itemId.isNotBlank()) { "A Gantt block draft needs a task ID" }
   }
@@ -69,13 +67,13 @@ object GanttBlockEditPolicy {
   }
 
   private fun minuteDelta(minutes: Int): Long? =
-    runCatching { Math.multiplyExact(minutes.toLong(), MILLIS_PER_MINUTE) }.getOrNull()
+    runCatching { GuardedArithmetic.multiplyExact(minutes.toLong(), MILLIS_PER_MINUTE) }.getOrNull()
 
   private fun add(left: Long, right: Long): Long? =
-    runCatching { Math.addExact(left, right) }.getOrNull()
+    runCatching { GuardedArithmetic.addExact(left, right) }.getOrNull()
 
   private fun subtract(left: Long, right: Long): Long? =
-    runCatching { Math.subtractExact(left, right) }.getOrNull()
+    runCatching { GuardedArithmetic.subtractExact(left, right) }.getOrNull()
 
   private const val MILLIS_PER_MINUTE = 60_000L
 }

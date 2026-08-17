@@ -76,6 +76,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import android.os.Bundle
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -166,6 +168,46 @@ private enum class BlockTimeField {
  * A shared time spine for app-owned Plan blocks and read-only calendar commitments. Solid bars can
  * be planned here; outlined bars remain visibly fixed and always open the event editor.
  */
+
+/**
+ * Restores an in-progress Gantt edit across process death. Replaces the java.io.Serializable
+ * seam GanttBlockDraft used to carry, so the engine's common half stays platform-free.
+ */
+private fun GanttBlockDraft.toBundle(): Bundle =
+  Bundle().apply {
+    putString("item_id", itemId)
+    putString("block_id", blockId)
+    putLong("start", startAt)
+    putLong("end", endAt)
+    putBoolean("locked", locked)
+  }
+
+private fun Bundle.toGanttBlockDraft(): GanttBlockDraft =
+  GanttBlockDraft(
+    itemId = getString("item_id").orEmpty(),
+    blockId = getString("block_id"),
+    startAt = getLong("start"),
+    endAt = getLong("end"),
+    locked = getBoolean("locked"),
+  )
+
+private val GanttBlockDraftSaver =
+  Saver<GanttBlockDraft, Bundle>(
+    save = { it.toBundle() },
+    restore = { it.toGanttBlockDraft() },
+  )
+
+private val NullableGanttBlockDraftSaver =
+  Saver<GanttBlockDraft?, Bundle>(
+    save = { draft ->
+      if (draft == null) Bundle().apply { putBoolean("present", false) }
+      else draft.toBundle().apply { putBoolean("present", true) }
+    },
+    restore = { bundle ->
+      if (bundle.getBoolean("present")) bundle.toGanttBlockDraft() else null
+    },
+  )
+
 @Composable
 fun GanttScreen(
   viewModel: BriefingViewModel,
@@ -196,8 +238,8 @@ fun GanttScreen(
   val colors = MaterialTheme.colorScheme
 
   val rangeDays by viewModel.ganttRangeDays.collectAsStateWithLifecycle()
-  var scheduleDraft by rememberSaveable { mutableStateOf<GanttBlockDraft?>(null) }
-  var moveDraft by rememberSaveable { mutableStateOf<GanttBlockDraft?>(null) }
+  var scheduleDraft by rememberSaveable(stateSaver = NullableGanttBlockDraftSaver) { mutableStateOf<GanttBlockDraft?>(null) }
+  var moveDraft by rememberSaveable(stateSaver = NullableGanttBlockDraftSaver) { mutableStateOf<GanttBlockDraft?>(null) }
   var moveSaving by rememberSaveable { mutableStateOf(false) }
   var dragOrigin by remember { mutableStateOf<GanttBlockDraft?>(null) }
   var dragPixels by remember { mutableFloatStateOf(0f) }
@@ -2210,7 +2252,13 @@ private fun ScheduleBlockDialog(
   onDelete: ((Boolean) -> Unit) -> Unit,
 ) {
   var draft by
-    rememberSaveable(initial.itemId, initial.blockId, initial.startAt, initial.endAt) {
+    rememberSaveable(
+      initial.itemId,
+      initial.blockId,
+      initial.startAt,
+      initial.endAt,
+      stateSaver = GanttBlockDraftSaver,
+    ) {
       mutableStateOf(initial)
     }
   var durationText by
