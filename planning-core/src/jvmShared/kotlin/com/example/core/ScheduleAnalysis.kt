@@ -24,6 +24,17 @@ object ScheduleAnalysis {
   fun isAllDay(event: BriefingEvent): Boolean = event.isAllDay
 
   /**
+   * The hard, capacity-eating stretches a list of events represents — the shape every planning
+   * consumer feeds to the engine as fixed commitments. All-day entries are markers, not
+   * commitments: they claim no capacity, so a planner is free to propose work across the whole
+   * day they label.
+   */
+  fun fixedCommitments(events: List<BriefingEvent>): List<WorkingInterval> =
+    events
+      .filter { it.endTime > it.startTime && !it.isAllDay }
+      .map { WorkingInterval(it.startTime, it.endTime) }
+
+  /**
    * Pairs of events whose times genuinely overlap, ordered by start time.
    *
    * All-day entries are skipped: they overlap everything by definition and

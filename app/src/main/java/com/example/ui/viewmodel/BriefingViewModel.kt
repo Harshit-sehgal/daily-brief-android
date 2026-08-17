@@ -919,8 +919,7 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
         val now = System.currentTimeMillis()
         val start = ScheduleAnalysis.startOfDay(now)
         val end = ScheduleAnalysis.startOfDayOffset(start, days)
-        val commitments =
-          repository.eventsInRangeOnce(start, end).map { WorkingInterval(it.startTime, it.endTime) }
+        val commitments = ScheduleAnalysis.fixedCommitments(repository.eventsInRangeOnce(start, end))
         _planScenarios.value =
           PlanScenarios.compare(
             items = relations.map { it.item },
@@ -974,8 +973,7 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
         val now = System.currentTimeMillis()
         val start = ScheduleAnalysis.startOfDay(now)
         val end = ScheduleAnalysis.startOfDayOffset(start, days)
-        val commitments =
-          repository.eventsInRangeOnce(start, end).map { WorkingInterval(it.startTime, it.endTime) }
+        val commitments = ScheduleAnalysis.fixedCommitments(repository.eventsInRangeOnce(start, end))
         _autoPlan.value =
           AutoPlan.propose(
             items = relations.map { it.item },
@@ -1406,9 +1404,8 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
               items = inputs.items,
               blocks = inputs.blocks,
               fixedCommitments =
-                inputs.commitments
-                  .filter { it.startTime < rangeEnd && it.endTime > rangeStart }
-                  .map { event -> WorkingInterval(event.startTime, event.endTime) },
+                ScheduleAnalysis.fixedCommitments(inputs.commitments)
+                  .filter { it.endAt > rangeStart && it.startAt < rangeEnd },
               dependencies = dependencies,
             )
           }

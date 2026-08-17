@@ -27,6 +27,17 @@ data class AutoPlanResult(
 }
 
 /**
+ * How a task's due date limits the planner. Defaults to [HARD]: the engine only proposes work
+ * that ends before `dueAt`, and names whatever does not fit — "know what you can commit to
+ * before you commit to it". [SOFT] preserves the old behaviour of planning past a deadline, but
+ * never claims the work is "ahead of its due date" when it is not.
+ */
+enum class DeadlinePolicy {
+  SOFT,
+  HARD,
+}
+
+/**
  * A proposal, never a decision.
  *
  * Auto-planning is the feature most able to destroy trust, because it moves a person's week while
@@ -54,6 +65,7 @@ object AutoPlan {
      * editing the tasks to fake one.
      */
     preferredOrder: List<String> = emptyList(),
+    deadlinePolicy: DeadlinePolicy = DeadlinePolicy.HARD,
   ): AutoPlanResult {
     if (rangeEndMs <= rangeStartMs) {
       return AutoPlanResult(emptyList(), emptyList(), "That range ends before it starts.")
@@ -113,17 +125,15 @@ object AutoPlan {
     }
     val skipped = unplaced.map(UnplacedTask::itemId).toSet()
 
-    // Time already spoken for: existing blocks, fixed commitments plus their buffer, and the past.
-    val buffer = schedule.bufferMinutes * 60_000L
+    // Time already spoken for: existing blocks and fixed commitments plus their buffer. The
+    // buffer lives in WorkingCalendar.freeIntervals, the same single code path PlanHealth uses.
     val taken =
-      (blocks.map { WorkingInterval(it.startAt, it.endAt) } +
-          fixedCommitments.map { WorkingInterval(it.startAt - buffer, it.endAt + buffer) })
-        .toMutableList()
+      blocks.map { WorkingInterval(it.startAt, it.endAt) }.toMutableList()
     // Blocks must start on a whole minute, and "now" almost never is. Rounding up rather than
     // down also keeps a proposal from starting a few seconds in the past.
     val earliest = ceilToMinute(maxOf(rangeStartMs, nowMs))
     val free =
-      WorkingCalendar.workingIntervals(schedule, rangeStartMs, rangeEndMs)
+      WorkingCalendar.freeIntervals(schedule, rangeStartMs, rangeEndMs, fixedCommitments)
         .mapNotNull { interval ->
           val start = maxOf(interval.startAt, earliest)
           if (start >= interval.endAt) null else WorkingInterval(start, interval.endAt)
@@ -140,7 +150,14 @@ object AutoPlan {
     candidates.filterNot { it.id in skipped }.forEach { item ->
       var remaining = requireNotNull(item.effortMinutes) - (scheduledMinutes[item.id] ?: 0)
       val notBefore =
-        predecessors[item.id].orEmpty().mapNotNull { finishByItem[it] }.maxOrNull() ?: earliest
+        listOfNotNull(
+            earliest,
+            item.startConstraint?.let { maxOf(it, earliest) },
+            predecessors[item.id].orEmpty().mapNotNull { finishByItem[it] }.maxOrNull(),
+          )
+          .max()
+      val notAfter =
+        if (deadlinePolicy == DeadlinePolicy.HARD) item.dueAt else null
       val blockedByName =
         predecessors[item.id].orEmpty().firstOrNull { finishByItem.containsKey(it) }?.let {
           byId[it]?.title
@@ -149,7 +166,7 @@ object AutoPlan {
 
       while (remaining >= schedule.minimumChunkMinutes) {
         val slot =
-          nextSlot(free, taken, maxOf(notBefore, earliest), schedule.minimumChunkMinutes)
+          nextSlot(free, taken, notBefore, schedule.minimumChunkMinutes, notAfter)
             ?: break
         val available = ((slot.endAt - slot.startAt) / 60_000L).toInt()
         val minutes = minOf(remaining, schedule.maximumChunkMinutes, available)
@@ -170,7 +187,11 @@ object AutoPlan {
                   append(blockedByName)
                   append(" finishes")
                 }
-                if (item.dueAt != null) append(", ahead of its due date")
+                if (item.dueAt != null && end <= item.dueAt) {
+                  append(", ahead of its due date")
+                } else if (notAfter != null) {
+                  append(", up to its due date")
+                }
               },
           )
         taken += WorkingInterval(slot.startAt, end)
@@ -183,11 +204,22 @@ object AutoPlan {
         unplaced +=
           UnplacedTask(
             item.id,
-            "No working slot of at least ${schedule.minimumChunkMinutes} minutes is free in this range.",
+            if (notAfter != null && earliest >= notAfter) {
+              "Its due date has already passed, so nothing can be planned for it."
+            } else {
+              "No working slot of at least ${schedule.minimumChunkMinutes} minutes is free in this range."
+            },
           )
       } else if (remaining >= schedule.minimumChunkMinutes) {
         unplaced +=
-          UnplacedTask(item.id, "$remaining minutes of it still have nowhere to go in this range.")
+          UnplacedTask(
+            item.id,
+            if (notAfter != null) {
+              "$remaining minutes of it remain, past its due date."
+            } else {
+              "$remaining minutes of it still have nowhere to go in this range."
+            },
+          )
       }
     }
 
@@ -211,21 +243,25 @@ object AutoPlan {
     taken: List<WorkingInterval>,
     notBefore: Long,
     minimumMinutes: Int,
+    notAfter: Long?,
   ): WorkingInterval? {
     val minimumMs = minimumMinutes * 60_000L
     free
       .sortedBy(WorkingInterval::startAt)
       .forEach { interval ->
         var cursor = maxOf(interval.startAt, notBefore)
+        // A deadline truncates the search window; it never hands out a slot past the due date.
+        val windowEnd = if (notAfter != null) minOf(interval.endAt, notAfter) else interval.endAt
+        if (windowEnd <= cursor) return@forEach
         val conflicts =
-          taken.filter { it.endAt > cursor && it.startAt < interval.endAt }.sortedBy(WorkingInterval::startAt)
+          taken.filter { it.endAt > cursor && it.startAt < windowEnd }.sortedBy(WorkingInterval::startAt)
         conflicts.forEach { conflict ->
           if (conflict.startAt - cursor >= minimumMs) {
             return WorkingInterval(cursor, conflict.startAt)
           }
           cursor = maxOf(cursor, conflict.endAt)
         }
-        if (interval.endAt - cursor >= minimumMs) return WorkingInterval(cursor, interval.endAt)
+        if (windowEnd - cursor >= minimumMs) return WorkingInterval(cursor, windowEnd)
       }
     return null
   }

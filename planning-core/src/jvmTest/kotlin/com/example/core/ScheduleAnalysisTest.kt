@@ -65,6 +65,22 @@ class ScheduleAnalysisTest {
   }
 
   @Test
+  fun `all-day entries are markers, not commitments`() {
+    val monday = instant(2026, 3, 2, 0, 0)
+    val tuesday = instant(2026, 3, 3, 0, 0)
+    val allDay = event("holiday", monday, tuesday, allDay = true)
+    val timed = event("standup", instant(2026, 3, 2, 9), instant(2026, 3, 2, 9, 30))
+
+    val commitments = ScheduleAnalysis.fixedCommitments(listOf(allDay, timed))
+
+    assertEquals(
+      listOf(WorkingInterval(timed.startTime, timed.endTime)),
+      commitments,
+    )
+    assertTrue("the all-day entry must never claim capacity", commitments.none { it.startAt == monday })
+  }
+
+  @Test
   fun `back to back events do not clash`() {
     val a = event("a", instant(2026, 3, 5, 9), instant(2026, 3, 5, 10))
     val b = event("b", instant(2026, 3, 5, 10), instant(2026, 3, 5, 11))
