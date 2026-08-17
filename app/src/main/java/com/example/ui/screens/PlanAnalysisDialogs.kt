@@ -1,30 +1,51 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.core.GanttLayout
 import com.example.core.PlanScenario
 import com.example.core.PlanScenarios
+import com.example.core.PortfolioTimeline
 import com.example.core.PortfolioRollupResult
 import com.example.core.TimeFormatter
 import com.example.data.model.PlanBaseline
 import com.example.data.model.PlanItem
 import com.example.ui.theme.MinimumTouchTarget
+import com.example.ui.theme.Radius
 import com.example.ui.theme.Space
 import com.example.ui.viewmodel.BaselineComparisonUiState
 
@@ -284,57 +305,43 @@ private fun countOf(count: Long, noun: String): String =
 @Composable
 internal fun PortfolioDialog(
   result: PortfolioRollupResult?,
+  timeline: PortfolioTimeline?,
   onDismiss: () -> Unit,
 ) {
-  if (result == null) return
+  if (result == null && timeline == null) return
+  var showTimeline by rememberSaveable { mutableStateOf(false) }
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Across every plan") },
+    title = { Text(if (showTimeline) "Every plan on one calendar" else "Across every plan") },
     text = {
       Column(
         verticalArrangement = Arrangement.spacedBy(Space.sm),
         modifier =
           Modifier.heightIn(max = DialogBodyMaxHeight)
-            .verticalScroll(rememberScrollState())
             .testTag("portfolio"),
       ) {
-        // The reason to open a rollup at all is the total; per-board rows are the breakdown of it.
-        if (result.rows.isNotEmpty()) {
-          Text(
-            buildString {
-              append("${result.rows.size} plan${if (result.rows.size == 1) "" else "s"}")
-              append(" · ${result.totalOpenTasks} open")
-              if (result.totalUnscheduledMinutes > 0) {
-                append(" · ${formatMinutes(result.totalUnscheduledMinutes)} not on the calendar yet")
-              }
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.testTag("portfolio_total"),
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+          FilterChip(
+            selected = !showTimeline,
+            onClick = { showTimeline = false },
+            label = { Text("Rollup") },
+            modifier = Modifier.testTag("portfolio_tab_rollup"),
+          )
+          FilterChip(
+            selected = showTimeline,
+            onClick = { showTimeline = true },
+            label = { Text("Timeline") },
+            modifier = Modifier.testTag("portfolio_tab_timeline"),
           )
         }
-        Text(result.note, style = MaterialTheme.typography.bodyMedium)
-        result.rows.forEach { row ->
-          Column(modifier = Modifier.testTag("portfolio_row_${row.boardId}")) {
-            Text(
-              row.boardName,
-              style = MaterialTheme.typography.bodyMedium,
-              fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-              buildString {
-                append("${row.openTaskCount} open")
-                append(", ${row.doneTaskCount} done")
-                if (row.unscheduledMinutes > 0) {
-                  append(", ${formatMinutes(row.unscheduledMinutes)} not on the calendar yet")
-                }
-                if (row.overdueTaskCount > 0) append(", ${row.overdueTaskCount} past due")
-                if (!row.isComplete) append(" · ${row.unestimatedTaskCount} without an estimate")
-              },
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        if (showTimeline) {
+          if (timeline == null) {
+            Text("The timeline could not be built.")
+          } else {
+            PortfolioTimelineView(timeline)
           }
+        } else {
+          PortfolioRollupView(result)
         }
       }
     },
@@ -349,6 +356,146 @@ internal fun PortfolioDialog(
     modifier = Modifier.testTag("portfolio_dialog"),
   )
 }
+
+@Composable
+private fun PortfolioRollupView(result: PortfolioRollupResult?) {
+  if (result == null) return
+  Column(
+    verticalArrangement = Arrangement.spacedBy(Space.sm),
+    modifier = Modifier.verticalScroll(rememberScrollState()),
+  ) {
+    // The reason to open a rollup at all is the total; per-board rows are the breakdown of it.
+    if (result.rows.isNotEmpty()) {
+      Text(
+        buildString {
+          append("${result.rows.size} plan${if (result.rows.size == 1) "" else "s"}")
+          append(" · ${result.totalOpenTasks} open")
+          if (result.totalUnscheduledMinutes > 0) {
+            append(" · ${formatMinutes(result.totalUnscheduledMinutes)} not on the calendar yet")
+          }
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.testTag("portfolio_total"),
+      )
+    }
+    Text(result.note, style = MaterialTheme.typography.bodyMedium)
+    result.rows.forEach { row ->
+      Column(modifier = Modifier.testTag("portfolio_row_${row.boardId}")) {
+        Text(
+          row.boardName,
+          style = MaterialTheme.typography.bodyMedium,
+          fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+          buildString {
+            append("${row.openTaskCount} open")
+            append(", ${row.doneTaskCount} done")
+            if (row.unscheduledMinutes > 0) {
+              append(", ${formatMinutes(row.unscheduledMinutes)} not on the calendar yet")
+            }
+            if (row.overdueTaskCount > 0) append(", ${row.overdueTaskCount} past due")
+            if (!row.isComplete) append(" · ${row.unestimatedTaskCount} without an estimate")
+          },
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+    }
+  }
+}
+
+/**
+ * All boards' scheduled blocks on one time spine, read-only. Bars are clipped to the visible
+ * range and never editable here — the timeline shows the shape of the week, it does not move it.
+ */
+@Composable
+private fun PortfolioTimelineView(timeline: PortfolioTimeline) {
+  val boardColors =
+    listOf(
+      MaterialTheme.colorScheme.primary,
+      MaterialTheme.colorScheme.tertiary,
+      MaterialTheme.colorScheme.secondary,
+      MaterialTheme.colorScheme.error,
+    )
+  val trackWidth = TimelineDayWidth * timeline.rangeDays
+  val ticks =
+    remember(timeline.range) {
+      GanttLayout.dayTicks(timeline.range, minimumStepDays = 1)
+    }
+  val today =
+    remember(timeline.range) {
+      GanttLayout.today(timeline.range, nowMs = System.currentTimeMillis())
+    }
+  val boards = timeline.bars.map { it.boardId to it.boardName }.distinctBy { it.first }
+
+  if (timeline.isEmpty) {
+    Text("Nothing is scheduled on any board in the next ${timeline.rangeDays} days.")
+    return
+  }
+  Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+    Box(Modifier.width(trackWidth).height(14.dp)) {
+      ticks.forEach { tick ->
+        Box(
+          Modifier
+            .offset(x = ((tick.position * trackWidth.value).dp))
+            .width(1.dp)
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.outlineVariant)
+        )
+      }
+      today?.nowPosition?.let { now ->
+        Box(
+          Modifier
+            .offset(x = (now * trackWidth.value).dp)
+            .width(2.dp)
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.primary)
+        )
+      }
+    }
+    boards.forEachIndexed { index, (boardId, boardName) ->
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+          boardName,
+          style = MaterialTheme.typography.bodySmall,
+          fontWeight = FontWeight.Medium,
+          modifier = Modifier.width(BoardLabelWidth).padding(end = Space.sm),
+        )
+        Box(Modifier.width(trackWidth).height(16.dp).background(MaterialTheme.colorScheme.surfaceVariant)) {
+          timeline.bars.filter { it.boardId == boardId }.forEach { bar ->
+            val startDp = (bar.startPosition * trackWidth.value).dp
+            val endDp = (bar.endPosition * trackWidth.value).dp
+            Box(
+              Modifier
+                .offset(x = startDp)
+                .width((endDp - startDp).coerceAtLeast(3.dp))
+                .fillMaxHeight()
+                .background(
+                  boardColors[index % boardColors.size],
+                  shape = RoundedCornerShape(Radius.block),
+                )
+                .testTag("portfolio_bar_${bar.itemId}"),
+            )
+          }
+        }
+      }
+      Spacer(Modifier.height(Space.xs))
+    }
+    Text(
+      "Read-only: a bar here shows where a board's blocks sit; it is not editable.",
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+  }
+}
+
+private val PortfolioTimeline.rangeDays: Int
+  get() =
+    ((range.endExclusiveMs - range.startInclusiveMs) / 86_400_000L).toInt().coerceAtLeast(1)
+
+private val TimelineDayWidth = 56.dp
+private val BoardLabelWidth = 96.dp
 
 /**
  * The same week planned three defensible ways.

@@ -25,6 +25,9 @@ import com.example.core.WorkingInterval
 import com.example.data.model.PlanBaseline
 import com.example.core.PortfolioRollupResult
 import com.example.core.PortfolioRollup
+import com.example.core.PortfolioTimeline
+import com.example.core.PortfolioGantt
+import com.example.core.GanttLayout
 import com.example.core.PlanScenarios
 import com.example.core.PlanScenario
 import com.example.core.BaselineVariance
@@ -864,6 +867,11 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
   /** Every board at once. Null means the rollup is not open. */
   val portfolio: StateFlow<PortfolioRollupResult?> = _portfolio.asStateFlow()
 
+  private val _portfolioTimeline = MutableStateFlow<PortfolioTimeline?>(null)
+
+  /** All boards' blocks on one time spine, built with the rollup. */
+  val portfolioTimeline: StateFlow<PortfolioTimeline?> = _portfolioTimeline.asStateFlow()
+
   /**
    * Totals across every live board.
    *
@@ -891,6 +899,19 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
             blocksByItem = blocksByItem,
             nowMs = System.currentTimeMillis(),
           )
+        val now = System.currentTimeMillis()
+        val rangeStart = ScheduleAnalysis.startOfDay(now)
+        _portfolioTimeline.value =
+          PortfolioGantt.layout(
+            boards = boards.map { it.id to it.name },
+            itemsByBoard = itemsByBoard,
+            blocksByItem = blocksByItem,
+            range =
+              GanttLayout.VisibleRange(
+                startInclusiveMs = rangeStart,
+                endExclusiveMs = ScheduleAnalysis.startOfDayOffset(rangeStart, PORTFOLIO_TIMELINE_DAYS),
+              ),
+          )
       } catch (e: CancellationException) {
         throw e
       } catch (e: Exception) {
@@ -901,6 +922,7 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
 
   fun dismissPortfolio() {
     _portfolio.value = null
+    _portfolioTimeline.value = null
   }
 
   private val _planScenarios = MutableStateFlow<List<PlanScenario>>(emptyList())
@@ -3208,5 +3230,6 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
     private const val DEFAULT_CALENDAR_VIEW = "Agenda"
     private const val DEFAULT_PLAN_VIEW = "Outline"
     private const val PLAN_HEALTH_DAYS = 7
+    private const val PORTFOLIO_TIMELINE_DAYS = 14
   }
 }

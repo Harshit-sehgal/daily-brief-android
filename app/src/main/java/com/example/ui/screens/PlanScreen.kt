@@ -125,6 +125,7 @@ fun PlanScreen(
   val baselines by viewModel.planBaselines.collectAsStateWithLifecycle()
   val baselineComparison by viewModel.baselineComparison.collectAsStateWithLifecycle()
   val portfolio by viewModel.portfolio.collectAsStateWithLifecycle()
+  val portfolioTimeline by viewModel.portfolioTimeline.collectAsStateWithLifecycle()
   val scenarios by viewModel.planScenarios.collectAsStateWithLifecycle()
   val view = PlanView.fromStored(storedView)
   val windowWidth = LocalWindowWidth.current
@@ -368,7 +369,11 @@ fun PlanScreen(
     onRestore = { baselineComparison?.let { viewModel.restoreBaseline(it.baselineId) } },
     onDismiss = viewModel::dismissBaselineComparison,
   )
-  PortfolioDialog(result = portfolio, onDismiss = viewModel::dismissPortfolio)
+  PortfolioDialog(
+    result = portfolio,
+    timeline = portfolioTimeline,
+    onDismiss = viewModel::dismissPortfolio,
+  )
   PlanScenarioDialog(
     scenarios = scenarios,
     formatter = formatter,
