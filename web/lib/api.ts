@@ -1,11 +1,16 @@
 import type {
   ApplyResponse,
+  BaselineComparison,
+  BaselineSnapshot,
   Board,
   CapacityRequest,
   CapacityResponse,
   PlanRun,
   PlanningRequest,
+  PortfolioResponse,
   Project,
+  ScenarioOrdering,
+  ScenarioResponse,
   SessionResponse,
   Task,
   TodayResponse,
@@ -95,6 +100,29 @@ export const client = {
       method: "POST",
       body: JSON.stringify(task),
     });
+  },
+
+  scenarios(plan: PlanningRequest, orderings?: ScenarioOrdering[]): Promise<ScenarioResponse> {
+    return api("/v1/scenarios", {
+      method: "POST",
+      body: JSON.stringify(orderings ? { v: 1, plan, orderings } : { v: 1, plan }),
+    });
+  },
+
+  createBaseline(): Promise<BaselineSnapshot> {
+    return api("/v1/baselines", { method: "POST", body: "{}" });
+  },
+
+  listBaselines(): Promise<BaselineSnapshot[]> {
+    return api("/v1/baselines");
+  },
+
+  baselineVariance(baselineId: string): Promise<BaselineComparison> {
+    return api(`/v1/baselines/${encodeURIComponent(baselineId)}/variance`);
+  },
+
+  portfolio(): Promise<PortfolioResponse> {
+    return api("/v1/portfolio");
   },
 
   reconcile(): Promise<{ ok: boolean }> {

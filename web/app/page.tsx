@@ -2,11 +2,19 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { client, savedSession, saveSession, clearSession, ApiError } from "@/lib/api";
-import type { Board, CapacityResponse, PlanRun, PlanningRequest, Project, Task, TodayResponse } from "@/lib/types";
+import type { BaselineComparison, BaselineSnapshot, Board, CapacityResponse, PlanRun, PlanningRequest, PortfolioResponse, Project, ScenarioResponse, Task, TodayResponse } from "@/lib/types";
 
 const FIXTURE = (process.env.NEXT_PUBLIC_FIXTURE ?? "1") === "1";
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+const WEEK_MS = 7 * DAY;
+
+/** Monday 00:00 UTC of the current week, for the portfolio strip's bar positions. */
+function weekStart(): number {
+  const now = new Date();
+  const daysSinceMonday = (now.getUTCDay() + 6) % 7;
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - daysSinceMonday * DAY;
+}
 
 function fmt(ms: number): string {
   return new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -72,11 +80,24 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
   const [due, setDue] = useState("");
   const [capacity, setCapacity] = useState<CapacityResponse | null>(null);
   const [waitsFor, setWaitsFor] = useState<Record<string, string>>({});
+  const [scenarios, setScenarios] = useState<ScenarioResponse | null>(null);
+  const [preferredOrder, setPreferredOrder] = useState<string[] | null>(null);
+  const [baselines, setBaselines] = useState<BaselineSnapshot[] | null>(null);
+  const [baselineId, setBaselineId] = useState<string | null>(null);
+  const [variance, setVariance] = useState<BaselineComparison | null>(null);
+  const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
 
   const refresh = useCallback(async () => {
-    const [ps, td] = await Promise.all([client.listProjects(), client.today()]);
+    const [ps, td, pf, bl] = await Promise.all([
+      client.listProjects(),
+      client.today(),
+      client.portfolio(),
+      client.listBaselines().catch(() => null),
+    ]);
     setProjects(ps);
     setToday(td);
+    setPortfolio(pf);
+    setBaselines(bl);
     setSelectedId((current) => current ?? ps.find((p) => p.isDefault)?.id ?? ps[0]?.id ?? null);
   }, []);
 
@@ -182,7 +203,7 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
           lagMinutes: 0,
         })),
       scheduleIdByTaskId: {},
-      preferredOrder: [],
+      preferredOrder: preferredOrder ?? [],
       schedules: [
         {
           id: "s1",
@@ -209,6 +230,47 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
       setRun(nextRun);
     } catch (e) {
       setError(e instanceof Error ? e.message : "planning failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function compareApproaches() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await client.scenarios(buildRequest(Date.now()));
+      setScenarios(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "scenarios failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function takeBaseline() {
+    setBusy(true);
+    setError(null);
+    try {
+      const snapshot = await client.createBaseline();
+      setBaselines(await client.listBaselines());
+      setVariance(null);
+      setBaselineId(snapshot.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "baseline failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function showVariance(baselineId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      setVariance(await client.baselineVariance(baselineId));
+      setBaselineId(baselineId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "variance failed");
     } finally {
       setBusy(false);
     }
@@ -398,6 +460,132 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
               <> Moving: {capacity.moves.map((m) => `"${m.title}"`).join(", ")}.</>
             )}
           </p>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="row">
+          <h2 style={{ margin: 0 }}>Compare approaches</h2>
+          <button onClick={compareApproaches} disabled={busy}>Compare</button>
+        </div>
+        {scenarios && (
+          <>
+            <p className="muted">{scenarios.spread}</p>
+            {scenarios.scenarios.map((s) => (
+              <div className="row" key={s.key} style={{ marginTop: 6 }}>
+                <div style={{ flex: 1 }}>
+                  <strong>{s.name}</strong>
+                  <div className="muted">
+                    {s.result.proposals.map((p) => p.itemId).filter((v, i, a) => a.indexOf(v) === i).length} placed
+                    {s.result.unplaced.length > 0 && <> · {s.result.unplaced.length} unplaced</>}
+                  </div>
+                  <div className="muted">{s.rationale}</div>
+                </div>
+                <button
+                  onClick={() => { setPreferredOrder(s.key === "due" ? [] : s.preferredOrder); setScenarios(null); }}
+                  disabled={busy}
+                >
+                  Use this
+                </button>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="row">
+          <h2 style={{ margin: 0 }}>Portfolio</h2>
+          <span className="tag">this week</span>
+        </div>
+        {portfolio && (
+          <>
+            <table>
+              <thead>
+                <tr><th>Project</th><th>Open</th><th>Done</th><th>Effort</th><th>Scheduled</th><th>Overdue</th></tr>
+              </thead>
+              <tbody>
+                {portfolio.rows.map((r) => (
+                  <tr key={r.projectId}>
+                    <td>{r.projectName}</td>
+                    <td>{r.openTasks}</td>
+                    <td>{r.doneTasks}</td>
+                    <td>{r.statedEffortMinutes} min</td>
+                    <td>{r.scheduledMinutes} min</td>
+                    <td>{r.overdueTasks}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {portfolio.rows.some((r) => r.weekBlocks.length > 0) && (
+              <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+                {portfolio.rows.filter((r) => r.weekBlocks.length > 0).map((r) => (
+                  <div key={r.projectId} className="row" style={{ gap: 6 }}>
+                    <span style={{ width: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.projectName}</span>
+                    <div style={{ flex: 1, position: "relative", height: 14, background: "rgba(0,0,0,0.06)" }}>
+                      {r.weekBlocks.map((b) => {
+                        const left = ((b.startAt - weekStart()) / WEEK_MS) * 100;
+                        const width = ((b.endAt - b.startAt) / WEEK_MS) * 100;
+                        return (
+                          <div
+                            key={`${b.itemId}-${b.startAt}`}
+                            title={b.itemId}
+                            style={{ position: "absolute", left: `${left}%`, width: `${width}%`, top: 0, bottom: 0, background: "#7c5cff" }}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="muted" style={{ marginTop: 8 }}>{portfolio.note}</p>
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="row">
+          <h2 style={{ margin: 0 }}>Baselines</h2>
+          <button onClick={takeBaseline} disabled={busy}>Take baseline</button>
+        </div>
+        {baselines === null ? (
+          <p className="muted">loading…</p>
+        ) : baselines.length === 0 ? (
+          <p className="muted">No baselines yet — take one before a change you want to measure.</p>
+        ) : (
+          <>
+            {baselines.map((b) => (
+              <div className="row" key={b.id} style={{ marginTop: 6 }}>
+                <div style={{ flex: 1 }}>
+                  <strong>{fmt(b.createdAt)}</strong>
+                  <span className="muted"> · {b.taskCount} tasks · {b.blockCount} blocks</span>
+                </div>
+                <button onClick={() => showVariance(b.id)} disabled={busy}>Variance</button>
+              </div>
+            ))}
+            {variance && baselineId && (
+              <div style={{ marginTop: 8 }}>
+                <p className="muted">{variance.summary}</p>
+                {variance.rows.map((row) => (
+                  <div className="row" key={row.itemId} style={{ marginTop: 4 }}>
+                    <div style={{ flex: 1 }}>
+                      <strong>{row.title}</strong>
+                      <span className="muted">
+                        {" "}
+                        {row.addedSinceBaseline ? "scheduled since" : row.removedSinceBaseline ? "no longer scheduled" : row.baselineStartMs ? `${fmt(row.baselineStartMs)} → ${fmt(row.currentStartMs ?? 0)}` : "—"}
+                      </span>
+                    </div>
+                    {row.driftMinutes != null && row.driftMinutes !== 0 && (
+                      <span className={row.driftMinutes > 0 ? "error" : "muted"}>
+                        {row.driftMinutes > 0 ? `${Math.round(row.driftMinutes / 3600000)} h later` : `${Math.round(-row.driftMinutes / 3600000)} h earlier`}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 

@@ -16,6 +16,9 @@ class ContractGoldenTest {
   private val capacityRequestPath = "golden/capacity-request-v1.json"
   private val capacityResponsePath = "golden/capacity-response-v1.json"
   private val boardPath = "golden/board-v1.json"
+  private val scenariosPath = "golden/scenarios-v1.json"
+  private val baselinePath = "golden/baseline-comparison-v1.json"
+  private val portfolioPath = "golden/portfolio-v1.json"
 
   @Test
   fun `golden request parses to the canonical request`() {
@@ -272,4 +275,113 @@ class ContractGoldenTest {
       tasks = listOf(taskA),
     )
   }
+
+  @Test
+  fun `golden scenarios parses and re-encodes byte-identical`() {
+    val canonical = canonicalScenarios()
+    val parsed = PlannerApi.json.decodeFromString<ScenarioResponseWire>(read(scenariosPath))
+    assertEquals(canonical, parsed)
+    assertEquals(
+      read(scenariosPath),
+      PlannerApi.json.encodeToString(ScenarioResponseWire.serializer(), canonical),
+    )
+  }
+
+  @Test
+  fun `golden baseline comparison parses and re-encodes byte-identical`() {
+    val canonical = canonicalBaselineComparison()
+    val parsed = PlannerApi.json.decodeFromString<BaselineComparisonWire>(read(baselinePath))
+    assertEquals(canonical, parsed)
+    assertEquals(
+      read(baselinePath),
+      PlannerApi.json.encodeToString(BaselineComparisonWire.serializer(), canonical),
+    )
+  }
+
+  @Test
+  fun `golden portfolio parses and re-encodes byte-identical`() {
+    val canonical = canonicalPortfolio()
+    val parsed = PlannerApi.json.decodeFromString<PortfolioResponseWire>(read(portfolioPath))
+    assertEquals(canonical, parsed)
+    assertEquals(
+      read(portfolioPath),
+      PlannerApi.json.encodeToString(PortfolioResponseWire.serializer(), canonical),
+    )
+  }
+
+  private fun canonicalScenarios(): ScenarioResponseWire =
+    ScenarioResponseWire(
+      v = PlannerApi.VERSION,
+      scenarios =
+        listOf(
+          ScenarioResultWire(
+            key = "due",
+            name = "Due date first",
+            rationale = "Whatever is due soonest gets the first free slot.",
+            preferredOrder = emptyList(),
+            result = canonicalResult(),
+          ),
+          ScenarioResultWire(
+            key = "priority",
+            name = "Priority first",
+            rationale = "Urgent and high-priority work is placed before anything else.",
+            preferredOrder = listOf("task-a", "task-b"),
+            result = canonicalResult(),
+          ),
+        ),
+      spread = "Both approaches place the same work by the same evening.",
+    )
+
+  private fun canonicalBaselineComparison(): BaselineComparisonWire =
+    BaselineComparisonWire(
+      v = PlannerApi.VERSION,
+      summary = "1 later, 1 pulled forward, 1 scheduled since.",
+      rows =
+        listOf(
+          TaskVarianceWire(
+            itemId = "task-a",
+            title = "Write schema",
+            baselineStartMs = 1735693200000L,
+            currentStartMs = 1735718400000L,
+            baselineMinutes = 90,
+            currentMinutes = 90,
+            driftMinutes = 25200000L,
+          ),
+          TaskVarianceWire(
+            itemId = "task-c",
+            title = "Seed fixtures",
+            baselineMinutes = 0,
+            currentMinutes = 30,
+            addedSinceBaseline = true,
+          ),
+        ),
+    )
+
+  private fun canonicalPortfolio(): PortfolioResponseWire =
+    PortfolioResponseWire(
+      v = PlannerApi.VERSION,
+      rows =
+        listOf(
+          PortfolioRowWire(
+            projectId = "project-1",
+            projectName = "Client A",
+            openTasks = 2,
+            doneTasks = 1,
+            statedEffortMinutes = 135,
+            scheduledMinutes = 90,
+            overdueTasks = 1,
+            unestimatedTasks = 1,
+            weekBlocks =
+              listOf(
+                PortfolioBlockWire(
+                  itemId = "task-a",
+                  title = "Write schema",
+                  startAt = 1735693200000L,
+                  endAt = 1735698600000L,
+                ),
+              ),
+          ),
+        ),
+      note = "1 open task states no effort, so every effort total here is a floor rather than a total.",
+    )
 }

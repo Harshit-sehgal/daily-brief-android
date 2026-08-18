@@ -198,3 +198,76 @@ export interface Dependency {
   type: string;
   lagMinutes: number;
 }
+
+export interface ScenarioOrdering {
+  key: string;
+  name: string;
+  rationale: string;
+  preferredOrder: string[];
+}
+
+export interface ScenarioResult {
+  key: string;
+  name: string;
+  rationale: string;
+  preferredOrder: string[];
+  result: PlanRun["result"];
+}
+
+export interface ScenarioResponse {
+  v: number;
+  scenarios: ScenarioResult[];
+  spread: string;
+}
+
+export interface BaselineSnapshot {
+  v: number;
+  id: string;
+  workspaceId: string;
+  createdAt: number;
+  taskCount: number;
+  blockCount: number;
+}
+
+export interface TaskVariance {
+  itemId: string;
+  title: string;
+  baselineStartMs?: number | null;
+  currentStartMs?: number | null;
+  baselineMinutes: number;
+  currentMinutes: number;
+  driftMinutes?: number | null;
+  addedSinceBaseline: boolean;
+  removedSinceBaseline: boolean;
+}
+
+export interface BaselineComparison {
+  v: number;
+  summary: string;
+  rows: TaskVariance[];
+}
+
+export interface PortfolioBlock {
+  itemId: string;
+  title: string;
+  startAt: number;
+  endAt: number;
+}
+
+export interface PortfolioRow {
+  projectId: string;
+  projectName: string;
+  openTasks: number;
+  doneTasks: number;
+  statedEffortMinutes: number;
+  scheduledMinutes: number;
+  overdueTasks: number;
+  unestimatedTasks: number;
+  weekBlocks: PortfolioBlock[];
+}
+
+export interface PortfolioResponse {
+  v: number;
+  rows: PortfolioRow[];
+  note: string;
+}

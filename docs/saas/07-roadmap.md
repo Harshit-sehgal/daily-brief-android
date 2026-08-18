@@ -192,7 +192,13 @@ Only once the loop is used. In `01-product-teardown.md` priority order:
    before its predecessor has one — the real residue of defect 3, discovered when the journey
    proved FS ordering), the golden request pins all four types, and the web board links tasks
    with a "waits for" picker.
-4. **Scenarios, baselines, portfolio** — `PortfolioGantt` folds in here.
+4. **Scenarios, baselines, portfolio** — `PortfolioGantt` folds in here. **Shipped 2026-08-18:**
+   `POST /v1/scenarios` runs the same engine under the default three orderings (due, priority,
+   quick wins — the app's `PlanScenarios`) and returns the engine's own spread sentence, writing
+   nothing; `POST /v1/baselines` snapshots the schedule in frozen wire form (V3 migration,
+   jsonb), and `GET /v1/baselines/{id}/variance` reports `BaselineVariance` against today;
+   `GET /v1/portfolio` is the per-project rollup with the week's blocks, which is what the Gantt
+   folds in with — the web surface draws the strip from them.
 5. **Billing** — Stripe, per-tenant quota, the trial boundary in `02`.
 
 ---

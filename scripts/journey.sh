@@ -156,6 +156,22 @@ jq -e '.availableMinutes > 0 and .spareMinutes >= 480' /tmp/opencode/journey-cap
 jq -e '.sentence | length > 0' /tmp/opencode/journey-capacity.json >/dev/null || fail "capacity carries no sentence"
 step "4b. capacity          (+$(( $(start_ms) - T )) ms)"
 
+# ── Scenarios: the same week three ways, computed by the server, written nowhere (Stage 4.4).
+T=$(start_ms)
+SCENARIOS=$(jq -cn --argjson plan "$REQUEST" '{v:1, plan:$plan}')
+api POST /v1/scenarios "$SCENARIOS" /tmp/opencode/journey-scenarios.json
+jq -e '.scenarios | length == 3' /tmp/opencode/journey-scenarios.json >/dev/null \
+  || fail "expected 3 default scenarios, got $(jq '.scenarios | length' /tmp/opencode/journey-scenarios.json)"
+jq -e '[.scenarios[].key] == ["due", "priority", "short"]' /tmp/opencode/journey-scenarios.json >/dev/null \
+  || fail "scenario keys not the default three: $(jq -c '[.scenarios[].key]' /tmp/opencode/journey-scenarios.json)"
+jq -e '.scenarios[0].result.proposals | length >= 2' /tmp/opencode/journey-scenarios.json >/dev/null \
+  || fail "scenario results carry no proposals"
+jq -e '.spread | length > 0' /tmp/opencode/journey-scenarios.json >/dev/null || fail "scenarios carry no spread sentence"
+# Analysis writes nothing: a scenario result carries no runId to apply or reject.
+jq -e '.scenarios[0].result | has("runId") | not' /tmp/opencode/journey-scenarios.json >/dev/null \
+  || fail "a scenario result leaked a run id"
+step "4c. scenarios          (+$(( $(start_ms) - T )) ms)"
+
 # ── Apply → Today ─────────────────────────────────────────────────────────────────────────
 T=$(start_ms)
 api POST "/v1/plan/$RUN_ID/apply" - /tmp/opencode/journey-apply.json
@@ -186,6 +202,31 @@ jq -e '.blocks | length == 0' /tmp/opencode/journey-today3.json >/dev/null || fa
 api POST "/v1/plan/$ENTRY_ID/undo" - /tmp/opencode/journey-undo2.json \
   && fail "double-undo must be refused (conflict), not succeed"
 step "7. undo → restored    (+$(( $(start_ms) - T )) ms)"
+
+# ── Baseline + portfolio: take a baseline of the empty week, plan and apply again, and the
+# variance must report the work that appeared while the portfolio counts it (Stage 4.4).
+T=$(start_ms)
+api POST /v1/baselines - /tmp/opencode/journey-baseline.json
+BASELINE_ID=$(jq -r .id /tmp/opencode/journey-baseline.json)
+[ -n "$BASELINE_ID" ] && [ "$BASELINE_ID" != "null" ] || fail "baseline create returned no id"
+api GET /v1/baselines - /tmp/opencode/journey-baselines.json
+jq -e --arg id "$BASELINE_ID" '[.[] | select(.id == $id)] | length == 1' /tmp/opencode/journey-baselines.json >/dev/null \
+  || fail "created baseline is not listed"
+api POST /v1/plan "$REQUEST" /tmp/opencode/journey-plan3.json
+RUN3=$(jq -r .runId /tmp/opencode/journey-plan3.json)
+api POST "/v1/plan/$RUN3/apply" - /tmp/opencode/journey-apply3.json
+api GET "/v1/baselines/$BASELINE_ID/variance" - /tmp/opencode/journey-variance.json
+jq -e '.rows | length >= 2' /tmp/opencode/journey-variance.json >/dev/null \
+  || fail "variance does not see the applied work: $(jq -c '.summary' /tmp/opencode/journey-variance.json)"
+jq -e '.rows[0].addedSinceBaseline == true' /tmp/opencode/journey-variance.json >/dev/null \
+  || fail "applied work is not reported as added since baseline"
+api GET /v1/portfolio - /tmp/opencode/journey-portfolio.json
+jq -e '.rows | length >= 1' /tmp/opencode/journey-portfolio.json >/dev/null \
+  || fail "portfolio has no rows"
+jq -e '[.rows[].weekBlocks[]] | length >= 2' /tmp/opencode/journey-portfolio.json >/dev/null \
+  || fail "portfolio Gantt sees none of the applied blocks"
+jq -e '.note | length > 0' /tmp/opencode/journey-portfolio.json >/dev/null || fail "portfolio carries no note"
+step "8. baseline + portfolio (+$(( $(start_ms) - T )) ms)"
 
 TOTAL=$(( $(start_ms) - T0 ))
 echo "== journey complete in ${TOTAL} ms"

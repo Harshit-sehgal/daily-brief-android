@@ -1,12 +1,24 @@
 package com.example.server
 
+import com.example.contract.BaselineComparisonWire
+import com.example.contract.BaselineSnapshotWire
 import com.example.contract.BoardWire
 import com.example.contract.CapacityRequestWire
 import com.example.contract.CreateProjectWire
 import com.example.contract.PlanningRequest
 import com.example.contract.PlanningResult
+import com.example.contract.PlannerApi
+import com.example.contract.PortfolioBlockWire
+import com.example.contract.PortfolioResponseWire
+import com.example.contract.PortfolioRowWire
 import com.example.contract.ProjectWire
+import com.example.contract.ScenarioOrderingWire
+import com.example.contract.ScenarioRequestWire
+import com.example.contract.ScenarioResponseWire
+import com.example.contract.ScenarioResultWire
+import com.example.contract.ScheduledBlockWire
 import com.example.contract.StageWire
+import com.example.contract.TaskVarianceWire
 import com.example.contract.TaskWire
 import com.example.server.db.Db
 import com.example.server.db.Db.execute
@@ -20,7 +32,15 @@ import com.example.server.google.GoogleOAuth
 import com.example.server.plan.Journal
 import com.example.core.Mapping
 import com.example.core.Mapping.answerCapacity
+import com.example.core.Mapping.toEngine
 import com.example.core.Mapping.toWire
+import com.example.core.AutoPlanResult
+import com.example.core.PlanScenario
+import com.example.core.BaselineVariance
+import com.example.core.PlanProposal
+import com.example.core.PlanScenarios
+import com.example.core.PortfolioRollup
+import com.example.core.UnplacedTask
 import com.example.server.reconcile.ReconcileWorker
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -349,6 +369,290 @@ fun Application.routes(config: Config) {
           call.respond(request.answerCapacity().toWire())
         }
 
+        // Stage 4.4 — scenarios, baselines, portfolio. All three are analysis that writes
+        // nothing: choosing a scenario is the caller's /plan call, a baseline is a snapshot,
+        // and the portfolio reads the current week.
+
+        fun taskWireRows(workspaceId: String, projectId: String? = null): List<TaskWire> =
+          Db.dataSource.connection.use { conn ->
+            val where =
+              if (projectId == null) "workspace_id = ?" else "workspace_id = ? AND project_id = ?"
+            val params =
+              if (projectId == null) listOf(workspaceId) else listOf(workspaceId, projectId)
+            conn.query(
+              "SELECT id, project_id, parent_id, title, notes, rank, start_constraint, due_at, effort_minutes, progress, priority, owner, scheduling_mode, locked, is_milestone, completed_at, archived_at, stage_id " +
+                "FROM tasks WHERE $where AND archived_at IS NULL ORDER BY rank",
+              params,
+            ) { rs ->
+              TaskWire(
+                id = rs.getString("id"),
+                boardId = rs.getString("project_id"),
+                columnId = rs.getString("stage_id"),
+                parentId = rs.getString("parent_id"),
+                title = rs.getString("title"),
+                notes = rs.getString("notes"),
+                rank = rs.getLong("rank"),
+                startConstraint = rs.getLong("start_constraint").takeIf { !rs.wasNull() },
+                dueAt = rs.getLong("due_at").takeIf { !rs.wasNull() },
+                effortMinutes = rs.getInt("effort_minutes").takeIf { !rs.wasNull() },
+                progress = rs.getInt("progress"),
+                priority = rs.getString("priority"),
+                owner = rs.getString("owner"),
+                schedulingMode = rs.getString("scheduling_mode"),
+                locked = rs.getBoolean("locked"),
+                isMilestone = rs.getBoolean("is_milestone"),
+                completedAt = rs.getLong("completed_at").takeIf { !rs.wasNull() },
+                archivedAt = rs.getLong("archived_at").takeIf { !rs.wasNull() },
+              )
+            }
+          }
+
+        fun blockWireRows(workspaceId: String): List<ScheduledBlockWire> =
+          Db.dataSource.connection.use { conn ->
+            conn.query(
+              "SELECT id, task_id, start_at, end_at, position, locked, linked_event_id FROM scheduled_blocks WHERE workspace_id = ? ORDER BY start_at",
+              listOf(workspaceId),
+            ) { rs ->
+              ScheduledBlockWire(
+                id = rs.getString("id"),
+                planItemId = rs.getString("task_id"),
+                startAt = rs.getLong("start_at"),
+                endAt = rs.getLong("end_at"),
+                position = rs.getInt("position"),
+                locked = rs.getBoolean("locked"),
+                linkedEventId = rs.getString("linked_event_id"),
+              )
+            }
+          }
+
+        /** The same three approaches the app's PlanScenarios compares, as wire orderings. */
+        fun defaultOrderings(plan: PlanningRequest): List<ScenarioOrderingWire> {
+          val items = plan.items
+          val priorityRank =
+            mapOf(
+              "urgent" to 0,
+              "high" to 1,
+              "normal" to 2,
+              "low" to 3,
+            )
+          return listOf(
+            ScenarioOrderingWire(
+              key = "due",
+              name = "Due date first",
+              rationale = "Whatever is due soonest gets the first free slot.",
+              preferredOrder = emptyList(),
+            ),
+            ScenarioOrderingWire(
+              key = "priority",
+              name = "Priority first",
+              rationale = "Urgent and high-priority work is placed before anything else.",
+              preferredOrder =
+                items
+                  .sortedWith(compareBy({ priorityRank[it.priority] ?: 2 }, { it.rank }, { it.id }))
+                  .map { it.id },
+            ),
+            ScenarioOrderingWire(
+              key = "short",
+              name = "Quick wins first",
+              rationale = "The smallest pieces of stated effort go first, clearing the list faster.",
+              preferredOrder =
+                items
+                  .sortedWith(compareBy({ it.effortMinutes ?: Int.MAX_VALUE }, { it.rank }, { it.id }))
+                  .map { it.id },
+            ),
+          )
+        }
+
+        post("/scenarios") {
+          val session = sessions.require(call)
+          val request = call.receive<ScenarioRequestWire>()
+          if (request.plan.workspaceId != session.workspaceId) {
+            call.respond(HttpStatusCode.Forbidden, mapOf("error" to "workspace mismatch"))
+            return@post
+          }
+          val refusal = request.plan.refusalReason()
+          if (refusal != null) {
+            call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to refusal))
+            return@post
+          }
+          val orderings = request.orderings ?: defaultOrderings(request.plan)
+          val scenarios =
+            orderings.map { ordering ->
+              val copy = request.plan.copy(preferredOrder = ordering.preferredOrder)
+              val result = Mapping.propose(Mapping.toEngine(copy, copy.nowMs), copy)
+              ScenarioResultWire(ordering.key, ordering.name, ordering.rationale, ordering.preferredOrder, result)
+            }
+          val spread =
+            PlanScenarios.describeSpread(
+              scenarios.map { scenario ->
+                PlanScenarioAdapter.toDomain(scenario)
+              },
+            )
+          call.respond(ScenarioResponseWire(PlannerApi.VERSION, scenarios, spread))
+        }
+
+        post("/baselines") {
+          val session = sessions.require(call)
+          val tasks = taskWireRows(session.workspaceId)
+          val blocks = blockWireRows(session.workspaceId)
+          val id = newId()
+          val now = System.currentTimeMillis()
+          val payload =
+            PlannerApi.json.encodeToString(
+              BaselinePayload.serializer(),
+              BaselinePayload(tasks, blocks),
+            )
+          Db.dataSource.connection.use { conn ->
+            conn.execute(
+              "INSERT INTO baselines (id, workspace_id, created_at, task_count, block_count, payload) VALUES (?, ?, ?, ?, ?, ?::jsonb)",
+              listOf(id, session.workspaceId, now, tasks.size, blocks.size, payload),
+            )
+          }
+          call.respond(
+            BaselineSnapshotWire(
+              v = PlannerApi.VERSION,
+              id = id,
+              workspaceId = session.workspaceId,
+              createdAt = now,
+              taskCount = tasks.size,
+              blockCount = blocks.size,
+            ),
+          )
+        }
+
+        get("/baselines") {
+          val session = sessions.require(call)
+          val snapshots =
+            Db.dataSource.connection.use { conn ->
+              conn.query(
+                "SELECT id, created_at, task_count, block_count FROM baselines WHERE workspace_id = ? ORDER BY created_at DESC",
+                listOf(session.workspaceId),
+              ) { rs ->
+                BaselineSnapshotWire(
+                  v = PlannerApi.VERSION,
+                  id = rs.getString("id"),
+                  workspaceId = session.workspaceId,
+                  createdAt = rs.getLong("created_at"),
+                  taskCount = rs.getInt("task_count"),
+                  blockCount = rs.getInt("block_count"),
+                )
+              }
+            }
+          call.respond(snapshots)
+        }
+
+        get("/baselines/{baselineId}/variance") {
+          val session = sessions.require(call)
+          val baselineId = call.parameters["baselineId"] ?: error("baselineId required")
+          val payload =
+            Db.dataSource.connection.use { conn ->
+              conn.queryOne(
+                "SELECT payload FROM baselines WHERE workspace_id = ? AND id = ?",
+                listOf(session.workspaceId, baselineId),
+              ) { rs -> rs.getString("payload") }
+            }
+          if (payload == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "no such baseline"))
+            return@get
+          }
+          val snapshot =
+            PlannerApi.json.decodeFromString(BaselinePayload.serializer(), payload)
+          val now = System.currentTimeMillis()
+          val comparison =
+            BaselineVariance.compare(
+              baselineItems = snapshot.tasks.map { it.toEngine(now) },
+              baselineBlocks = snapshot.blocks.map { it.toEngine(now) },
+              currentItems = taskWireRows(session.workspaceId).map { it.toEngine(now) },
+              currentBlocks = blockWireRows(session.workspaceId).map { it.toEngine(now) },
+            )
+          call.respond(
+            BaselineComparisonWire(
+              v = PlannerApi.VERSION,
+              summary = comparison.summary,
+              rows =
+                comparison.rows.map { row ->
+                  TaskVarianceWire(
+                    itemId = row.itemId,
+                    title = row.title,
+                    baselineStartMs = row.baselineStartMs,
+                    currentStartMs = row.currentStartMs,
+                    baselineMinutes = row.baselineMinutes,
+                    currentMinutes = row.currentMinutes,
+                    driftMinutes = row.driftMinutes,
+                    addedSinceBaseline = row.addedSinceBaseline,
+                    removedSinceBaseline = row.removedSinceBaseline,
+                  )
+                },
+            ),
+          )
+        }
+
+        get("/portfolio") {
+          val session = sessions.require(call)
+          val now = System.currentTimeMillis()
+          val weekStart =
+            java.time.Instant.ofEpochMilli(now).truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+              .minus(java.time.Duration.ofDays(java.time.DayOfWeek.MONDAY.getValue() - 1L))
+              .toEpochMilli()
+          val weekEnd = weekStart + 7 * 24 * 60 * 60 * 1000L
+          val projects =
+            Db.dataSource.connection.use { conn ->
+              conn.query(
+                "SELECT id, name FROM projects WHERE workspace_id = ? AND archived_at IS NULL ORDER BY rank, created_at",
+                listOf(session.workspaceId),
+              ) { rs -> rs.getString("id") to rs.getString("name") }
+            }
+          val tasksByProject =
+            projects.map { (id, _) -> id to taskWireRows(session.workspaceId, id) }.toMap()
+          val allBlocks = blockWireRows(session.workspaceId)
+          val weekBlocksByProject =
+            tasksByProject.mapValues { (projectId, tasks) ->
+              val ids = tasks.mapTo(mutableSetOf()) { it.id }
+              allBlocks.filter { it.planItemId in ids && it.startAt < weekEnd && it.endAt > weekStart }
+            }
+          val itemsByBoard =
+            tasksByProject.mapValues { (_, tasks) -> tasks.map { it.toEngine(now) } }
+          val blocksByItem =
+            allBlocks.groupBy { it.planItemId }.mapValues { (_, blocks) -> blocks.map { it.toEngine(now) } }
+          val rollup =
+            PortfolioRollup.summarise(
+              boards = projects,
+              itemsByBoard = itemsByBoard,
+              blocksByItem = blocksByItem,
+              nowMs = now,
+            )
+          val byId = rollup.rows.associateBy { it.boardId }
+          call.respond(
+            PortfolioResponseWire(
+              v = PlannerApi.VERSION,
+              rows =
+                projects.map { (projectId, projectName) ->
+                  val row = requireNotNull(byId[projectId])
+                  PortfolioRowWire(
+                    projectId = projectId,
+                    projectName = projectName,
+                    openTasks = row.openTaskCount,
+                    doneTasks = row.doneTaskCount,
+                    statedEffortMinutes = row.statedEffortMinutes,
+                    scheduledMinutes = row.scheduledMinutes,
+                    overdueTasks = row.overdueTaskCount,
+                    unestimatedTasks = row.unestimatedTaskCount,
+                    weekBlocks =
+                      weekBlocksByProject[projectId].orEmpty().map { block ->
+                        PortfolioBlockWire(
+                          itemId = block.planItemId,
+                          title = "",
+                          startAt = block.startAt,
+                          endAt = block.endAt,
+                        )
+                      },
+                  )
+                },
+              note = rollup.note,
+            ),
+          )
+        }
+
         post("/plan/{runId}/apply") {
           val session = sessions.require(call)
           val runId = call.parameters["runId"] ?: error("runId required")
@@ -398,6 +702,35 @@ data class SessionResponse(val workspaceId: String, val token: String)
 
 @Serializable
 data class PlanRunResponse(val runId: String, val result: PlanningResult)
+
+/** What a baseline holds: the frozen wire forms, so decoding never needs per-row SQL. */
+@Serializable
+data class BaselinePayload(
+  val tasks: List<TaskWire>,
+  val blocks: List<ScheduledBlockWire>,
+)
+
+/**
+ * The scenario sentence (`PlanScenarios.describeSpread`) speaks in domain results; the wire
+ * result is the same shape with the same fields, so this adapter hands it back without
+ * re-running anything.
+ */
+private object PlanScenarioAdapter {
+  fun toDomain(scenario: ScenarioResultWire): PlanScenario {
+    val result = scenario.result
+    return PlanScenario(
+      key = scenario.key,
+      name = scenario.name,
+      rationale = scenario.rationale,
+      result =
+        AutoPlanResult(
+          proposals = result.proposals.map { PlanProposal(it.itemId, it.startAt, it.endAt, it.reason) },
+          unplaced = result.unplaced.map { UnplacedTask(it.itemId, it.reason) },
+          explanation = result.explanation,
+        ),
+    )
+  }
+}
 
 @Serializable
 data class ApplyResponse(val blocks: Int, val entryId: String)
