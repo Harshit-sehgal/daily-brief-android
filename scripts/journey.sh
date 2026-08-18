@@ -228,6 +228,67 @@ jq -e '[.rows[].weekBlocks[]] | length >= 2' /tmp/opencode/journey-portfolio.jso
 jq -e '.note | length > 0' /tmp/opencode/journey-portfolio.json >/dev/null || fail "portfolio carries no note"
 step "8. baseline + portfolio (+$(( $(start_ms) - T )) ms)"
 
+# ── Billing: the tier boundary from 02, on a fresh trial workspace (Stage 4.5). The main
+# journey workspace is paid so the loop's paid surfaces (capacity, baselines, a second
+# project) run first; this leg exercises the free limits and the webhook upgrade.
+T=$(start_ms)
+api POST /v1/fixture/trial-workspace - /tmp/opencode/journey-trial-session.json
+TRIAL_TOKEN=$(jq -r .token /tmp/opencode/journey-trial-session.json)
+TRIAL_WS=$(jq -r .workspaceId /tmp/opencode/journey-trial-session.json)
+[ -n "$TRIAL_TOKEN" ] && [ "$TRIAL_TOKEN" != "null" ] || fail "trial workspace signup returned no session"
+api_post() { # api_post PATH BODY FILE [TOKEN]
+  curl -sS -o "$3" -w '%{http_code}' -X POST "http://localhost:8090$1" \
+    -H "Authorization: Bearer ${4:-$TRIAL_TOKEN}" -H 'Content-Type: application/json' \
+    -d "${2:-}" > /tmp/opencode/journey-status.txt
+}
+api_get_trial() { # api_get_trial PATH FILE
+  curl -sS -o "$2" -w '%{http_code}' -X GET "http://localhost:8090$1" \
+    -H "Authorization: Bearer $TRIAL_TOKEN" > /tmp/opencode/journey-status.txt
+}
+api_get_trial /v1/billing /tmp/opencode/journey-billing.json
+jq -e '.tier == "free" and .status == "trial"' /tmp/opencode/journey-billing.json >/dev/null \
+  || fail "trial workspace is not on the free tier: $(jq -c '{tier,status}' /tmp/opencode/journey-billing.json)"
+jq -e '.limits.maxProjects == 1 and .limits.baselines == false and .limits.capacity == false' /tmp/opencode/journey-billing.json >/dev/null \
+  || fail "trial limits are not the free ones: $(jq -c '.limits' /tmp/opencode/journey-billing.json)"
+jq -e '.usage.projects == 0' /tmp/opencode/journey-billing.json >/dev/null || fail "trial workspace should start with 0 projects"
+jq -e '.trialEndsAt != null and .checkoutUrl != null' /tmp/opencode/journey-billing.json >/dev/null \
+  || fail "trial lacks an end date or a checkout url"
+# The free tier can hold exactly one project; the second is refused with 402.
+api_post /v1/projects '{"v":1,"name":"Client A"}' /tmp/opencode/journey-trial-project1.json
+PROJECT_CODE=$(cat /tmp/opencode/journey-status.txt)
+[ "$PROJECT_CODE" = "200" ] || fail "the first project should fit the free tier (got $PROJECT_CODE)"
+api_post /v1/projects '{"v":1,"name":"Client B"}' /tmp/opencode/journey-trial-project2.json
+PROJECT_CODE=$(cat /tmp/opencode/journey-status.txt)
+[ "$PROJECT_CODE" = "402" ] || fail "a second project should be refused with 402 (got $PROJECT_CODE)"
+# Capacity and baselines are paid surfaces: 402 while free.
+api_post /v1/capacity "{}" /tmp/opencode/journey-trial-capacity.json
+[ "$(cat /tmp/opencode/journey-status.txt)" = "402" ] || fail "capacity should be refused with 402 while free"
+api_post /v1/baselines "{}" /tmp/opencode/journey-trial-baseline.json
+[ "$(cat /tmp/opencode/journey-status.txt)" = "402" ] || fail "baselines should be refused with 402 while free"
+# The checkout opens, and the webhook (signature-checked) turns the trial paid.
+api_post /v1/billing/checkout "{}" /tmp/opencode/journey-checkout.json
+jq -e '.url | length > 0' /tmp/opencode/journey-checkout.json >/dev/null || fail "checkout returned no url"
+CHECKOUT_URL=$(jq -r .url /tmp/opencode/journey-checkout.json)
+WEBHOOK_PAYLOAD="{\"type\":\"checkout.completed\",\"url\":\"$CHECKOUT_URL\",\"client_reference_id\":\"$TRIAL_WS\"}"
+curl -sS -o /dev/null -w '%{http_code}' -X POST "http://localhost:8090/v1/billing/webhook" \
+  -H 'Content-Type: application/json' -H 'X-DailyBrief-Signature: fixture-billing-secret' \
+  -d "$WEBHOOK_PAYLOAD" > /tmp/opencode/journey-status.txt
+[ "$(cat /tmp/opencode/journey-status.txt)" = "204" ] || fail "webhook was not accepted"
+curl -sS -o /dev/null -w '%{http_code}' -X POST "http://localhost:8090/v1/billing/webhook" \
+  -H 'Content-Type: application/json' -H 'X-DailyBrief-Signature: wrong-secret' \
+  -d "$WEBHOOK_PAYLOAD" > /tmp/opencode/journey-status.txt
+[ "$(cat /tmp/opencode/journey-status.txt)" = "204" ] || fail "webhook with a wrong signature was not ignored"
+api_get_trial /v1/billing /tmp/opencode/journey-billing2.json
+jq -e '.tier == "paid" and .status == "active"' /tmp/opencode/journey-billing2.json >/dev/null \
+  || fail "the webhook did not upgrade the workspace: $(jq -c '{tier,status}' /tmp/opencode/journey-billing2.json)"
+jq -e '.limits.maxProjects > 1 and .limits.baselines == true and .limits.capacity == true' /tmp/opencode/journey-billing2.json >/dev/null \
+  || fail "paid limits did not open: $(jq -c '.limits' /tmp/opencode/journey-billing2.json)"
+api_post /v1/projects '{"v":1,"name":"Client B"}' /tmp/opencode/journey-trial-project3.json
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "a second project should fit after upgrade"
+api_post /v1/baselines "{}" /tmp/opencode/journey-trial-baseline2.json
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "baselines should open after upgrade"
+step "9. billing boundary    (+$(( $(start_ms) - T )) ms)"
+
 TOTAL=$(( $(start_ms) - T0 ))
 echo "== journey complete in ${TOTAL} ms"
 if [ "$TOTAL" -gt 90000 ]; then

@@ -271,3 +271,24 @@ export interface PortfolioResponse {
   rows: PortfolioRow[];
   note: string;
 }
+
+export interface TierLimits {
+  maxProjects: number;
+  baselines: boolean;
+  capacity: boolean;
+}
+
+export interface TierUsage {
+  projects: number;
+  baselines: number;
+}
+
+export interface BillingResponse {
+  v: number;
+  tier: string;
+  status: string;
+  trialEndsAt?: number | null;
+  limits: TierLimits;
+  usage: TierUsage;
+  checkoutUrl?: string | null;
+}

@@ -23,6 +23,10 @@ data class Config(
   val fixtureProvider: Boolean = false,
   /** The web client's origin; CORS admits exactly this host. */
   val webOrigin: String = "http://localhost:3000",
+  /** Stage 4.5: billing activates only when Stripe keys are present. */
+  val stripeSecretKey: String? = null,
+  val stripeWebhookSecret: String? = null,
+  val stripePriceId: String? = null,
 ) {
   companion object {
     fun fromEnv(env: Map<String, String> = System.getenv()): Config =
@@ -37,6 +41,9 @@ data class Config(
         googleClientSecret = env["GOOGLE_CLIENT_SECRET"],
         googleCalendarId = env["GOOGLE_CALENDAR_ID"],
         fixtureProvider = env["FIXTURE_PROVIDER"] == "1",
+        stripeSecretKey = env["STRIPE_SECRET_KEY"],
+        stripeWebhookSecret = env["STRIPE_WEBHOOK_SECRET"],
+        stripePriceId = env["STRIPE_PRICE_ID"],
       )
 
     private fun requireEnv(env: Map<String, String>, name: String): String =

@@ -2,6 +2,7 @@ package com.example.server
 
 import com.example.contract.BaselineComparisonWire
 import com.example.contract.BaselineSnapshotWire
+import com.example.contract.BillingResponseWire
 import com.example.contract.BoardWire
 import com.example.contract.CapacityRequestWire
 import com.example.contract.CreateProjectWire
@@ -20,6 +21,15 @@ import com.example.contract.ScheduledBlockWire
 import com.example.contract.StageWire
 import com.example.contract.TaskVarianceWire
 import com.example.contract.TaskWire
+import com.example.contract.TierLimitsWire
+import com.example.contract.TierUsageWire
+import com.example.server.billing.BillingProvider
+import com.example.server.billing.FixtureBillingProvider
+import com.example.server.billing.NotConfiguredBillingProvider
+import com.example.server.billing.StripeBillingProvider
+import com.example.server.billing.SubscriptionStore
+import com.example.server.billing.TierLimits
+import com.example.server.billing.WebhookEvent
 import com.example.server.db.Db
 import com.example.server.db.Db.execute
 import com.example.server.db.Db.newId
@@ -85,6 +95,11 @@ fun Application.routes(config: Config) {
           val workspaceId = FixtureWorld.ensure(call)
           call.respond(SessionResponse(workspaceId, sessions.issue(workspaceId)))
         }
+        // Stage 4.5's boundary leg: a fresh workspace on the free trial, untouched by the loop.
+        post("/fixture/trial-workspace") {
+          val workspaceId = FixtureWorld.ensureTrialWorkspace()
+          call.respond(SessionResponse(workspaceId, sessions.issue(workspaceId)))
+        }
       } else {
         // The real-account leg: the web client redirects to Google, then trades the code for
         // a server-side token (envelope-encrypted in calendar_connections) and a session.
@@ -107,6 +122,31 @@ fun Application.routes(config: Config) {
         }
       }
 
+      // Stage 4.5: the billing seam. Checkout is opened against the provider; the webhook is
+      // where a payment becomes a paid workspace. The webhook endpoint is unauthenticated by
+      // design — the provider's signature check is the authentication.
+      val billingProvider: BillingProvider =
+        when {
+          config.fixtureProvider -> FixtureBillingProvider()
+          config.stripeSecretKey != null && config.stripeWebhookSecret != null && config.stripePriceId != null ->
+            StripeBillingProvider(config.stripeSecretKey, config.stripeWebhookSecret, config.stripePriceId)
+          else -> NotConfiguredBillingProvider()
+        }
+
+      post("/billing/webhook") {
+        val payload = call.receive<String>()
+        val signature = call.request.headers["X-DailyBrief-Signature"]
+        when (val event = billingProvider.webhookEvent(payload, signature)) {
+          is WebhookEvent.CheckoutCompleted -> {
+            if (event.workspaceId != null) {
+              SubscriptionStore.upgrade(event.workspaceId, System.currentTimeMillis())
+            }
+            call.respond(HttpStatusCode.NoContent)
+          }
+          else -> call.respond(HttpStatusCode.NoContent)
+        }
+      }
+
       authenticate("session") {
         // A task names its project through boardId; an unknown board falls back to the
         // workspace's default project, which is what the mobile client (boardId "b1") sends.
@@ -119,6 +159,14 @@ fun Application.routes(config: Config) {
             ) { it.getString(1) }
           } ?: FixtureWorld.projectId(session.workspaceId)
         }
+
+        fun countRows(workspaceId: String, table: String): Int =
+          Db.dataSource.connection.use { conn ->
+            conn.queryOne(
+              "SELECT COUNT(*) FROM $table WHERE workspace_id = ?",
+              listOf(workspaceId),
+            ) { it.getInt(1) } ?: 0
+          }
 
         fun insertTask(projectId: String, workspaceId: String, task: com.example.contract.TaskWire) {
           val now = System.currentTimeMillis()
@@ -184,6 +232,17 @@ fun Application.routes(config: Config) {
 
         post("/projects") {
           val session = sessions.require(call)
+          val subscription = SubscriptionStore.read(session.workspaceId)
+          if (subscription != null && !TierLimits.isPaid(subscription.tier, subscription.status)) {
+            val used = countRows(session.workspaceId, "projects")
+            if (used >= TierLimits.maxProjects(subscription.tier)) {
+              call.respond(
+                HttpStatusCode.PaymentRequired,
+                mapOf("error" to "the free tier allows one project — upgrade to add more"),
+              )
+              return@post
+            }
+          }
           val request = call.receive<CreateProjectWire>()
           val name = request.name.trim()
           if (name.isEmpty()) {
@@ -352,6 +411,18 @@ fun Application.routes(config: Config) {
 
         post("/capacity") {
           val session = sessions.require(call)
+          val subscription = SubscriptionStore.read(session.workspaceId)
+          if (subscription == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "no subscription"))
+            return@post
+          }
+          if (!TierLimits.allowsCapacity(subscription.tier)) {
+            call.respond(
+              HttpStatusCode.PaymentRequired,
+              mapOf("error" to "capacity is part of the paid tier — upgrade to measure another client"),
+            )
+            return@post
+          }
           val request = call.receive<CapacityRequestWire>()
           if (request.plan.workspaceId != session.workspaceId) {
             call.respond(HttpStatusCode.Forbidden, mapOf("error" to "workspace mismatch"))
@@ -493,6 +564,18 @@ fun Application.routes(config: Config) {
 
         post("/baselines") {
           val session = sessions.require(call)
+          val subscription = SubscriptionStore.read(session.workspaceId)
+          if (subscription == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "no subscription"))
+            return@post
+          }
+          if (!TierLimits.allowsBaselines(subscription.tier)) {
+            call.respond(
+              HttpStatusCode.PaymentRequired,
+              mapOf("error" to "baselines are part of the paid tier — upgrade to snapshot your plan"),
+            )
+            return@post
+          }
           val tasks = taskWireRows(session.workspaceId)
           val blocks = blockWireRows(session.workspaceId)
           val id = newId()
@@ -653,6 +736,50 @@ fun Application.routes(config: Config) {
           )
         }
 
+        post("/billing/checkout") {
+          val session = sessions.require(call)
+          val tier =
+            SubscriptionStore.read(session.workspaceId)?.tier ?: run {
+              call.respond(HttpStatusCode.NotFound, mapOf("error" to "no subscription"))
+              return@post
+            }
+          val url = billingProvider.checkoutUrl(session.workspaceId, tier)
+          if (url == null) {
+            call.respond(HttpStatusCode.NotImplemented, mapOf("error" to "billing is not configured on this deployment"))
+          } else {
+            call.respond(mapOf("url" to url))
+          }
+        }
+
+        get("/billing") {
+          val session = sessions.require(call)
+          val sub = SubscriptionStore.read(session.workspaceId)
+          if (sub == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "no subscription"))
+            return@get
+          }
+          call.respond(
+            BillingResponseWire(
+              v = PlannerApi.VERSION,
+              tier = sub.tier,
+              status = sub.status,
+              trialEndsAt = sub.trialEndsAt,
+              limits =
+                TierLimitsWire(
+                  maxProjects = TierLimits.maxProjects(sub.tier),
+                  baselines = TierLimits.allowsBaselines(sub.tier),
+                  capacity = TierLimits.allowsCapacity(sub.tier),
+                ),
+              usage =
+                TierUsageWire(
+                  projects = countRows(session.workspaceId, "projects"),
+                  baselines = countRows(session.workspaceId, "baselines"),
+                ),
+              checkoutUrl = billingProvider.checkoutUrl(session.workspaceId, sub.tier),
+            ),
+          )
+        }
+
         post("/plan/{runId}/apply") {
           val session = sessions.require(call)
           val runId = call.parameters["runId"] ?: error("runId required")
@@ -789,7 +916,7 @@ object FixtureWorld {
         val userId = newId()
         val ws = newId()
         conn.execute(
-          "INSERT INTO users (id, email, name, tier, created_at, updated_at) VALUES (?, ?, ?, 'free', ?, ?)",
+          "INSERT INTO users (id, email, name, tier, created_at, updated_at) VALUES (?, ?, ?, 'paid', ?, ?)",
           listOf(userId, email, name, System.currentTimeMillis(), System.currentTimeMillis()),
         )
         conn.execute(
@@ -798,9 +925,36 @@ object FixtureWorld {
         )
         ws
       }
+    // The main journey workspace is paid: the loop's capacity, baselines and second project
+    // steps are paid surfaces, and the tier boundary has its own trial leg (step 9).
+    Db.inTransaction { conn ->
+      conn.execute(
+        "INSERT INTO subscriptions (id, workspace_id, tier, status, quota_json, created_at, updated_at) VALUES (?, ?, 'paid', 'active', '{}', ?, ?) " +
+          "ON CONFLICT (workspace_id) DO NOTHING",
+        listOf(newId(), workspaceId, System.currentTimeMillis(), System.currentTimeMillis()),
+      )
+    }
     projectId(workspaceId)
     return workspaceId
   }
+
+  /** A fresh workspace on the free trial, for exercising the boundary without touching the loop. */
+  fun ensureTrialWorkspace(): String =
+    Db.inTransaction { conn ->
+      val userId = newId()
+      val ws = newId()
+      val now = System.currentTimeMillis()
+      conn.execute(
+        "INSERT INTO users (id, email, name, tier, created_at, updated_at) VALUES (?, ?, ?, 'free', ?, ?)",
+        listOf(userId, "trial-${now}@dailybrief.dev", "Trial User", now, now),
+      )
+      conn.execute(
+        "INSERT INTO workspaces (id, name, owner_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        listOf(ws, "Trial Workspace", userId, now, now),
+      )
+      SubscriptionStore.ensureTrial(conn, ws, now)
+      ws
+    }
 
   fun projectId(workspaceId: String): String =
     Db.dataSource.connection.use { conn ->

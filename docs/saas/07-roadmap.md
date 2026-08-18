@@ -199,7 +199,14 @@ Only once the loop is used. In `01-product-teardown.md` priority order:
    jsonb), and `GET /v1/baselines/{id}/variance` reports `BaselineVariance` against today;
    `GET /v1/portfolio` is the per-project rollup with the week's blocks, which is what the Gantt
    folds in with — the web surface draws the strip from them.
-5. **Billing** — Stripe, per-tenant quota, the trial boundary in `02`.
+5. **Billing** — Stripe, per-tenant quota, the trial boundary in `02`. **Shipped 2026-08-18:**
+   the boundary from the tier table is enforced server-side (`TierLimits`, pure and unit-tested:
+   one project free, capacity and baselines paid, the engine itself never tiered) and reported
+   on `GET /v1/billing` with usage, so a client renders the boundary instead of guessing it.
+   Checkout and webhook sit behind a `BillingProvider` seam: fixture mode runs the whole
+   boundary in the journey (402s, signature-checked upgrade), a real deployment activates
+   `StripeBillingProvider` (REST, no SDK) when keys are present, and without keys the seam
+   answers 501 honestly instead of pretending.
 
 ---
 

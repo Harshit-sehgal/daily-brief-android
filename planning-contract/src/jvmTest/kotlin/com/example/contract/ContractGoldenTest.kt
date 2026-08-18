@@ -19,6 +19,7 @@ class ContractGoldenTest {
   private val scenariosPath = "golden/scenarios-v1.json"
   private val baselinePath = "golden/baseline-comparison-v1.json"
   private val portfolioPath = "golden/portfolio-v1.json"
+  private val billingPath = "golden/billing-v1.json"
 
   @Test
   fun `golden request parses to the canonical request`() {
@@ -355,6 +356,33 @@ class ContractGoldenTest {
             addedSinceBaseline = true,
           ),
         ),
+    )
+
+  @Test
+  fun `golden billing parses and re-encodes byte-identical`() {
+    val canonical = canonicalBilling()
+    val parsed = PlannerApi.json.decodeFromString<BillingResponseWire>(read(billingPath))
+    assertEquals(canonical, parsed)
+    assertEquals(
+      read(billingPath),
+      PlannerApi.json.encodeToString(BillingResponseWire.serializer(), canonical),
+    )
+  }
+
+  private fun canonicalBilling(): BillingResponseWire =
+    BillingResponseWire(
+      v = PlannerApi.VERSION,
+      tier = "free",
+      status = "trial",
+      trialEndsAt = 1736352000000L,
+      limits =
+        TierLimitsWire(
+          maxProjects = 1,
+          baselines = false,
+          capacity = false,
+        ),
+      usage = TierUsageWire(projects = 1, baselines = 0),
+      checkoutUrl = "https://checkout.example/daily-brief/free?workspace=ws-1",
     )
 
   private fun canonicalPortfolio(): PortfolioResponseWire =

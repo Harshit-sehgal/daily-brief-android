@@ -2,6 +2,7 @@ import type {
   ApplyResponse,
   BaselineComparison,
   BaselineSnapshot,
+  BillingResponse,
   Board,
   CapacityRequest,
   CapacityResponse,
@@ -123,6 +124,14 @@ export const client = {
 
   portfolio(): Promise<PortfolioResponse> {
     return api("/v1/portfolio");
+  },
+
+  billing(): Promise<BillingResponse> {
+    return api("/v1/billing");
+  },
+
+  checkout(): Promise<{ url: string }> {
+    return api("/v1/billing/checkout", { method: "POST", body: "{}" });
   },
 
   reconcile(): Promise<{ ok: boolean }> {

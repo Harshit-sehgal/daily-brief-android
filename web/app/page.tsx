@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { client, savedSession, saveSession, clearSession, ApiError } from "@/lib/api";
-import type { BaselineComparison, BaselineSnapshot, Board, CapacityResponse, PlanRun, PlanningRequest, PortfolioResponse, Project, ScenarioResponse, Task, TodayResponse } from "@/lib/types";
+import type { BaselineComparison, BaselineSnapshot, BillingResponse, Board, CapacityResponse, PlanRun, PlanningRequest, PortfolioResponse, Project, ScenarioResponse, Task, TodayResponse } from "@/lib/types";
 
 const FIXTURE = (process.env.NEXT_PUBLIC_FIXTURE ?? "1") === "1";
 const HOUR = 3_600_000;
@@ -86,18 +86,21 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
   const [baselineId, setBaselineId] = useState<string | null>(null);
   const [variance, setVariance] = useState<BaselineComparison | null>(null);
   const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
+  const [billing, setBilling] = useState<BillingResponse | null>(null);
 
   const refresh = useCallback(async () => {
-    const [ps, td, pf, bl] = await Promise.all([
+    const [ps, td, pf, bl, bi] = await Promise.all([
       client.listProjects(),
       client.today(),
       client.portfolio(),
       client.listBaselines().catch(() => null),
+      client.billing().catch(() => null),
     ]);
     setProjects(ps);
     setToday(td);
     setPortfolio(pf);
     setBaselines(bl);
+    setBilling(bi);
     setSelectedId((current) => current ?? ps.find((p) => p.isDefault)?.id ?? ps[0]?.id ?? null);
   }, []);
 
@@ -584,6 +587,32 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
                   </div>
                 ))}
               </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="row">
+          <h2 style={{ margin: 0 }}>Plan</h2>
+          <span className="tag">{billing ? `${billing.tier}${billing.status === "trial" ? " trial" : ""}` : "…"}</span>
+        </div>
+        {billing && (
+          <>
+            <p className="muted">
+              {billing.status === "trial" && billing.trialEndsAt
+                ? `Trial ends ${fmt(billing.trialEndsAt)}. `
+                : billing.tier === "paid"
+                  ? "Paid — every surface is open. "
+                  : "Free tier. "}
+              {billing.usage.projects} of {billing.limits.maxProjects === 2147483647 ? "∞" : billing.limits.maxProjects} projects
+              {!billing.limits.baselines && " · baselines locked"}
+              {!billing.limits.capacity && " · capacity locked"}
+            </p>
+            {billing.checkoutUrl ? (
+              <a className="button primary" href={billing.checkoutUrl} target="_blank" rel="noreferrer">Upgrade</a>
+            ) : (
+              <p className="muted">Billing is not configured on this deployment.</p>
             )}
           </>
         )}
