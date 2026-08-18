@@ -389,3 +389,21 @@ file paths and engine signatures (see section C above).
 **Not done (documented above):** commit (not requested); date-time cluster (blocked);
 engine defects (outside chosen scope); widgets/backup/PDF (teardown says LATER);
 Phase 7 slice, manual/HCI evidence, Kotlin/Native (human-only or deferred).
+### 2026-08-19 (android tranche + reshuffle + device-suite repair)
+
+- **`9ad0d04`** — saved-view depth (Outline text filter persisted as the `text` filter,
+  restored on apply; density presets ride the codec's zoom vocabulary), one-tall-PNG
+  export beside the PDF, focus timer (one doze-friendly alarm, Done/Defer notification
+  actions writing through the journal), dynamic launcher shortcuts to Plan and Today.
+- **`c2a675b`/`151b23c`/`194c8f7`** — the monorepo reshuffle: `apps/android`, `apps/mobile`,
+  `apps/web`, `services/server`, `packages/planning-core`, `packages/planning-contract`;
+  module names survive via `projectDir` mappings, so scripts/CI still spell `:app` etc.
+- **`7bab74d`** — the device suite was red since v10 landed and no one had run
+  `--device`: four migration tests stopped at v9, `RuntimeSafety` pinned user_version 9,
+  and `MIGRATION_9_10` created a partial index Room's validation rejects (schema has no
+  WHERE clause). The migration is now schema-exact; the "one non-archived default"
+  partial index rides `AppDatabase`'s onCreate callback through the shared
+  `installNonArchivedDefaultScheduleIndex`, which the migration test registers the same
+  way. View-options journeys scroll to the commands my Search/Density sections pushed
+  below the fold. **Evidence:** `scripts/verify.sh --device` green — 130 instrumented
+  tests, both lints, both APKs, R8; `scripts/verify.sh --journey` green.
