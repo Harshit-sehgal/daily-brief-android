@@ -1,5 +1,9 @@
 package com.example.core
 
+import com.example.contract.CapacityMoveWire
+import com.example.contract.CapacityRequestWire
+import com.example.contract.CapacityResponse
+import com.example.contract.CapacityVerdictWire
 import com.example.contract.DeadlinePolicyWire
 import com.example.contract.ExternalEventWire
 import com.example.contract.IntervalWire
@@ -127,9 +131,14 @@ object Mapping {
 
   fun List<WorkScheduleWire>.toEngineSpec(itemsById: Map<String, TaskWire>): WorkingCalendarSpec {
     val chosen = firstOrNull { it.archivedAt == null && it.isDefault } ?: first()
-    val windows = chosen.windows.sortedBy { it.rank }
+    return chosen.toEngineSpec()
+  }
+
+  /** One wire schedule → one engine spec; [toEngineSpec] is the default-picking form. */
+  fun WorkScheduleWire.toEngineSpec(): WorkingCalendarSpec {
+    val windows = windows.sortedBy { it.rank }
     return WorkingCalendarSpec(
-      zoneId = chosen.timeZoneId,
+      zoneId = timeZoneId,
       weeklyWindows =
         windows
           .filter { it.kind == "weekly" }
@@ -143,11 +152,58 @@ object Mapping {
               windows = if (it.isClosed) emptyList() else listOf(WorkingDayWindow(it.startMinute, it.endMinute)),
             )
           },
-      minimumChunkMinutes = chosen.minimumChunkMinutes,
-      maximumChunkMinutes = chosen.maximumChunkMinutes,
-      bufferMinutes = chosen.bufferMinutes,
+      minimumChunkMinutes = minimumChunkMinutes,
+      maximumChunkMinutes = maximumChunkMinutes,
+      bufferMinutes = bufferMinutes,
     )
   }
+
+  /**
+   * The capacity answer for a wire request: the multi-schedule health evaluation over the
+   * request's own range, then [CapacityAnswer] with the proposed client load. `now` is the
+   * request's, so a preview and a server run of the same request cannot disagree.
+   */
+  fun CapacityRequestWire.answerCapacity(): CapacityResult {
+    val plan = this.plan
+    val engine = toEngine(plan, plan.nowMs)
+    val schedules = plan.schedules.associate { it.id to it.toEngineSpec() }
+    require(schedules.isNotEmpty()) { "At least one working schedule is required" }
+    val defaultScheduleId =
+      (plan.schedules.firstOrNull { it.archivedAt == null && it.isDefault } ?: plan.schedules.first()).id
+    val scheduleIdByItemId =
+      engine.items.associate { item ->
+        item.id to (plan.scheduleIdByTaskId[item.id]?.takeIf { it in schedules } ?: defaultScheduleId)
+      }
+    val health =
+      MultiSchedulePlanHealth.evaluate(
+        schedules = schedules,
+        scheduleIdByItemId = scheduleIdByItemId,
+        rangeStart = plan.rangeStartMs,
+        rangeEnd = plan.rangeEndMs,
+        now = plan.nowMs,
+        items = engine.items,
+        blocks = engine.blocks,
+        fixedCommitments = engine.fixedCommitments,
+        dependencies = engine.dependencies,
+      )
+    return CapacityAnswer.answer(health, newClientHoursPerWeek, plan.rangeEndMs)
+  }
+
+  fun CapacityResult.toWire(): CapacityResponse =
+    CapacityResponse(
+      availableMinutes = availableMinutes,
+      plannedMinutes = plannedMinutes,
+      spareMinutes = spareMinutes,
+      verdict =
+        when (verdict) {
+          CapacityVerdict.CAN_TAKE -> CapacityVerdictWire.CAN_TAKE
+          CapacityVerdict.MOVE -> CapacityVerdictWire.MOVE
+          CapacityVerdict.CANNOT -> CapacityVerdictWire.CANNOT
+          CapacityVerdict.INCOMPLETE -> CapacityVerdictWire.INCOMPLETE
+        },
+      sentence = sentence,
+      moves = moves.map { CapacityMoveWire(it.itemId, it.title, it.unscheduledMinutes) },
+    )
 
   fun PlanHealthResult.toWire(): PlanHealthWire =
     PlanHealthWire(

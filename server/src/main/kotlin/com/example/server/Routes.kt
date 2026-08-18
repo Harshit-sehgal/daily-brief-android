@@ -1,5 +1,6 @@
 package com.example.server
 
+import com.example.contract.CapacityRequestWire
 import com.example.contract.PlanningRequest
 import com.example.contract.PlanningResult
 import com.example.server.db.Db
@@ -13,6 +14,8 @@ import com.example.server.google.GoogleCalendarProvider
 import com.example.server.google.GoogleOAuth
 import com.example.server.plan.Journal
 import com.example.core.Mapping
+import com.example.core.Mapping.answerCapacity
+import com.example.core.Mapping.toWire
 import com.example.server.reconcile.ReconcileWorker
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -174,6 +177,25 @@ fun Application.routes(config: Config) {
           val projectId = FixtureWorld.projectId(session.workspaceId)
           val (runId, result) = cache.planAndStore(request, session.workspaceId, projectId)
           call.respond(PlanRunResponse(runId, result))
+        }
+
+        post("/capacity") {
+          val session = sessions.require(call)
+          val request = call.receive<CapacityRequestWire>()
+          if (request.plan.workspaceId != session.workspaceId) {
+            call.respond(HttpStatusCode.Forbidden, mapOf("error" to "workspace mismatch"))
+            return@post
+          }
+          val refusal = request.plan.refusalReason()
+          if (refusal != null) {
+            call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to refusal))
+            return@post
+          }
+          if (request.plan.schedules.isEmpty()) {
+            call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "at least one working schedule is required"))
+            return@post
+          }
+          call.respond(request.answerCapacity().toWire())
         }
 
         post("/plan/{runId}/apply") {

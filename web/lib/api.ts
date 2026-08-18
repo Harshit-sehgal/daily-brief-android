@@ -1,5 +1,7 @@
 import type {
   ApplyResponse,
+  CapacityRequest,
+  CapacityResponse,
   PlanRun,
   PlanningRequest,
   SessionResponse,
@@ -80,6 +82,10 @@ export const client = {
 
   plan(request: PlanningRequest): Promise<PlanRun> {
     return api("/v1/plan", { method: "POST", body: JSON.stringify(request) });
+  },
+
+  capacity(request: CapacityRequest): Promise<CapacityResponse> {
+    return api("/v1/capacity", { method: "POST", body: JSON.stringify(request) });
   },
 
   apply(runId: string): Promise<ApplyResponse> {

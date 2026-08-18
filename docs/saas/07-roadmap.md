@@ -177,9 +177,12 @@ writes nothing; Undo restores exactly.
 
 Only once the loop is used. In `01-product-teardown.md` priority order:
 
-1. **Capacity** — `MultiSchedulePlanHealth` behind three numbers and one sentence. This answers
-   *"can I take another client next week?"*, which is the ICP's actual question and the reason
-   the max-flow code is the most commercially valuable in the repository.
+1. **Capacity** — `MultiSchedulePlanHealth` behind three numbers and one sentence: `POST /v1/capacity`
+   answers *"can I take another client next week?"* with available/planned/spare minutes and a
+   verdict sentence — yes, no, or the minimal set of deferrable tasks that would have to move
+   (`CapacityAnswer` in `commonMain`, golden-pinned in the contract, a journey step, and a strip
+   on the web Planner). **Shipped 2026-08-18.** What remains here: per-project schedules on the
+   wire's `scheduleIdByTaskId` once Stage 4.2 lands, and the Capacity surface in the mobile app.
 2. **Projects → Tasks / Board / Timeline** — progressive disclosure; Timeline last.
 3. **Dependencies and critical path** — including engine defect 3 (SS/FF/SF scheduling), which
    consultants with client hand-offs will hit immediately.

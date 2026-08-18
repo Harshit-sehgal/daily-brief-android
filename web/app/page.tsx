@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { client, savedSession, saveSession, clearSession, ApiError } from "@/lib/api";
-import type { PlanRun, Task, TodayResponse } from "@/lib/types";
+import type { CapacityResponse, PlanRun, PlanningRequest, Task, TodayResponse } from "@/lib/types";
 
 const FIXTURE = (process.env.NEXT_PUBLIC_FIXTURE ?? "1") === "1";
 const HOUR = 3_600_000;
@@ -67,6 +67,7 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
   const [title, setTitle] = useState("");
   const [effort, setEffort] = useState("60");
   const [due, setDue] = useState("");
+  const [capacity, setCapacity] = useState<CapacityResponse | null>(null);
 
   const refresh = useCallback(async () => {
     const [ts, td] = await Promise.all([client.listTasks(), client.today()]);
@@ -116,52 +117,70 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
     }
   }
 
-  /** The client composes fixedCommitments from Today's events, as the journey script does:
+  /** The client composes the plan request from Today's events, as the journey script does:
    *  the server stays a pure planner, and the calendar's busy time is the client's reading. */
+  function buildRequest(now: number): PlanningRequest {
+    return {
+      v: 1,
+      workspaceId: session.workspaceId,
+      rangeStartMs: now - (now % DAY),
+      rangeEndMs: now - (now % DAY) + 7 * DAY,
+      nowMs: now - (now % DAY),
+      items:
+        tasks?.map((t, i) => ({
+          ...t,
+          boardId: "b1",
+          rank: t.rank ?? i,
+          effortMinutes: t.effortMinutes ?? undefined,
+        })) ?? [],
+      blocks: [],
+      fixedCommitments: (today?.events ?? []).map((e) => ({ startAt: e.startTime, endAt: e.endTime })),
+      dependencies: [],
+      scheduleIdByTaskId: {},
+      preferredOrder: [],
+      schedules: [
+        {
+          id: "s1",
+          name: "Weekdays",
+          timeZoneId: "UTC",
+          isDefault: true,
+          minimumChunkMinutes: 30,
+          maximumChunkMinutes: 120,
+          bufferMinutes: 0,
+          rank: 0,
+          windows: weekWindows(),
+        },
+      ],
+      deadlinePolicy: "HARD",
+    };
+  }
+
   async function planMyWeek() {
     setBusy(true);
     setError(null);
     setRun(null);
     try {
-      const td = today ?? (await client.today());
-      const now = Date.now();
-      const rangeStart = now - (now % DAY);
-      const nextRun = await client.plan({
-        v: 1,
-        workspaceId: session.workspaceId,
-        rangeStartMs: rangeStart,
-        rangeEndMs: rangeStart + 7 * DAY,
-        nowMs: rangeStart,
-        items:
-          tasks?.map((t, i) => ({
-            ...t,
-            boardId: "b1",
-            rank: t.rank ?? i,
-            effortMinutes: t.effortMinutes ?? undefined,
-          })) ?? [],
-        blocks: [],
-        fixedCommitments: td.events.map((e) => ({ startAt: e.startTime, endAt: e.endTime })),
-        dependencies: [],
-        scheduleIdByTaskId: {},
-        preferredOrder: [],
-        schedules: [
-          {
-            id: "s1",
-            name: "Weekdays",
-            timeZoneId: "UTC",
-            isDefault: true,
-            minimumChunkMinutes: 30,
-            maximumChunkMinutes: 120,
-            bufferMinutes: 0,
-            rank: 0,
-            windows: weekWindows(),
-          },
-        ],
-        deadlinePolicy: "HARD",
-      });
+      const nextRun = await client.plan(buildRequest(Date.now()));
       setRun(nextRun);
     } catch (e) {
       setError(e instanceof Error ? e.message : "planning failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function askCapacity() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await client.capacity({
+        v: 1,
+        plan: buildRequest(Date.now()),
+        newClientHoursPerWeek: 8,
+      });
+      setCapacity(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "capacity failed");
     } finally {
       setBusy(false);
     }
@@ -261,8 +280,21 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
         )}
         <div className="row" style={{ marginTop: 8 }}>
           <button className="primary" onClick={planMyWeek} disabled={busy}>Plan my week</button>
+          <button onClick={askCapacity} disabled={busy}>Can I take another client?</button>
           {entryId && <button onClick={undo} disabled={busy}>Undo apply</button>}
         </div>
+        {capacity && (
+          <p className={capacity.verdict === "CANNOT" || capacity.verdict === "INCOMPLETE" ? "error" : "muted"} style={{ marginTop: 8 }}>
+            <strong>
+              {capacity.availableMinutes / 60} h available · {capacity.plannedMinutes / 60} h planned ·{" "}
+              {capacity.spareMinutes / 60} h spare
+            </strong>{" "}
+            — {capacity.sentence}
+            {capacity.moves.length > 0 && (
+              <> Moving: {capacity.moves.map((m) => `"${m.title}"`).join(", ")}.</>
+            )}
+          </p>
+        )}
       </div>
 
       {run && (

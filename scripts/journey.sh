@@ -119,6 +119,18 @@ jq -e --argjson start $(( NOW + 14*HOUR )) --argjson end $(( NOW + 15*HOUR )) \
 RUN_ID=$(jq -r .runId /tmp/opencode/journey-plan.json)
 step "4. plan my week       (+$(( $(start_ms) - T )) ms)"
 
+# ── Capacity: the same request asks "can I take another client?" — three numbers, one
+# sentence (Stage 4.1). The plan fits, so an 8 h/week client must fit too.
+T=$(start_ms)
+CAPACITY=$(jq -cn --argjson plan "$REQUEST" '{v:1, plan:$plan, newClientHoursPerWeek:8}')
+api POST /v1/capacity "$CAPACITY" /tmp/opencode/journey-capacity.json
+jq -e '.verdict == "CAN_TAKE"' /tmp/opencode/journey-capacity.json >/dev/null \
+  || fail "expected CAN_TAKE, got $(jq -r .verdict /tmp/opencode/journey-capacity.json)"
+jq -e '.availableMinutes > 0 and .spareMinutes >= 480' /tmp/opencode/journey-capacity.json >/dev/null \
+  || fail "capacity numbers look wrong: $(jq -c . /tmp/opencode/journey-capacity.json)"
+jq -e '.sentence | length > 0' /tmp/opencode/journey-capacity.json >/dev/null || fail "capacity carries no sentence"
+step "4b. capacity          (+$(( $(start_ms) - T )) ms)"
+
 # ── Apply → Today ─────────────────────────────────────────────────────────────────────────
 T=$(start_ms)
 api POST "/v1/plan/$RUN_ID/apply" - /tmp/opencode/journey-apply.json

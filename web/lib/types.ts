@@ -145,3 +145,24 @@ export interface SessionResponse {
   workspaceId: string;
   token: string;
 }
+export interface CapacityRequest {
+  v: number;
+  plan: PlanningRequest;
+  newClientHoursPerWeek: number;
+}
+
+export interface CapacityMove {
+  itemId: string;
+  title: string;
+  unscheduledMinutes: number;
+}
+
+export interface CapacityResponse {
+  v: number;
+  availableMinutes: number;
+  plannedMinutes: number;
+  spareMinutes: number;
+  verdict: "CAN_TAKE" | "MOVE" | "CANNOT" | "INCOMPLETE";
+  sentence: string;
+  moves: CapacityMove[];
+}

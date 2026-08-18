@@ -13,6 +13,8 @@ import org.junit.Test
 class ContractGoldenTest {
   private val requestPath = "golden/request-v1.json"
   private val resultPath = "golden/result-v1.json"
+  private val capacityRequestPath = "golden/capacity-request-v1.json"
+  private val capacityResponsePath = "golden/capacity-response-v1.json"
 
   @Test
   fun `golden request parses to the canonical request`() {
@@ -44,6 +46,28 @@ class ContractGoldenTest {
   @Test
   fun `the golden request holds the range contract`() {
     assertNull(canonicalRequest().refusalReason())
+  }
+
+  @Test
+  fun `golden capacity request parses and re-encodes byte-identical`() {
+    val canonical = canonicalCapacityRequest()
+    val parsed = PlannerApi.json.decodeFromString<CapacityRequestWire>(read(capacityRequestPath))
+    assertEquals(canonical, parsed)
+    assertEquals(
+      read(capacityRequestPath),
+      PlannerApi.json.encodeToString(CapacityRequestWire.serializer(), canonical),
+    )
+  }
+
+  @Test
+  fun `golden capacity response parses and re-encodes byte-identical`() {
+    val canonical = canonicalCapacityResponse()
+    val parsed = PlannerApi.json.decodeFromString<CapacityResponse>(read(capacityResponsePath))
+    assertEquals(canonical, parsed)
+    assertEquals(
+      read(capacityResponsePath),
+      PlannerApi.json.encodeToString(CapacityResponse.serializer(), canonical),
+    )
   }
 
   private fun canonicalRequest(): PlanningRequest =
@@ -160,4 +184,38 @@ class ContractGoldenTest {
 
   private fun read(path: String): String =
     requireNotNull(javaClass.classLoader?.getResource(path)) { "missing $path" }.readText()
+
+  /**
+   * The capacity golden uses a Monday-containing range so the pinned answer is a real one:
+   * the canonical plan's schedule works Monday 09:00–17:00 Europe/Berlin (dayOfWeek 2 in the
+   * Android calendar convention the engine uses), so available and spare are exactly 480
+   * minutes and the 8 h/week client fits at the boundary. The values are the engine's —
+   * `EngineCapacityTest` in planning-core pins the computation itself.
+   */
+  private fun canonicalCapacityRequest(): CapacityRequestWire {
+    val plan = canonicalRequest()
+    return CapacityRequestWire(
+      plan =
+        plan.copy(
+          rangeStartMs = 1735516800000L, // Monday 2024-12-30 00:00 UTC
+          rangeEndMs = 1735603200000L, // Tuesday 2024-12-31 00:00 UTC
+          nowMs = 1735516800000L,
+          schedules =
+            plan.schedules.map { schedule ->
+              schedule.copy(windows = schedule.windows.map { it.copy(dayOfWeek = 2) })
+            },
+        ),
+      newClientHoursPerWeek = 8,
+    )
+  }
+
+  private fun canonicalCapacityResponse(): CapacityResponse =
+    CapacityResponse(
+      availableMinutes = 480,
+      plannedMinutes = 135,
+      spareMinutes = 480,
+      verdict = CapacityVerdictWire.CAN_TAKE,
+      sentence = "8 h available this week, 2.2 h planned, 8 h spare — an 8 h/week client fits.",
+      moves = emptyList(),
+    )
 }
