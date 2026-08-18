@@ -15,6 +15,7 @@ class ContractGoldenTest {
   private val resultPath = "golden/result-v1.json"
   private val capacityRequestPath = "golden/capacity-request-v1.json"
   private val capacityResponsePath = "golden/capacity-response-v1.json"
+  private val boardPath = "golden/board-v1.json"
 
   @Test
   fun `golden request parses to the canonical request`() {
@@ -68,6 +69,14 @@ class ContractGoldenTest {
       read(capacityResponsePath),
       PlannerApi.json.encodeToString(CapacityResponse.serializer(), canonical),
     )
+  }
+
+  @Test
+  fun `golden board parses and re-encodes byte-identical`() {
+    val canonical = canonicalBoard()
+    val parsed = PlannerApi.json.decodeFromString<BoardWire>(read(boardPath))
+    assertEquals(canonical, parsed)
+    assertEquals(read(boardPath), PlannerApi.json.encodeToString(BoardWire.serializer(), canonical))
   }
 
   private fun canonicalRequest(): PlanningRequest =
@@ -218,4 +227,29 @@ class ContractGoldenTest {
       sentence = "8 h available this week, 2.2 h planned, 8 h spare — an 8 h/week client fits.",
       moves = emptyList(),
     )
+
+  private fun canonicalBoard(): BoardWire {
+    val taskA =
+      canonicalRequest().items.first().copy(
+        boardId = "project-1",
+        columnId = "stage-todo",
+      )
+    return BoardWire(
+      project =
+        ProjectWire(
+          id = "project-1",
+          workspaceId = "ws-1",
+          name = "Client A",
+          isDefault = false,
+          rank = 0,
+        ),
+      stages =
+        listOf(
+          StageWire(id = "stage-todo", name = "To Do", rank = 0),
+          StageWire(id = "stage-progress", name = "In Progress", rank = 1),
+          StageWire(id = "stage-done", name = "Done", rank = 2),
+        ),
+      tasks = listOf(taskA),
+    )
+  }
 }

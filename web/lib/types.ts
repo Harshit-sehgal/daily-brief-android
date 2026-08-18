@@ -166,3 +166,27 @@ export interface CapacityResponse {
   sentence: string;
   moves: CapacityMove[];
 }
+
+export interface Project {
+  v: number;
+  id: string;
+  workspaceId: string;
+  name: string;
+  isDefault: boolean;
+  rank: number;
+  archivedAt?: number | null;
+}
+
+export interface Stage {
+  id: string;
+  name: string;
+  rank: number;
+  archivedAt?: number | null;
+}
+
+export interface Board {
+  v: number;
+  project: Project;
+  stages: Stage[];
+  tasks: Task[];
+}

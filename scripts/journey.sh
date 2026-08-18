@@ -86,6 +86,23 @@ api POST /v1/tasks "$TASK2" /tmp/opencode/journey-t2.json
 api POST /v1/tasks "$TASK3" /tmp/opencode/journey-t3.json
 step "2. add three tasks   (+$(( $(start_ms) - T )) ms)"
 
+# ── Projects (Stage 4.2): a second project with its own board and task, then a plan
+# whose items span both projects.
+T=$(start_ms)
+api POST /v1/projects '{"v":1,"name":"Client A"}' /tmp/opencode/journey-project.json
+PROJECT_ID=$(jq -r .id /tmp/opencode/journey-project.json)
+[ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ] || fail "project create returned no id"
+api GET /v1/projects - /tmp/opencode/journey-projects.json
+jq -e --arg id "$PROJECT_ID" '[.[] | select(.id == $id)] | length == 1' /tmp/opencode/journey-projects.json >/dev/null || fail "created project is not listed"
+api GET "/v1/projects/$PROJECT_ID" - /tmp/opencode/journey-board.json
+jq -e '[.stages[].name] == ["To Do", "In Progress", "Done"]' /tmp/opencode/journey-board.json >/dev/null || fail "board lacks the default stages: $(jq -c '[.stages[].name]' /tmp/opencode/journey-board.json)"
+api POST "/v1/projects/$PROJECT_ID/tasks" \
+  '{"id":"c1","boardId":"'"$PROJECT_ID"'","columnId":"todo","title":"Client kickoff","rank":0,"effortMinutes":120}' \
+  /tmp/opencode/journey-client-task.json
+api GET "/v1/projects/$PROJECT_ID" - /tmp/opencode/journey-board2.json
+jq -e '[.tasks[].title] | index("Client kickoff") != null' /tmp/opencode/journey-board2.json >/dev/null || fail "board does not show the new task"
+step "2b. projects + board   (+$(( $(start_ms) - T )) ms)"
+
 T=$(start_ms)
 api POST /v1/reconcile - /tmp/opencode/journey-reconcile.json
 step "3. connect calendar   (+$(( $(start_ms) - T )) ms)"

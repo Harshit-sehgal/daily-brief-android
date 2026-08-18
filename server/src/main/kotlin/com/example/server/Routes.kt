@@ -1,8 +1,13 @@
 package com.example.server
 
+import com.example.contract.BoardWire
 import com.example.contract.CapacityRequestWire
+import com.example.contract.CreateProjectWire
 import com.example.contract.PlanningRequest
 import com.example.contract.PlanningResult
+import com.example.contract.ProjectWire
+import com.example.contract.StageWire
+import com.example.contract.TaskWire
 import com.example.server.db.Db
 import com.example.server.db.Db.execute
 import com.example.server.db.Db.newId
@@ -83,21 +88,31 @@ fun Application.routes(config: Config) {
       }
 
       authenticate("session") {
-        post("/tasks") {
-          val session = sessions.require(call)
-          val task = call.receive<com.example.contract.TaskWire>()
-          val projectId = FixtureWorld.projectId(session.workspaceId)
+        // A task names its project through boardId; an unknown board falls back to the
+        // workspace's default project, which is what the mobile client (boardId "b1") sends.
+        fun projectFor(session: Session, boardId: String?): String {
+          if (boardId == null) return FixtureWorld.projectId(session.workspaceId)
+          return Db.dataSource.connection.use { conn ->
+            conn.queryOne(
+              "SELECT id FROM projects WHERE workspace_id = ? AND id = ? AND archived_at IS NULL",
+              listOf(session.workspaceId, boardId),
+            ) { it.getString(1) }
+          } ?: FixtureWorld.projectId(session.workspaceId)
+        }
+
+        fun insertTask(projectId: String, workspaceId: String, task: com.example.contract.TaskWire) {
           val now = System.currentTimeMillis()
           Db.inTransaction { conn ->
             conn.execute(
               "INSERT INTO tasks (id, project_id, stage_id, parent_id, workspace_id, title, notes, rank, start_constraint, due_at, effort_minutes, progress, priority, owner, scheduling_mode, locked, is_milestone, completed_at, archived_at, created_at, updated_at) " +
-                "VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
                 "ON CONFLICT (project_id, id) DO UPDATE SET title = EXCLUDED.title, effort_minutes = EXCLUDED.effort_minutes, due_at = EXCLUDED.due_at, priority = EXCLUDED.priority, updated_at = EXCLUDED.updated_at",
               listOf(
                 task.id,
                 projectId,
+                task.columnId,
                 task.parentId,
-                session.workspaceId,
+                workspaceId,
                 task.title,
                 task.notes,
                 task.rank,
@@ -117,6 +132,142 @@ fun Application.routes(config: Config) {
               ),
             )
           }
+        }
+
+        post("/tasks") {
+          val session = sessions.require(call)
+          val task = call.receive<com.example.contract.TaskWire>()
+          insertTask(projectFor(session, task.boardId), session.workspaceId, task)
+          call.respond(mapOf("ok" to true))
+        }
+
+        get("/projects") {
+          val session = sessions.require(call)
+          val projects =
+            Db.dataSource.connection.use { conn ->
+              conn.query(
+                "SELECT id, name, is_default, rank, archived_at FROM projects WHERE workspace_id = ? AND archived_at IS NULL ORDER BY rank, created_at",
+                listOf(session.workspaceId),
+              ) { rs ->
+                ProjectWire(
+                  id = rs.getString("id"),
+                  workspaceId = session.workspaceId,
+                  name = rs.getString("name"),
+                  isDefault = rs.getBoolean("is_default"),
+                  rank = rs.getLong("rank"),
+                  archivedAt = rs.getLong("archived_at").takeIf { !rs.wasNull() },
+                )
+              }
+            }
+          call.respond(projects)
+        }
+
+        post("/projects") {
+          val session = sessions.require(call)
+          val request = call.receive<CreateProjectWire>()
+          val name = request.name.trim()
+          if (name.isEmpty()) {
+            call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "project name cannot be empty"))
+            return@post
+          }
+          val projectId = newId()
+          val now = System.currentTimeMillis()
+          Db.inTransaction { conn ->
+            conn.execute(
+              "INSERT INTO projects (id, workspace_id, name, name_key, rank, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, false, ?, ?)",
+              listOf(projectId, session.workspaceId, name, name.lowercase(), 1, now, now),
+            )
+            DefaultStages.create(conn, projectId, session.workspaceId, now)
+          }
+          call.respond(
+            ProjectWire(
+              id = projectId,
+              workspaceId = session.workspaceId,
+              name = name,
+              isDefault = false,
+              rank = 1,
+            ),
+          )
+        }
+
+        get("/projects/{projectId}") {
+          val session = sessions.require(call)
+          val projectId = call.parameters["projectId"] ?: error("projectId required")
+          val project =
+            Db.dataSource.connection.use { conn ->
+              conn.queryOne(
+                "SELECT id, name, is_default, rank, archived_at FROM projects WHERE workspace_id = ? AND id = ? AND archived_at IS NULL",
+                listOf(session.workspaceId, projectId),
+              ) { rs ->
+                ProjectWire(
+                  id = rs.getString("id"),
+                  workspaceId = session.workspaceId,
+                  name = rs.getString("name"),
+                  isDefault = rs.getBoolean("is_default"),
+                  rank = rs.getLong("rank"),
+                  archivedAt = rs.getLong("archived_at").takeIf { !rs.wasNull() },
+                )
+              }
+            }
+          if (project == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "no such project"))
+            return@get
+          }
+          val (stages, tasks) =
+            Db.dataSource.connection.use { conn ->
+              val stages =
+                conn.query(
+                  "SELECT id, name, rank, archived_at FROM workflow_stages WHERE project_id = ? AND archived_at IS NULL ORDER BY rank",
+                  listOf(projectId),
+                ) { rs ->
+                  StageWire(
+                    id = rs.getString("id"),
+                    name = rs.getString("name"),
+                    rank = rs.getLong("rank"),
+                    archivedAt = rs.getLong("archived_at").takeIf { !rs.wasNull() },
+                  )
+                }
+              val tasks =
+                conn.query(
+                  "SELECT id, parent_id, title, notes, rank, start_constraint, due_at, effort_minutes, progress, priority, owner, scheduling_mode, locked, is_milestone, completed_at, archived_at, stage_id " +
+                    "FROM tasks WHERE workspace_id = ? AND project_id = ? AND archived_at IS NULL ORDER BY rank",
+                  listOf(session.workspaceId, projectId),
+                ) { rs ->
+                  TaskWire(
+                    id = rs.getString("id"),
+                    boardId = projectId,
+                    columnId = rs.getString("stage_id"),
+                    parentId = rs.getString("parent_id"),
+                    title = rs.getString("title"),
+                    notes = rs.getString("notes"),
+                    rank = rs.getLong("rank"),
+                    startConstraint = rs.getLong("start_constraint").takeIf { !rs.wasNull() },
+                    dueAt = rs.getLong("due_at").takeIf { !rs.wasNull() },
+                    effortMinutes = rs.getInt("effort_minutes").takeIf { !rs.wasNull() },
+                    progress = rs.getInt("progress"),
+                    priority = rs.getString("priority"),
+                    owner = rs.getString("owner"),
+                    schedulingMode = rs.getString("scheduling_mode"),
+                    locked = rs.getBoolean("locked"),
+                    isMilestone = rs.getBoolean("is_milestone"),
+                    completedAt = rs.getLong("completed_at").takeIf { !rs.wasNull() },
+                    archivedAt = rs.getLong("archived_at").takeIf { !rs.wasNull() },
+                  )
+                }
+              stages to tasks
+            }
+          call.respond(BoardWire(project = project, stages = stages, tasks = tasks))
+        }
+
+        post("/projects/{projectId}/tasks") {
+          val session = sessions.require(call)
+          val projectId = call.parameters["projectId"] ?: error("projectId required")
+          if (projectFor(session, projectId) != projectId) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "no such project"))
+            return@post
+          }
+          val task = call.receive<com.example.contract.TaskWire>().copy(boardId = projectId)
+          insertTask(projectId, session.workspaceId, task)
           call.respond(mapOf("ok" to true))
         }
 
@@ -330,8 +481,26 @@ object FixtureWorld {
         "INSERT INTO projects (id, workspace_id, name, name_key, rank, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, 0, true, ?, ?)",
         listOf(projectId, workspaceId, PROJECT_NAME, PROJECT_NAME.lowercase(), System.currentTimeMillis(), System.currentTimeMillis()),
       )
+      DefaultStages.create(conn, projectId, workspaceId, System.currentTimeMillis())
       projectId
     }
+}
+
+/** The standard board columns every project starts with, mirroring the app's DEFAULT_COLUMNS. */
+object DefaultStages {
+  private data class Stage(val id: String, val name: String, val rank: Long)
+
+  private val STAGES = listOf(Stage("todo", "To Do", 0), Stage("in-progress", "In Progress", 1), Stage("done", "Done", 2))
+
+  fun create(conn: java.sql.Connection, projectId: String, workspaceId: String, now: Long) {
+    STAGES.forEach { stage ->
+      conn.execute(
+        "INSERT INTO workflow_stages (id, project_id, workspace_id, name, name_key, rank, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+          "ON CONFLICT (project_id, id) DO NOTHING",
+        listOf(stage.id, projectId, workspaceId, stage.name, stage.name.lowercase(), stage.rank, now, now),
+      )
+    }
+  }
 }
 
 fun providerFor(config: Config, workspaceId: String): com.example.server.google.CalendarProvider {

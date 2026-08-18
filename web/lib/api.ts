@@ -1,9 +1,11 @@
 import type {
   ApplyResponse,
+  Board,
   CapacityRequest,
   CapacityResponse,
   PlanRun,
   PlanningRequest,
+  Project,
   SessionResponse,
   Task,
   TodayResponse,
@@ -74,6 +76,25 @@ export const client = {
 
   listTasks(): Promise<Task[]> {
     return api("/v1/tasks");
+  },
+
+  listProjects(): Promise<Project[]> {
+    return api("/v1/projects");
+  },
+
+  createProject(name: string): Promise<Project> {
+    return api("/v1/projects", { method: "POST", body: JSON.stringify({ v: 1, name }) });
+  },
+
+  board(projectId: string): Promise<Board> {
+    return api(`/v1/projects/${encodeURIComponent(projectId)}`);
+  },
+
+  addProjectTask(projectId: string, task: Task): Promise<{ ok: boolean }> {
+    return api(`/v1/projects/${encodeURIComponent(projectId)}/tasks`, {
+      method: "POST",
+      body: JSON.stringify(task),
+    });
   },
 
   reconcile(): Promise<{ ok: boolean }> {

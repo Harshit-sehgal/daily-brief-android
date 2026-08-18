@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { client, savedSession, saveSession, clearSession, ApiError } from "@/lib/api";
-import type { CapacityResponse, PlanRun, PlanningRequest, Task, TodayResponse } from "@/lib/types";
+import type { Board, CapacityResponse, PlanRun, PlanningRequest, Project, Task, TodayResponse } from "@/lib/types";
 
 const FIXTURE = (process.env.NEXT_PUBLIC_FIXTURE ?? "1") === "1";
 const HOUR = 3_600_000;
@@ -57,7 +57,10 @@ function SignIn() {
 }
 
 function Planner({ session }: { session: { token: string; workspaceId: string } }) {
-  const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [board, setBoard] = useState<Board | null>(null);
+  const [newProjectName, setNewProjectName] = useState("");
   const [today, setToday] = useState<TodayResponse | null>(null);
   const [run, setRun] = useState<PlanRun | null>(null);
   const [entryId, setEntryId] = useState<string | null>(null);
@@ -70,33 +73,64 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
   const [capacity, setCapacity] = useState<CapacityResponse | null>(null);
 
   const refresh = useCallback(async () => {
-    const [ts, td] = await Promise.all([client.listTasks(), client.today()]);
-    setTasks(ts);
+    const [ps, td] = await Promise.all([client.listProjects(), client.today()]);
+    setProjects(ps);
     setToday(td);
+    setSelectedId((current) => current ?? ps.find((p) => p.isDefault)?.id ?? ps[0]?.id ?? null);
   }, []);
 
   useEffect(() => {
     refresh().catch((e) => setError(e instanceof Error ? e.message : "load failed"));
   }, [refresh]);
 
+  useEffect(() => {
+    if (!selectedId) {
+      setBoard(null);
+      return;
+    }
+    client
+      .board(selectedId)
+      .then(setBoard)
+      .catch((e) => setError(e instanceof Error ? e.message : "board failed"));
+  }, [selectedId]);
+
+  async function createProject() {
+    const name = newProjectName.trim();
+    if (!name) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await client.createProject(name);
+      setNewProjectName("");
+      const ps = await client.listProjects();
+      setProjects(ps);
+      setSelectedId(created.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "create failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addTask() {
-    if (!title.trim()) return;
+    if (!title.trim() || !selectedId) return;
     setBusy(true);
     setError(null);
     try {
       const id = `t${crypto.randomUUID().slice(0, 8)}`;
-      await client.addTask({
+      await client.addProjectTask(selectedId, {
         id,
-        boardId: "b1",
+        boardId: selectedId,
+        columnId: null,
         title: title.trim(),
-        rank: tasks?.length ?? 0,
+        rank: board?.tasks.length ?? 0,
         effortMinutes: Number(effort) || undefined,
         dueAt: due ? new Date(`${due}T00:00:00Z`).getTime() : undefined,
       });
       setTitle("");
       setEffort("60");
       setDue("");
-      await refresh();
+      setBoard(await client.board(selectedId));
     } catch (e) {
       setError(e instanceof Error ? e.message : "add failed");
     } finally {
@@ -127,9 +161,9 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
       rangeEndMs: now - (now % DAY) + 7 * DAY,
       nowMs: now - (now % DAY),
       items:
-        tasks?.map((t, i) => ({
+        board?.tasks.map((t, i) => ({
           ...t,
-          boardId: "b1",
+          boardId: t.boardId ?? selectedId ?? "b1",
           rank: t.rank ?? i,
           effortMinutes: t.effortMinutes ?? undefined,
         })) ?? [],
@@ -233,37 +267,74 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
     <>
       <div className="card">
         <div className="row">
-          <h2 style={{ margin: 0 }}>My tasks</h2>
-          <span className="tag">{tasks?.length ?? "…"} tasks</span>
+          <h2 style={{ margin: 0 }}>Projects</h2>
           <span style={{ flex: 1 }} />
           <button onClick={() => { clearSession(); window.location.reload(); }}>Sign out</button>
         </div>
-        {tasks === null ? (
+        {projects === null ? (
           <p className="muted">loading…</p>
-        ) : tasks.length === 0 ? (
-          <p className="muted">No tasks yet — add one below.</p>
         ) : (
-          <table>
-            <thead>
-              <tr><th>Task</th><th>Effort</th><th>Due</th></tr>
-            </thead>
-            <tbody>
-              {tasks.map((t) => (
-                <tr key={t.id}>
-                  <td>{t.title}</td>
-                  <td>{t.effortMinutes ? `${t.effortMinutes} min` : "—"}</td>
-                  <td>{t.dueAt ? fmt(t.dueAt) : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+            {projects.map((p) => (
+              <button
+                key={p.id}
+                className={p.id === selectedId ? "primary" : ""}
+                onClick={() => setSelectedId(p.id)}
+              >
+                {p.name}
+              </button>
+            ))}
+            <input
+              type="text"
+              placeholder="New project…"
+              value={newProjectName}
+              onChange={(e) => setNewProjectName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") createProject(); }}
+              style={{ width: 140 }}
+              aria-label="New project name"
+            />
+            <button onClick={createProject} disabled={busy || !newProjectName.trim()}>Create</button>
+          </div>
         )}
-        <div className="row" style={{ marginTop: 12 }}>
-          <input type="text" placeholder="Task title" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
-          <input type="number" placeholder="min" value={effort} onChange={(e) => setEffort(e.target.value)} style={{ width: 80 }} aria-label="Effort minutes" />
-          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Due date" />
-          <button className="primary" onClick={addTask} disabled={busy || !title.trim()}>Add</button>
+      </div>
+
+      <div className="card">
+        <div className="row">
+          <h2 style={{ margin: 0 }}>{board ? board.project.name : "Board"}</h2>
+          <span className="tag">{board?.tasks.length ?? "…"} tasks</span>
         </div>
+        {board === null ? (
+          <p className="muted">loading…</p>
+        ) : (
+          <>
+            {board.stages.map((stage) => (
+              <div key={stage.id}>
+                <strong>{stage.name}</strong>
+                {board.tasks.filter((t) => t.columnId === stage.id).length === 0 ? (
+                  <p className="muted" style={{ margin: "2px 0 8px" }}>—</p>
+                ) : (
+                  <table>
+                    <tbody>
+                      {board.tasks.filter((t) => t.columnId === stage.id).map((t) => (
+                        <tr key={t.id}>
+                          <td>{t.title}</td>
+                          <td>{t.effortMinutes ? `${t.effortMinutes} min` : "—"}</td>
+                          <td>{t.dueAt ? fmt(t.dueAt) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))}
+            <div className="row" style={{ marginTop: 12 }}>
+              <input type="text" placeholder="Task title" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
+              <input type="number" placeholder="min" value={effort} onChange={(e) => setEffort(e.target.value)} style={{ width: 80 }} aria-label="Effort minutes" />
+              <input type="date" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Due date" />
+              <button className="primary" onClick={addTask} disabled={busy || !title.trim()}>Add</button>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="card">
