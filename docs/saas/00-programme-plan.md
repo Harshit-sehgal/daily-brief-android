@@ -322,9 +322,12 @@ for what follows. One judgement call remains, and it does not block any stage:
 
 1. ~~**Kotlin/Native target**~~ — **resolved**: `linuxX64` landed (WP-7), the compiler enforces
    `commonMain` purity, and `iosArm64`/`iosSimulatorArm64` followed with the mobile MVP.
-2. **Monorepo reshuffle** — `apps/ services/ packages/` was deferred until the web app exists
-   so `apps/android/` moves once rather than twice. The web app now exists; the reshuffle is due but
-   can wait for a point where the tree is otherwise quiet.
+2. ~~**Monorepo reshuffle**~~ — **resolved** (2026-08-19): the web app exists, so `app/`
+   moved once — `apps/android`, `apps/mobile`, `apps/web`; `services/server`;
+   `packages/planning-core`, `packages/planning-contract`. Gradle module names are
+   unchanged (`:app`, `:server`, `:planning-core`, `:planning-contract`) via
+   `projectDir` mappings in `settings.gradle.kts`, so scripts and CI spell the same
+   tasks. The full gate plus the WP-13 journey pass after the move.
 
 And one standing decision, recorded rather than asked: the three Android-only features from D1
 stay. `git revert a5bc8c1 43dea69` remains available if you would rather carry less Android

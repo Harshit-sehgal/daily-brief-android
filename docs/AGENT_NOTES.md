@@ -112,8 +112,10 @@ baselines, scenarios, portfolio rollups, journal + Undo.
    owner**: kotlinx-datetime 0.8.0 + desugar_jdk_libs 2.1.5 are cached and in use.
    The remaining half is the Kotlin/Native target (~1 GB) for compiler-enforced
    `commonMain` (WP-7) — the source-scan test stays the guard until then.
-3. Monorepo reshuffle ordering — `apps/ services/ packages/` deferred until the web
-   app exists.
+3. ~~Monorepo reshuffle ordering~~ — **resolved** (2026-08-19): `apps/ services/ packages/`
+    landed once the web app existed; `app/` moved a single time. Module names survive via
+    `projectDir` mappings (`settings.gradle.kts`), so scripts and CI are unchanged in what
+    they spell.
 
 ## Standing rules for my work
 - Never edit the canonical docs; record updates in this file's log instead.
