@@ -12,7 +12,7 @@ import com.example.server.google.FixtureCalendarProvider
 import com.example.server.google.GoogleCalendarProvider
 import com.example.server.google.GoogleOAuth
 import com.example.server.plan.Journal
-import com.example.server.plan.Mapping
+import com.example.core.Mapping
 import com.example.server.reconcile.ReconcileWorker
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application

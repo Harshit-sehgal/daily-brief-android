@@ -77,6 +77,7 @@ Counted by the purity test, not by the engine-core figure above.
 | `WorkScheduleDefaults` | 10 | `commonMain` | Moved from `jvmShared` — nothing was blocking it |
 | `SyncMergePolicy` | 85 | `commonMain` | Moved from `jvmShared` (WP-13) — pure Kotlin, nothing blocked it |
 | `LegacyMd5`, `LegacyIdentity` | 170 | `commonMain` | Shared byte-exact identity code for the iOS actual |
+| `Mapping`, `EnginePreview` | 219 | `commonMain` | Contract ⇄ engine mapping, moved in from `:server` (WP-M3), plus the mobile preview entry point — one JSON string in, one out, so no engine type crosses the native boundary |
 | `LegacyNameKeys` | 9 | `jvmShared` | `Normalizer`, `Locale` — the only JVM actual left |
 
 **The three journal codecs are one unit, and it is not a cheap unblock.** An earlier version of
@@ -183,6 +184,12 @@ audit:
 
 ## Change log
 
+- 2026-08-18 (WP-M3): `Mapping` moved from `:server` to `commonMain` (`com.example.core`),
+  and `EnginePreview.previewPlan(requestJson)` added beside it — the mobile native bridge
+  (one String in, one String out) that makes a phone preview byte-compatible with a server
+  run. `:planning-contract` converted to KMP so the contract types are importable from
+  `commonMain` (golden files and 19 tests unchanged, now in `jvmTest`); the mobile
+  `planner-engine` module compiles them into the app AAR.
 - 2026-08-18: `iosArm64`/`iosSimulatorArm64` targets added (configure everywhere, build on
   macOS only); `LegacyNameKeys.ios.kt` actual lands (`precomposedStringWithCompatibilityMapping`
   + `en_US_POSIX`); trim + name-based UUID shared into `commonMain` (`legacyTrim`,

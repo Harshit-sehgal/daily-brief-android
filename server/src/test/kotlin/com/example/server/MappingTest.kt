@@ -13,9 +13,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import com.example.server.plan.Mapping
-import com.example.server.plan.Mapping.EngineInput
-import com.example.server.plan.Mapping.toEngineSpec
+import com.example.core.Mapping
+import com.example.core.Mapping.EngineInput
+import com.example.core.Mapping.toEngineSpec
 import kotlinx.serialization.json.Json
 
 /**

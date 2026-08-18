@@ -1,4 +1,4 @@
-package com.example.server.plan
+package com.example.core
 
 import com.example.contract.DeadlinePolicyWire
 import com.example.contract.ExternalEventWire
@@ -13,16 +13,6 @@ import com.example.contract.TaskDependencyWire
 import com.example.contract.TaskWire
 import com.example.contract.UnplacedTaskWire
 import com.example.contract.WorkScheduleWire
-import com.example.core.AutoPlan
-import com.example.core.DeadlinePolicy
-import com.example.core.PlanHealth
-import com.example.core.PlanHealthAssessment
-import com.example.core.PlanHealthResult
-import com.example.core.WorkingCalendarSpec
-import com.example.core.WorkingDateOverride
-import com.example.core.WorkingDayWindow
-import com.example.core.WorkingInterval
-import com.example.core.WorkingWeekWindow
 import com.example.data.model.BriefingEvent
 import com.example.data.model.PlanBlock
 import com.example.data.model.PlanDependency

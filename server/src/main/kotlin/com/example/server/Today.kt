@@ -4,7 +4,7 @@ import com.example.core.ScheduleAnalysis
 import com.example.data.model.BriefingEvent
 import com.example.server.db.Db
 import com.example.server.db.Db.query
-import com.example.server.plan.Mapping.toWire
+import com.example.core.Mapping.toWire
 import kotlinx.serialization.Serializable
 
 /**

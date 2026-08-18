@@ -5,7 +5,11 @@ plugins {
   // AGP 9 refuses `com.android.library` alongside the multiplatform plugin; this is the
   // replacement it points at.
   alias(libs.plugins.android.kotlin.multiplatform.library)
+  id("maven-publish")
 }
+
+group = "com.example"
+version = "0.1.0"
 
 // The planning engine, split out of the Android app so a server can run the same
 // scheduling code the phone runs.
@@ -45,7 +49,15 @@ kotlin {
     // else; a bare `compileSdk = 37` asks for 37.0, which sends Gradle off to download a
     // platform that is not in the pinned SDK — the build then stalls on the network with
     // no visible progress at all.
-    compileSdk { version = release(37) { minorApiLevel = 1 } }
+    //
+    // The mobile Expo app (AGP 8.12, no minor API levels) cannot consume a 37.1 AAR, so
+    // the mobile-facing publication compiles at 36 via -PmobileCompileSdk=36
+    // (scripts/publish-engine-local.sh --mobile). The gate and :app keep 37.1.
+    if (providers.gradleProperty("mobileCompileSdk").isPresent) {
+      compileSdk = providers.gradleProperty("mobileCompileSdk").get().toInt()
+    } else {
+      compileSdk { version = release(37) { minorApiLevel = 1 } }
+    }
     minSdk = 24
   }
 
@@ -60,6 +72,11 @@ kotlin {
       // The engine's date maths. `api` because TimeZone appears in public signatures that
       // :app and the future planning service both call.
       api(libs.kotlinx.datetime)
+      // The frozen wire contract. Mapping (contract wire ⇄ engine) lives here in commonMain
+      // because both the server and the mobile preview run it: the engine is the authority
+      // and this file is the only place the two meet. `api` so the contract types surface in
+      // the PlannerCore framework alongside EnginePreview.
+      api(project(":planning-contract"))
     }
 
     val jvmShared = create("jvmShared") {

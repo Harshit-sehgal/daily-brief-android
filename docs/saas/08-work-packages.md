@@ -513,15 +513,47 @@ manually against a real Google account (runbook).
 ### Out of scope (later WPs)
 
 Notion on the server, Gemini summaries, alarms/push, billing, scale-out beyond one node, KMS
-proper, Expo mobile (WP-16).
+proper, Expo mobile depth (WP-16 shipped its MVP).
 - **WP-14 Google Calendar sync worker** — OAuth server-side, tokens encrypted at rest,
   `SyncMergePolicy`'s rules ported exactly: times and location are source-owned, wording and
   placement are user-owned, `userEdited` is sticky.
 - **WP-15 depth and paid tier** — Capacity first (it answers "can I take another client?", the
   ICP's actual question), then Projects/Board/Timeline, then dependencies and critical path,
   then scenarios/baselines/portfolio, then Stripe.
-- **WP-16 mobile** — Expo + React Native UI, `planning-core` via KMP. **Local engine previews;
-  the server is authoritative for Apply.**
+- **WP-16 mobile — MVP shipped 2026-08-18** (`19b0d71` + WP-M3 + WP-M2/M4 commits).
+  Expo + React Native UI, `planning-core` via KMP. **Local engine previews; the server is
+  authoritative for Apply.**
+
+  Delivered as four mobile-first packages:
+
+  - **WP-M1** (`19b0d71`) — `planning-core` gains `iosArm64`/`iosSimulatorArm64`; the
+    `LegacyNameKeys` iOS `actual` lands (`precomposedStringWithCompatibilityMapping` +
+    `en_US_POSIX`); `legacyTrim`/`legacyStableId`/`LegacyMd5` shared into `commonMain`.
+    Verified: `scripts/verify.sh` green; iOS compiles only on macOS.
+  - **WP-M2** — the `mobile/` Expo app: Login (fixture demo + Google OAuth with
+    `auth-callback`), Today, Planner (Plan my week, proposal with reasons, Apply, Undo),
+    Settings. `tsc --noEmit` and `expo export --platform web` clean.
+  - **WP-M3** — the local engine bridge. `Mapping` moves from `:server` into `planning-core`
+    `commonMain` (`com.example.core`) with `EnginePreview.previewPlan(requestJson)` — one
+    String in, one String out — and `:planning-contract` converts to KMP so the wire types
+    are portable with the engine (golden files and 19 tests unchanged, moved to `jvmTest`).
+    `mobile/modules/planner-engine` is the native module: Kotlin `AsyncFunction` on Android
+    (via the mavenLocal AARs), Swift on iOS (`EnginePreview.shared` from the `PlannerCore`
+    XCFramework), a web stub, and a typed TS client. `scripts/publish-engine-local.sh`
+    gained `--mobile` (publishes the AARs at compileSdk 36, the max the RN 0.86 toolchain
+    can consume).
+  - **WP-M4** — the mobile MVP wired end to end: debug + release APKs build with the engine
+    embedded; the release APK installs and its JS bundle runs on the emulator (login
+    hierarchy renders). Interactive on-device driving is blocked by an emulator-image
+    first-frame bug (documented in `mobile/README.md` "Known limitation"); the journey the
+    app drives — signup → tasks → plan → apply → today → undo — is green at the wire level
+    against the fixture server.
+
+  Traps learned (all documented in `mobile/README.md`): RN 0.86 pins AGP 8.12.0 + Kotlin
+  2.1.20, and the Expo toolchain's pika plugin caps at Kotlin 2.3.20 — so the mobile
+  project compiles at 2.3.20 against the 2.4.10-built engine AARs (compiler N reads
+  metadata N+1), with three manual edits to the generated `android/` that must be re-applied
+  after every `expo prebuild`.
 
 ---
 

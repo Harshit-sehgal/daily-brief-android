@@ -11,13 +11,18 @@ half, `jvmShared` holds everything still needing JVM APIs, and both the `jvm` ta
 Android depend on `jvmShared`. Moving a file from `jvmShared` to `commonMain` is the unit
 of porting work; `docs/saas/05-kmp-portability-audit.md` tracks what is left and why.
 `:planning-contract` is the frozen wire contract (docs/saas/04-planner-api-contract.md):
-plain JVM, kotlinx-serialization only, golden byte-identical files — nothing in the SaaS
-stages starts until it is stable. `:server` is the SaaS service (WP-13): Ktor + Flyway +
+Kotlin Multiplatform, kotlinx-serialization only, golden byte-identical files — nothing
+in the SaaS stages starts until it is stable. `:server` is the SaaS service (WP-13): Ktor + Flyway +
 Postgres, unit-tested (`:server:test` in the gate) and acceptance-tested by
 `scripts/journey.sh`, which runs the whole signup→plan→apply→undo loop against docker
 Postgres in ~1.5 s; `scripts/verify.sh --journey` is the gate plus that acceptance. The
 `web/` client (Next.js, Planner + Today only) talks to it; the server is authoritative
-for Apply.
+for Apply. `mobile/` is the Expo app (Login, Today, Planner, Settings) on the same
+server; its `planner-engine` local module runs `planning-core`'s `EnginePreview` on-device
+for preview — the server stays authoritative for Apply. `:planning-contract` is now KMP
+too (WP-M3), so the frozen wire types are portable with the engine; `Mapping` and
+`EnginePreview` live in `planning-core`'s `commonMain`, and the mobile preview is
+byte-compatible with a server run because both meet at `EnginePreview`.
 
 **`commonMain` purity is enforced by the compiler, with a fast scan in reserve.** The
 `linuxX64` target (WP-7) gives the metadata compilation a consumer, so
@@ -43,6 +48,7 @@ scripts/verify.sh             # the whole CI gate: tests, both lints, both APKs,
 scripts/verify.sh --journey   # the gate plus the WP-13 acceptance (needs docker)
 scripts/emulator.sh           # boot + unlock + wake an emulator (~10s from a snapshot)
 scripts/verify.sh --device    # the gate plus instrumentation on that emulator
+scripts/publish-engine-local.sh  # publish planning-core/contract AARs to mavenLocal; --mobile for the mobile build (compileSdk 36)
 scripts/smoke-release.sh      # install and launch the *minified* build — catches R8 damage
 scripts/capture-preview.sh    # recapture preview.html's plates from the running app
 scripts/embed-preview-plates.py  # ...then inline them into preview.html
@@ -62,6 +68,22 @@ test bugs, and `scripts/emulator.sh` handles both:
 
 If `adb install` fails with `Failure calling service package: Broken pipe`, push
 the APK to `/data/local/tmp` and `pm install -r -t` it instead.
+
+**Mobile builds need three manual edits to the generated `mobile/android/`** (gitignored,
+so re-apply after every `expo prebuild`) — `kotlinVersion=2.3.20` in `gradle.properties`,
+and in `build.gradle` a KGP 2.3.20 buildscript classpath, `ext.compileSdkVersion = 36`
+before the expo-root-project apply, and `mavenLocal()`. Rationale and exact shapes:
+`mobile/README.md`. The mobile project compiles at Kotlin 2.3.20 because the Expo
+toolchain's pika plugin caps there, and the engine AARs are Kotlin 2.4.10 (metadata
+2.4.0) — a compiler reads metadata up to one minor version ahead. Build the Android app
+with `scripts/publish-engine-local.sh --mobile` + `./gradlew :app:assembleRelease`
+(toolchain `JAVA_HOME`, `--offline`).
+
+**The API 36 emulator image never presents the mobile app's window** (first-frame
+reveal deadlock — zero frames, splash stuck, input never activates; the native Compose
+app renders fine on the same image). Documented in `mobile/README.md`; the wire-level
+journey the app drives is covered by `scripts/journey.sh`, so the mobile feature work is
+verifiable without the device.
 
 ## Where things live
 
