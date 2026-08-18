@@ -122,7 +122,7 @@ REQUEST=$(jq -cn \
       {id:"t2", boardId:"b1", title:"Prep the slides", rank:1, effortMinutes:45},
       {id:"t3", boardId:"b1", title:"Review the deck", rank:2, effortMinutes:60, dueAt:($now+40*3600000)}
     ],
-    blocks:[], dependencies:[],
+    blocks:[], dependencies:[{id:"d1", predecessorId:"t2", successorId:"t3", type:"finish_to_start", lagMinutes:15}],
     fixedCommitments:[{startAt:($now+14*3600000), endAt:($now+15*3600000)}],
     scheduleIdByTaskId:{}, preferredOrder:[],
     schedules:[{id:"s1", name:"Weekdays", timeZoneId:"UTC", isDefault:true, minimumChunkMinutes:30, maximumChunkMinutes:120, bufferMinutes:0, rank:0, windows:$windows}],
@@ -134,6 +134,14 @@ jq -e --argjson start $(( NOW + 14*HOUR )) --argjson end $(( NOW + 15*HOUR )) \
   '[.result.proposals[] | select(.startAt < $end and .endAt > $start)] | length == 0' /tmp/opencode/journey-plan.json >/dev/null \
   || fail "a proposal overlaps the stand-up"
 RUN_ID=$(jq -r .runId /tmp/opencode/journey-plan.json)
+# Stage 4.3: "Review the deck" waits for "Prep the slides" plus 15 min of lag.
+T2_END=$(jq -r '[.result.proposals[] | select(.itemId == "t2")][0].endAt' /tmp/opencode/journey-plan.json)
+[ -n "$T2_END" ] && [ "$T2_END" != "null" ] || fail "dependency predecessor t2 was not placed"
+jq -e --argjson bound $(( T2_END + 15*60000 )) \
+  '[.result.proposals[] | select(.itemId == "t3")][0].startAt >= $bound' /tmp/opencode/journey-plan.json >/dev/null \
+  || fail "t3 did not wait 15 min after t2 finished"
+jq -e '[.result.proposals[] | select(.itemId == "t3")][0].reason | contains("Prep the slides finishes")' \
+  /tmp/opencode/journey-plan.json >/dev/null || fail "t3's reason does not name its predecessor"
 step "4. plan my week       (+$(( $(start_ms) - T )) ms)"
 
 # ── Capacity: the same request asks "can I take another client?" — three numbers, one

@@ -72,6 +72,27 @@
         "successorId": "task-b",
         "type": "finish_to_start",
         "lagMinutes": 0
+      },
+      {
+        "id": "dep-2",
+        "predecessorId": "task-a",
+        "successorId": "task-b",
+        "type": "start_to_start",
+        "lagMinutes": 15
+      },
+      {
+        "id": "dep-3",
+        "predecessorId": "task-a",
+        "successorId": "task-b",
+        "type": "finish_to_finish",
+        "lagMinutes": 0
+      },
+      {
+        "id": "dep-4",
+        "predecessorId": "task-a",
+        "successorId": "task-b",
+        "type": "start_to_finish",
+        "lagMinutes": 5
       }
     ],
     "scheduleIdByTaskId": {

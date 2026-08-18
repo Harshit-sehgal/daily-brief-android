@@ -124,6 +124,26 @@ class ContractGoldenTest {
             predecessorId = "task-a",
             successorId = "task-b",
           ),
+          TaskDependencyWire(
+            id = "dep-2",
+            predecessorId = "task-a",
+            successorId = "task-b",
+            type = "start_to_start",
+            lagMinutes = 15,
+          ),
+          TaskDependencyWire(
+            id = "dep-3",
+            predecessorId = "task-a",
+            successorId = "task-b",
+            type = "finish_to_finish",
+          ),
+          TaskDependencyWire(
+            id = "dep-4",
+            predecessorId = "task-a",
+            successorId = "task-b",
+            type = "start_to_finish",
+            lagMinutes = 5,
+          ),
         ),
       scheduleIdByTaskId = mapOf("task-a" to "schedule-1", "task-b" to "schedule-1"),
       schedules =

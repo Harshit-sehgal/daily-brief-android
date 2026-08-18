@@ -183,9 +183,15 @@ Only once the loop is used. In `01-product-teardown.md` priority order:
    (`CapacityAnswer` in `commonMain`, golden-pinned in the contract, a journey step, and a strip
    on the web Planner). **Shipped 2026-08-18.** What remains here: per-project schedules on the
    wire's `scheduleIdByTaskId` once Stage 4.2 lands, and the Capacity surface in the mobile app.
-2. **Projects → Tasks / Board / Timeline** — progressive disclosure; Timeline last.
+2. **Projects → Tasks / Board / Timeline** — progressive disclosure; Timeline last. **Board
+   shipped 2026-08-18** (contract + migration + routes + journey step + web surface); the
+   Timeline is the portfolio Gantt, which folds in with the portfolio at 4.
 3. **Dependencies and critical path** — including engine defect 3 (SS/FF/SF scheduling), which
-   consultants with client hand-offs will hit immediately.
+   consultants with client hand-offs will hit immediately. **Shipped 2026-08-18:** the greedy
+   now places candidates in dependency-topological order (a successor is never offered a slot
+   before its predecessor has one — the real residue of defect 3, discovered when the journey
+   proved FS ordering), the golden request pins all four types, and the web board links tasks
+   with a "waits for" picker.
 4. **Scenarios, baselines, portfolio** — `PortfolioGantt` folds in here.
 5. **Billing** — Stripe, per-tenant quota, the trial boundary in `02`.
 

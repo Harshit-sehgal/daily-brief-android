@@ -260,6 +260,63 @@ class AutoPlanTest {
   }
 
   @Test
+  fun `a successor that is due sooner still waits for its predecessor`() {
+    // "second" is due at 11:00 and sorts before "first" (no due date) under the planner's own
+    // order. The candidate order is topologically constrained, so the predecessor still places
+    // first and the successor's slot honours the link even though it then fills its whole due.
+    val result =
+      AutoPlan.propose(
+        items =
+          listOf(
+            item("first", effort = 60, rank = 1),
+            item("second", effort = 60, rank = 2, dueAt = at(2036, Calendar.FEBRUARY, 4, 11, 0)),
+          ),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies =
+          listOf(dependency("d1", "first", "second", PlanDependencyType.FINISH_TO_START)),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    val firstEnd = result.proposals.single { it.itemId == "first" }.endAt
+    val second = result.proposals.single { it.itemId == "second" }
+    assertTrue("a successor cannot start before its predecessor ends", second.startAt >= firstEnd)
+    assertEquals(at(2036, Calendar.FEBRUARY, 4, 10, 0), firstEnd)
+    assertEquals(at(2036, Calendar.FEBRUARY, 4, 10, 0), second.startAt)
+    assertTrue(second.reason, second.reason.contains("after first finishes"))
+  }
+
+  @Test
+  fun `a dependency cycle degrades to the deterministic order without dropping work`() {
+    val result =
+      AutoPlan.propose(
+        items =
+          listOf(
+            item("first", effort = 60, rank = 2, dueAt = at(2036, Calendar.FEBRUARY, 4, 11, 0)),
+            item("second", effort = 60, rank = 1),
+          ),
+        blocks = emptyList(),
+        fixedCommitments = emptyList(),
+        dependencies =
+          listOf(
+            dependency("d1", "first", "second", PlanDependencyType.FINISH_TO_START),
+            dependency("d2", "second", "first", PlanDependencyType.FINISH_TO_START),
+          ),
+        schedule = schedule,
+        rangeStartMs = monday,
+        rangeEndMs = weekEnd,
+        nowMs = monday,
+      )
+
+    assertEquals(2, result.proposals.size)
+    // Comparator order decides (due soonest first, then rank); each still places.
+    assertEquals(listOf("first", "second"), result.proposals.map { it.itemId })
+  }
+
+  @Test
   fun `the past is never planned into and the same inputs give the same plan`() {
     val midMorning = at(2036, Calendar.FEBRUARY, 4, 10, 20)
     val result =

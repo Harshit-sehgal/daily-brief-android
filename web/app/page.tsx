@@ -71,6 +71,7 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
   const [effort, setEffort] = useState("60");
   const [due, setDue] = useState("");
   const [capacity, setCapacity] = useState<CapacityResponse | null>(null);
+  const [waitsFor, setWaitsFor] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     const [ps, td] = await Promise.all([client.listProjects(), client.today()]);
@@ -169,7 +170,17 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
         })) ?? [],
       blocks: [],
       fixedCommitments: (today?.events ?? []).map((e) => ({ startAt: e.startTime, endAt: e.endTime })),
-      dependencies: [],
+      dependencies: Object.entries(waitsFor)
+        .filter(([successorId, predecessorId]) =>
+          board?.tasks.some((t) => t.id === successorId) && board?.tasks.some((t) => t.id === predecessorId)
+        )
+        .map(([successorId, predecessorId], i) => ({
+          id: `d${i}`,
+          predecessorId,
+          successorId,
+          type: "finish_to_start",
+          lagMinutes: 0,
+        })),
       scheduleIdByTaskId: {},
       preferredOrder: [],
       schedules: [
@@ -314,12 +325,34 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
                   <p className="muted" style={{ margin: "2px 0 8px" }}>—</p>
                 ) : (
                   <table>
+                    <thead>
+                      <tr><th>Task</th><th>Effort</th><th>Due</th><th>Waits for</th></tr>
+                    </thead>
                     <tbody>
                       {board.tasks.filter((t) => t.columnId === stage.id).map((t) => (
                         <tr key={t.id}>
                           <td>{t.title}</td>
                           <td>{t.effortMinutes ? `${t.effortMinutes} min` : "—"}</td>
                           <td>{t.dueAt ? fmt(t.dueAt) : "—"}</td>
+                          <td>
+                            <select
+                              value={waitsFor[t.id] ?? ""}
+                              onChange={(e) =>
+                                setWaitsFor((prev) => {
+                                  const next = { ...prev };
+                                  if (e.target.value) next[t.id] = e.target.value;
+                                  else delete next[t.id];
+                                  return next;
+                                })
+                              }
+                              aria-label={`${t.title} waits for`}
+                            >
+                              <option value="">—</option>
+                              {board.tasks.filter((other) => other.id !== t.id).map((other) => (
+                                <option key={other.id} value={other.id}>{other.title}</option>
+                              ))}
+                            </select>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

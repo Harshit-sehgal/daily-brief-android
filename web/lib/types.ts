@@ -55,7 +55,7 @@ export interface PlanningRequest {
   items: Task[];
   blocks: unknown[];
   fixedCommitments: Interval[];
-  dependencies: unknown[];
+  dependencies: Dependency[];
   scheduleIdByTaskId: Record<string, string>;
   preferredOrder: string[];
   schedules: WorkSchedule[];
@@ -189,4 +189,12 @@ export interface Board {
   project: Project;
   stages: Stage[];
   tasks: Task[];
+}
+
+export interface Dependency {
+  id: string;
+  predecessorId: string;
+  successorId: string;
+  type: string;
+  lagMinutes: number;
 }

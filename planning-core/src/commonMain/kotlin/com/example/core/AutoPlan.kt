@@ -44,8 +44,10 @@ enum class DeadlinePolicy {
  * they are not looking. So this engine is pure and writes nothing: it returns blocks it *would*
  * create, each with the reason it chose that slot, and the caller shows them before anything is
  * committed. Everything it cannot justify it refuses and names — a task with no stated effort is
- * reported as unplaceable rather than given an invented duration, and a dependency type it does not
- * yet schedule around is said out loud instead of ignored.
+ * reported as unplaceable rather than given an invented duration, and a dependency type it does
+ * not yet schedule around is said out loud instead of ignored. The greedy places candidates in
+ * a dependency-topological order, so a successor is never offered a slot before its predecessor
+ * has one.
  *
  * It never touches existing blocks, fixed commitments, locked work, or time that has already passed.
  */
@@ -108,6 +110,40 @@ object AutoPlan {
             .thenBy { it.id }
         )
 
+    // A successor must not be considered before its predecessors have something scheduled: the
+    // greedy's only way to honour a link is the bounds the predecessor already placed, so the
+    // candidate order is a topological sort of the dependency graph. Among simultaneously ready
+    // tasks the deterministic comparator above still decides, and a cycle (which the app's
+    // DependencyManager prevents from being created) falls back to the comparator order rather
+    // than hanging or dropping work. A predecessor outside the candidates — completed, locked,
+    // no effort — contributes no edge: the placement loop still honours its bound if its blocks
+    // are known, and otherwise says nothing rather than inventing a time.
+    val successorLists = mutableMapOf<String, MutableList<String>>()
+    val indegree = mutableMapOf<String, Int>()
+    val candidateIds = candidates.mapTo(mutableSetOf()) { it.id }
+    dependencies.forEach { dependency ->
+      if (dependency.predecessorId in candidateIds && dependency.successorId in candidateIds) {
+        indegree[dependency.successorId] = (indegree[dependency.successorId] ?: 0) + 1
+        successorLists.getOrPut(dependency.predecessorId) { mutableListOf() } +=
+          dependency.successorId
+      }
+    }
+    val orderedCandidates = mutableListOf<PlanItem>()
+    val remaining = candidates.toMutableList()
+    while (remaining.isNotEmpty()) {
+      val chosenIndex = remaining.indexOfFirst { indegree[it.id] ?: 0 == 0 }
+      if (chosenIndex < 0) {
+        // Cycle: emit the rest in comparator order (remaining is still sorted by it).
+        orderedCandidates += remaining
+        break
+      }
+      val chosen = remaining.removeAt(chosenIndex)
+      orderedCandidates += chosen
+      successorLists[chosen.id].orEmpty().forEach { successor ->
+        indegree[successor] = requireNotNull(indegree[successor]) - 1
+      }
+    }
+
     // Generalized precedence, the same translation CriticalPathEngine uses: every dependency
     // becomes successor-start >= predecessor-anchor + offset. FS anchors on the predecessor's
     // finish, SS on its start; FF and SF subtract the successor's own duration because they
@@ -145,7 +181,7 @@ object AutoPlan {
 
     val proposals = mutableListOf<PlanProposal>()
 
-    candidates.forEach { item ->
+    orderedCandidates.forEach { item ->
       var remaining = requireNotNull(item.effortMinutes) - (scheduledMinutes[item.id] ?: 0)
       var notBefore = listOfNotNull(earliest, item.startConstraint?.let { maxOf(it, earliest) }).max()
       var blockingPhrase: String? = null
