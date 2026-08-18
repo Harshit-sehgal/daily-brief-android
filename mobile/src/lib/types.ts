@@ -182,3 +182,27 @@ export interface SummaryResponse {
   used: number;
   limit: number;
 }
+
+export interface PortfolioBlock {
+  itemId: string;
+  startAt: number;
+  endAt: number;
+}
+
+export interface PortfolioRow {
+  projectId: string;
+  projectName: string;
+  openTasks: number;
+  doneTasks: number;
+  statedEffortMinutes: number;
+  scheduledMinutes: number;
+  overdueTasks: number;
+  unestimatedTasks: number;
+  weekBlocks: PortfolioBlock[];
+}
+
+export interface PortfolioResponse {
+  v: number;
+  rows: PortfolioRow[];
+  note: string;
+}

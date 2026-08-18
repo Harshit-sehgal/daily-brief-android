@@ -288,6 +288,12 @@ in `data`, never the deleted or the foreign token). What remains is the Expo-sid
 wiring — `expo-notifications` is not installed, and installing it means a prebuild this
 machine cannot verify — so that client hook-up is documented as the device-side step.
 
+Shipped 2026-08-18 (mobile week strip): the Planner gains a "This week" portfolio strip —
+one row per project, bars placed across the week by `GET /v1/portfolio` (the same rows,
+`weekBlocks` and note the web client renders), refreshing on focus and after every apply.
+It is a view, not a control: a portfolio failure leaves the board untouched. TypeScript
+and the web export stay green.
+
 The existing Android app continues as the shipping product throughout, and does not block any
 of this.
 

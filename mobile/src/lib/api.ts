@@ -6,6 +6,7 @@ import type {
   Board,
   PlanRun,
   PlanningRequest,
+  PortfolioResponse,
   Project,
   SessionResponse,
   SummaryResponse,
@@ -162,5 +163,9 @@ export const client = {
 
   summary(): Promise<SummaryResponse> {
     return api("/v1/summary", { method: "POST", body: "{}" });
+  },
+
+  portfolio(): Promise<PortfolioResponse> {
+    return api("/v1/portfolio");
   },
 };

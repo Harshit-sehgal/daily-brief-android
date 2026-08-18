@@ -12,9 +12,17 @@ import {
 } from "react-native";
 
 import { client, savedSession } from "@/lib/api";
-import type { Board, PlanRun, PlanningRequest, Project, Task, TodayResponse } from "@/lib/types";
+import type { Board, PlanRun, PlanningRequest, PortfolioResponse, Project, Task, TodayResponse } from "@/lib/types";
 
 const DAY = 86_400_000;
+const WEEK_MS = 7 * DAY;
+
+/** Monday 00:00 UTC of the current week, for the portfolio strip's bar positions. */
+function weekStart(): number {
+  const now = new Date();
+  const daysSinceMonday = (now.getUTCDay() + 6) % 7;
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - daysSinceMonday * DAY;
+}
 
 /** The native engine bridge runs only where a native module exists; on web the server
  *  is the only planner. Lazy require so web bundling never touches the native module. */
@@ -57,6 +65,7 @@ export default function PlannerScreen() {
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
 
   const loadBoard = useCallback(async (projectId: string) => {
     setBoard(await client.board(projectId));
@@ -75,6 +84,12 @@ export default function PlannerScreen() {
       const first = ps.find((p) => p.isDefault)?.id ?? ps[0]?.id ?? null;
       setSelectedId((current) => current && ps.some((p) => p.id === current) ? current : first);
       if (first) await loadBoard(first);
+      // The strip is a view, not a control: a portfolio failure must not blank the board.
+      try {
+        setPortfolio(await client.portfolio());
+      } catch {
+        setPortfolio(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "load failed");
     }
@@ -200,6 +215,11 @@ export default function PlannerScreen() {
       const res = await client.apply(run.runId);
       setEntryId(res.entryId);
       setRun(null);
+      try {
+        setPortfolio(await client.portfolio());
+      } catch {
+        // The strip can stay stale; the undo button already proves the apply landed.
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "apply failed");
     } finally {
@@ -266,6 +286,34 @@ export default function PlannerScreen() {
             );
           })
         : null}
+
+      {portfolio && portfolio.rows.some((r) => r.weekBlocks.length > 0) ? (
+        <View style={styles.portfolio}>
+          <Text style={styles.sectionTitle}>This week</Text>
+          {portfolio.rows
+            .filter((r) => r.weekBlocks.length > 0)
+            .map((r) => (
+              <View key={r.projectId} style={styles.portfolioRow}>
+                <Text numberOfLines={1} style={styles.portfolioLabel}>
+                  {r.projectName}
+                </Text>
+                <View style={styles.portfolioStrip}>
+                  {r.weekBlocks.map((b) => {
+                    const left = ((b.startAt - weekStart()) / WEEK_MS) * 100;
+                    const width = ((b.endAt - b.startAt) / WEEK_MS) * 100;
+                    return (
+                      <View
+                        key={`${b.itemId}-${b.startAt}`}
+                        style={[styles.portfolioBar, { left: `${left}%`, width: `${width}%` }]}
+                      />
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
+          <Text style={styles.portfolioNote}>{portfolio.note}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.addRow}>
         <TextInput
@@ -456,5 +504,28 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
   undoText: { color: "#3c87f7", fontSize: 15, fontWeight: "600" },
+  portfolio: { marginTop: 20, gap: 6 },
+  portfolioRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  portfolioLabel: {
+    width: 84,
+    fontSize: 13,
+    fontWeight: "600",
+    opacity: 0.8,
+  },
+  portfolioStrip: {
+    flex: 1,
+    height: 14,
+    borderRadius: 3,
+    backgroundColor: "#e8e8ee",
+    overflow: "hidden",
+  },
+  portfolioBar: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    borderRadius: 3,
+    backgroundColor: "#3c87f7",
+  },
+  portfolioNote: { fontSize: 12, opacity: 0.6, marginTop: 2 },
   error: { color: "#d93a3a", fontSize: 14, marginTop: 12 },
 });
