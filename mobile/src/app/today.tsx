@@ -3,11 +3,62 @@ import { useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { client, savedSession } from "@/lib/api";
-import type { SummaryResponse, TodayResponse } from "@/lib/types";
+import type { ScheduledBlock, SummaryResponse, TodayResponse } from "@/lib/types";
 
 function formatTime(epochMs: number): string {
   const d = new Date(epochMs);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+const HOUR_DP = 48;
+const DAY_MS = 86_400_000;
+
+function dayStartUtc(date: string): number {
+  const [y, m, d] = date.split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+/** The time spine as a vertical timeline: the day's hours on an axis, events outlined and
+ *  plan blocks filled, both positioned by their wall-clock minutes. A view only — nothing
+ *  here writes. */
+function DayTimeline({ date, events, blocks }: { date: string; events: TodayResponse["events"]; blocks: ScheduledBlock[] }) {
+  const dayStart = dayStartUtc(date);
+  const dayEnd = dayStart + DAY_MS;
+  const height = 24 * HOUR_DP;
+  const topOf = (ms: number) => Math.max(0, Math.min(24 * HOUR_DP, ((ms - dayStart) / DAY_MS) * height));
+  const hourLabels = Array.from({ length: 8 }, (_, i) => i * 3); // 00, 03, …, 21
+  const inDay = (start: number, end: number) => start < dayEnd && end > dayStart;
+  return (
+    <View style={styles.timeline}>
+      {hourLabels.map((h) => (
+        <View key={h} style={[styles.hourLine, { top: h * HOUR_DP }]}>
+          <Text style={styles.hourLabel}>{String(h).padStart(2, "0")}</Text>
+        </View>
+      ))}
+      {events.filter((e) => inDay(e.startTime, e.endTime)).map((e) => {
+        const top = topOf(e.startTime);
+        const h = Math.max(8, topOf(e.endTime) - top);
+        return (
+          <View key={e.id} style={[styles.tlBar, styles.tlEvent, { top, height: h }]}>
+            <Text numberOfLines={1} style={styles.tlEventTitle}>
+              {formatTime(e.startTime)} {e.title}
+            </Text>
+          </View>
+        );
+      })}
+      {blocks.filter((b) => inDay(b.startAt, b.endAt)).map((b) => {
+        const top = topOf(b.startAt);
+        const h = Math.max(8, topOf(b.endAt) - top);
+        return (
+          <View key={b.id} style={[styles.tlBar, styles.tlBlock, { top, height: h }]}>
+            <Text numberOfLines={1} style={styles.tlBlockTitle}>
+              {formatTime(b.startAt)} {b.planItemId}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
 }
 
 export default function TodayScreen() {
@@ -112,6 +163,11 @@ export default function TodayScreen() {
         </View>
       ) : null}
 
+      <Text style={styles.sectionTitle}>Timeline</Text>
+      <ScrollView style={styles.timelineScroll} nestedScrollEnabled>
+        <DayTimeline date={today.date} events={events} blocks={blocks} />
+      </ScrollView>
+
       <Text style={styles.sectionTitle}>Calendar</Text>
       {events.length === 0 ? <Text style={styles.empty}>No events today</Text> : null}
       {events.map((e) => (
@@ -170,6 +226,23 @@ const styles = StyleSheet.create({
   empty: { fontSize: 14, opacity: 0.5, paddingVertical: 6 },
   conflicts: { backgroundColor: "#fdf0f0", borderRadius: 8, padding: 12, marginTop: 8 },
   conflictText: { fontSize: 13, color: "#a03030", marginTop: 2 },
+  timelineScroll: { height: 400, borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e6" },
+  timeline: { height: 24 * HOUR_DP, position: "relative" },
+  hourLine: { position: "absolute", left: 0, right: 0, borderTopWidth: 1, borderTopColor: "#ececf0" },
+  hourLabel: { position: "absolute", top: 2, right: 8, fontSize: 11, opacity: 0.5 },
+  tlBar: {
+    position: "absolute",
+    left: 48,
+    right: 8,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  tlEvent: { borderWidth: 1, borderColor: "#3c87f7", backgroundColor: "#eaf2fe" },
+  tlEventTitle: { fontSize: 12, fontWeight: "600", color: "#1c4f9c" },
+  tlBlock: { backgroundColor: "#3c87f7" },
+  tlBlockTitle: { fontSize: 12, fontWeight: "600", color: "#ffffff" },
   primary: {
     marginTop: 24,
     backgroundColor: "#3c87f7",

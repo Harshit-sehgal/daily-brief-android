@@ -12,7 +12,16 @@ import {
 } from "react-native";
 
 import { client, savedSession } from "@/lib/api";
-import type { Board, PlanRun, PlanningRequest, PortfolioResponse, Project, Task, TodayResponse } from "@/lib/types";
+import type {
+  Board,
+  CapacityResponse,
+  PlanRun,
+  PlanningRequest,
+  PortfolioResponse,
+  Project,
+  Task,
+  TodayResponse,
+} from "@/lib/types";
 
 const DAY = 86_400_000;
 const WEEK_MS = 7 * DAY;
@@ -66,6 +75,9 @@ export default function PlannerScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
+  const [capacityHours, setCapacityHours] = useState("8");
+  const [capacity, setCapacity] = useState<CapacityResponse | null>(null);
+  const [capacityBusy, setCapacityBusy] = useState(false);
 
   const loadBoard = useCallback(async (projectId: string) => {
     setBoard(await client.board(projectId));
@@ -207,6 +219,31 @@ export default function PlannerScreen() {
     }
   }
 
+  /** The capacity question (Stage 4.1): the same plan plus a client load to test. The
+   *  answer is the engine's own verdict — three numbers and one sentence. */
+  async function askCapacity() {
+    if (!session || !board) return;
+    const hours = Math.max(1, Math.min(168, Number(capacityHours) || 8));
+    setCapacityHours(String(hours));
+    setCapacityBusy(true);
+    setError(null);
+    try {
+      let today: TodayResponse;
+      try {
+        today = await client.today();
+      } catch {
+        today = { date: "", events: [], blocks: [], conflicts: [], busyMinutes: 0, freeMinutes: 0 };
+      }
+      const request = planRequest(board.tasks, Date.now());
+      request.fixedCommitments = today.events.map((e) => ({ startAt: e.startTime, endAt: e.endTime }));
+      setCapacity(await client.capacity(request, hours));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "capacity failed");
+    } finally {
+      setCapacityBusy(false);
+    }
+  }
+
   async function apply() {
     if (!run || isPreview) return;
     setBusy(true);
@@ -287,7 +324,7 @@ export default function PlannerScreen() {
           })
         : null}
 
-      {portfolio && portfolio.rows.some((r) => r.weekBlocks.length > 0) ? (
+      {portfolio ? (
         <View style={styles.portfolio}>
           <Text style={styles.sectionTitle}>This week</Text>
           {portfolio.rows
@@ -313,6 +350,14 @@ export default function PlannerScreen() {
             ))}
           <Text style={styles.portfolioNote}>{portfolio.note}</Text>
         </View>
+      ) : null}
+
+      {portfolio && board ? (
+        <WeekGantt
+          tasks={board.tasks}
+          blocks={portfolio.rows.find((r) => r.projectId === selectedId)?.weekBlocks ?? []}
+          projectName={portfolio.rows.find((r) => r.projectId === selectedId)?.projectName ?? "This project"}
+        />
       ) : null}
 
       <View style={styles.addRow}>
@@ -389,14 +434,104 @@ export default function PlannerScreen() {
         </Pressable>
       ) : null}
 
+      <View style={styles.capacity}>
+        <Text style={styles.sectionTitle}>Can I take another client?</Text>
+        <View style={styles.capacityRow}>
+          <TextInput
+            style={styles.capacityInput}
+            value={capacityHours}
+            onChangeText={setCapacityHours}
+            keyboardType="number-pad"
+            accessibilityLabel="New client hours per week"
+          />
+          <Text style={styles.capacityHint}>hours/week</Text>
+          <Pressable
+            style={styles.capacityButton}
+            onPress={askCapacity}
+            disabled={capacityBusy || (board?.tasks.length ?? 0) === 0}
+          >
+            <Text style={styles.capacityButtonText}>{capacityBusy ? "Checking…" : "Check"}</Text>
+          </Pressable>
+        </View>
+        {capacity ? (
+          <View style={styles.capacityResult}>
+            <Text style={styles.capacitySentence}>{capacity.sentence}</Text>
+            <Text style={styles.capacityNumbers}>
+              {fmtHours(capacity.availableMinutes)} available · {fmtHours(capacity.plannedMinutes)} planned ·{" "}
+              {fmtHours(capacity.spareMinutes)} spare
+            </Text>
+            {capacity.moves.length > 0 ? (
+              <View style={styles.capacityMoves}>
+                {capacity.moves.map((m) => (
+                  <Text key={m.itemId} style={styles.capacityMove}>
+                    {m.title}: {m.unscheduledMinutes}m would move
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
+  );
+}
+
+/** A week Gantt for the selected project: one row per task, bars placed across the week by
+ *  the portfolio's weekBlocks, joined to task titles from the board. A view only — nothing
+ *  here writes; a portfolio failure leaves it absent. */
+function WeekGantt({ tasks, blocks, projectName }: { tasks: Task[]; blocks: PortfolioResponse["rows"][number]["weekBlocks"]; projectName: string }) {
+  const weekLabels = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+  const byTask = new Map<string, typeof blocks>();
+  for (const b of blocks) {
+    const list = byTask.get(b.itemId) ?? [];
+    list.push(b);
+    byTask.set(b.itemId, list);
+  }
+  const rows = tasks.filter((t) => byTask.has(t.id));
+  if (rows.length === 0) return null;
+  return (
+    <View style={styles.gantt}>
+      <Text style={styles.ganttTitle}>{projectName} — this week</Text>
+      <View style={styles.ganttHeader}>
+        {weekLabels.map((d, i) => (
+          <Text key={d} style={[styles.ganttDay, { left: `${(i / 7) * 100}%` }]}>
+            {d}
+          </Text>
+        ))}
+      </View>
+      {rows.map((t) => (
+        <View key={t.id} style={styles.ganttRow}>
+          <Text numberOfLines={1} style={styles.ganttTask}>
+            {t.title}
+          </Text>
+          <View style={styles.ganttTrack}>
+            {byTask.get(t.id)!.map((b) => {
+              const left = ((b.startAt - weekStart()) / WEEK_MS) * 100;
+              const width = ((b.endAt - b.startAt) / WEEK_MS) * 100;
+              return (
+                <View
+                  key={`${b.itemId}-${b.startAt}`}
+                  style={[styles.ganttBar, { left: `${left}%`, width: `${width}%` }]}
+                />
+              );
+            })}
+          </View>
+        </View>
+      ))}
+    </View>
   );
 }
 
 function formatTime(epochMs: number): string {
   const d = new Date(epochMs);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function fmtHours(minutes: number): string {
+  const h = Math.round(minutes / 60);
+  return `${h}h`;
 }
 
 const styles = StyleSheet.create({
@@ -527,5 +662,42 @@ const styles = StyleSheet.create({
     backgroundColor: "#3c87f7",
   },
   portfolioNote: { fontSize: 12, opacity: 0.6, marginTop: 2 },
+  gantt: { marginTop: 20, gap: 4 },
+  ganttTitle: { fontSize: 13, fontWeight: "700", opacity: 0.6, marginBottom: 2 },
+  ganttHeader: { height: 16, position: "relative" },
+  ganttDay: { position: "absolute", fontSize: 10, opacity: 0.5 },
+  ganttRow: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 28 },
+  ganttTask: { width: 84, fontSize: 12, opacity: 0.8, fontWeight: "500" },
+  ganttTrack: { flex: 1, height: 12, borderRadius: 3, backgroundColor: "#e8e8ee", overflow: "hidden" },
+  ganttBar: { position: "absolute", top: 0, bottom: 0, borderRadius: 3, backgroundColor: "#3c87f7" },
+  capacity: { marginTop: 24, gap: 6 },
+  capacityRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  capacityInput: {
+    borderWidth: 1,
+    borderColor: "#c8c8d0",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    minWidth: 72,
+    minHeight: 48,
+    textAlign: "center",
+  },
+  capacityHint: { fontSize: 13, opacity: 0.6 },
+  capacityButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#3c87f7",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    minHeight: 48,
+  },
+  capacityButtonText: { color: "#3c87f7", fontSize: 15, fontWeight: "600" },
+  capacityResult: { marginTop: 8, gap: 4 },
+  capacitySentence: { fontSize: 15, fontWeight: "600" },
+  capacityNumbers: { fontSize: 13, opacity: 0.7 },
+  capacityMoves: { marginTop: 4, gap: 2 },
+  capacityMove: { fontSize: 13, opacity: 0.7 },
   error: { color: "#d93a3a", fontSize: 14, marginTop: 12 },
 });

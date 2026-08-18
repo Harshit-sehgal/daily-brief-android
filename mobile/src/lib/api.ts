@@ -4,6 +4,7 @@ import * as SecureStore from "expo-secure-store";
 import type {
   ApplyResponse,
   Board,
+  CapacityResponse,
   PlanRun,
   PlanningRequest,
   PortfolioResponse,
@@ -145,6 +146,13 @@ export const client = {
     return api("/v1/plan", { method: "POST", body: JSON.stringify(request) });
   },
 
+  capacity(plan: PlanningRequest, newClientHoursPerWeek: number): Promise<CapacityResponse> {
+    return api("/v1/capacity", {
+      method: "POST",
+      body: JSON.stringify({ v: 1, plan, newClientHoursPerWeek }),
+    });
+  },
+
   apply(runId: string): Promise<ApplyResponse> {
     return api(`/v1/plan/${runId}/apply`, { method: "POST" });
   },
@@ -167,5 +175,13 @@ export const client = {
 
   portfolio(): Promise<PortfolioResponse> {
     return api("/v1/portfolio");
+  },
+
+  registerDevice(token: string): Promise<{ ok: boolean }> {
+    return api("/v1/devices", { method: "POST", body: JSON.stringify({ token, platform: "expo" }) });
+  },
+
+  unregisterDevice(token: string): Promise<{ ok: boolean }> {
+    return api("/v1/devices", { method: "DELETE", body: JSON.stringify({ token, platform: "expo" }) });
   },
 };

@@ -14,6 +14,16 @@ authoritative for Apply, and the local engine (`modules/planner-engine`) powers 
   with reasons, Apply, and Undo. Mirrors the web client's planner.
 - **Settings** — the server URL shown to the user, session reset.
 
+## Push
+
+`expo-notifications` (installed, in the Android prebuild) mints the install's push token
+at app start once a session exists, registers it with the server (`POST /v1/devices`), and
+deregisters it at sign-out (`DELETE /v1/devices`). The server half — the tenant-bound
+registry, the provider seam, and the Apply trigger — shipped 2026-08-18. The client
+half shipped 2026-08-19. Delivery on Android needs the release APK from the prebuild (the
+managed-dev workflow does not run native modules); the journey proves the wire shape at
+`/v1/fixture/push-deliveries`.
+
 ## API base
 
 Android emulators reach the host at `http://10.0.2.2:8090`; iOS simulators and web use
@@ -51,16 +61,21 @@ no minor API levels — so the Android build needs:
 
 1. **`scripts/publish-engine-local.sh --mobile`** first, to publish the planning AARs
    compiled at `compileSdk 36` to `~/.m2/repository`.
-2. `mobile/android/gradle.properties`: `kotlinVersion=2.3.20`. The engine AARs are
+2. `mobile/android/local.properties`: `sdk.dir=/home/harshit/.local/android-toolchain/android-sdk`
+   (the prebuild drops it; without it Gradle cannot find the SDK).
+3. `mobile/android/gradle.properties`: `kotlinVersion=2.3.20`. The engine AARs are
    compiled with Kotlin 2.4.10 (metadata 2.4.0); a compiler reads metadata up to one minor
    version ahead, and the Expo toolchain's pika plugin caps at 2.3.20. RN 0.86 itself
    pins Kotlin 2.1.20 + AGP 8.12.0.
-3. `mobile/android/build.gradle`:
+4. `mobile/android/build.gradle`:
    - buildscript classpath `org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.20`;
    - `ext.compileSdkVersion = 36` **before** `apply plugin: "expo-root-project"` (an Int —
      a gradle.properties value arrives as a String and AGP 8.12 fails with
      "Value is null");
    - `mavenLocal()` in the `allprojects` repositories block.
+
+Any new native dependency (e.g. `expo-notifications`' `installreferrer`) needs one online
+Gradle run to fill the offline cache; `--offline` holds afterwards.
 
 Build: `./gradlew :app:assembleRelease` (with `JAVA_HOME` set to the pinned toolchain).
 

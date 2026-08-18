@@ -1,12 +1,24 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { useEffect } from "react";
 import { useColorScheme } from "react-native";
+
+import { savedSession } from "@/lib/api";
+import { installNotificationHandler, registerPushToken } from "@/lib/push";
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  useEffect(() => {
+    installNotificationHandler();
+    // Register the install's push token once a session exists; failures are silent — a
+    // push registry problem must never block the app's ordinary start.
+    savedSession().then((session) => {
+      if (session) registerPushToken();
+    });
+  }, []);
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
       <Stack

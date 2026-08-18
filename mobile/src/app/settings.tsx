@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { API_BASE, clearSession, savedSession } from "@/lib/api";
+import { unregisterPushToken } from "@/lib/push";
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -20,6 +21,9 @@ export default function SettingsScreen() {
   }, [router]);
 
   async function signOut() {
+    // Leave the tenant's device registry before the session dies: the workspace must stop
+    // ringing this phone. A failure here is safe — the token is upserted, not trusted.
+    await unregisterPushToken();
     await clearSession();
     router.replace("/");
   }

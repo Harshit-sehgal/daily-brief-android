@@ -206,3 +206,19 @@ export interface PortfolioResponse {
   rows: PortfolioRow[];
   note: string;
 }
+
+export interface CapacityMove {
+  itemId: string;
+  title: string;
+  unscheduledMinutes: number;
+}
+
+export interface CapacityResponse {
+  v: number;
+  availableMinutes: number;
+  plannedMinutes: number;
+  spareMinutes: number;
+  verdict: string;
+  sentence: string;
+  moves: CapacityMove[];
+}
