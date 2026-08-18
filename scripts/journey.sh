@@ -105,6 +105,10 @@ step "2b. projects + board   (+$(( $(start_ms) - T )) ms)"
 
 T=$(start_ms)
 api POST /v1/reconcile - /tmp/opencode/journey-reconcile.json
+# WP-14: the sync ledger records the run and the fixture events it merged.
+api GET /v1/fixture/sync-runs - /tmp/opencode/journey-sync-runs.json
+jq -e '.[0].status == "ok" and .[0].eventsSeen >= 2 and .[0].durationMs >= 0' /tmp/opencode/journey-sync-runs.json >/dev/null \
+  || fail "sync ledger missing the committed reconcile: $(jq -c . /tmp/opencode/journey-sync-runs.json)"
 step "3. connect calendar   (+$(( $(start_ms) - T )) ms)"
 
 # ── Plan: the request composes the calendar's busy time into fixedCommitments, exactly as

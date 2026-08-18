@@ -1020,6 +1020,31 @@ fun Application.routes(config: Config) {
             )
           }
         }
+
+        // Fixture-only: the WP-14 sync ledger, so the journey can prove a reconcile ran and
+        // committed. The ledger itself is written in every mode; only this read is fixture-only.
+        if (config.fixtureProvider) {
+          get("/fixture/sync-runs") {
+            val session = sessions.require(call)
+            val runs =
+              Db.dataSource.connection.use { conn ->
+                conn.query(
+                  "SELECT id, started_at, finished_at, duration_ms, events_seen, status FROM sync_runs WHERE workspace_id = ? ORDER BY started_at DESC",
+                  listOf(session.workspaceId),
+                ) { rs ->
+                  SyncRunRow(
+                    id = rs.getString("id"),
+                    startedAt = rs.getLong("started_at"),
+                    finishedAt = rs.getLong("finished_at"),
+                    durationMs = rs.getLong("duration_ms"),
+                    eventsSeen = rs.getInt("events_seen"),
+                    status = rs.getString("status"),
+                  )
+                }
+              }
+            call.respond(runs)
+          }
+        }
       }
     }
   }
@@ -1033,6 +1058,17 @@ private class QuotaExceeded(val used: Long, val limit: Int) : Exception()
 private data class DeviceRequest(
   val token: String = "",
   val platform: String? = null,
+)
+
+/** One row of the WP-14 sync ledger, as the fixture read returns it. */
+@Serializable
+private data class SyncRunRow(
+  val id: String,
+  val startedAt: Long,
+  val finishedAt: Long,
+  val durationMs: Long,
+  val eventsSeen: Int,
+  val status: String,
 )
 
 @Serializable
@@ -1210,12 +1246,39 @@ fun providerFor(config: Config, workspaceId: String): com.example.server.google.
         listOf(workspaceId),
       ) { rs -> rs.getString("id") to rs.getString("token_ciphertext") }
     } ?: error("no connected calendar for workspace $workspaceId")
-  val stored = Envelope.unwrap(KeyProviders.from(config), workspaceId, "calendar_connection_${connection.first}", connection.second)
+  val connectionId = connection.first
+  val stored = Envelope.unwrap(KeyProviders.from(config), workspaceId, "calendar_connection_$connectionId", connection.second)
     ?: error("could not unwrap the stored token for workspace $workspaceId")
   val token = GoogleOAuth.json.decodeFromString<GoogleOAuth.TokenResponse>(stored)
-  // The slice does not refresh: a short-lived access token expires during a long demo, and
-  // the runbook says so. Refresh handling is WP-14 hardening.
-  return GoogleCalendarProvider(config, connection.first, token.access_token)
+  // Refresh is WP-14 hardening: Google access tokens live ~1 hour. When a fetch is refused
+  // with 401/403, the provider refreshes once through the OAuth endpoint, persists the fresh
+  // pair back through the envelope, and retries — so a long demo never needs a re-consent.
+  val storedRefreshToken = token.refresh_token
+  val refresher =
+    storedRefreshToken?.let { refreshToken ->
+      {
+        GoogleOAuth.refreshAccessToken(config, refreshToken)
+      }
+    }
+  return GoogleCalendarProvider(
+    config,
+    connectionId,
+    token.access_token,
+    refresher = refresher,
+    onTokensRefreshed = { fresh ->
+      // A refresh response may or may not rotate the refresh token; keep the stored one when
+      // it does not. The envelope authority is the current KeyProvider, like storeToken.
+      val pair = fresh.copy(refresh_token = fresh.refresh_token ?: storedRefreshToken)
+      val keyProvider = KeyProviders.from(config)
+      val envelope = Envelope.wrap(keyProvider, workspaceId, "calendar_connection_$connectionId", GoogleOAuth.json.encodeToString(pair))
+      Db.dataSource.connection.use { conn ->
+        conn.execute(
+          "UPDATE calendar_connections SET token_ciphertext = ?, token_kms_key_id = ?, updated_at = ? WHERE workspace_id = ? AND id = ?",
+          listOf(envelope, keyProvider.keyId, System.currentTimeMillis(), workspaceId, connectionId),
+        )
+      }
+    },
+  )
 }
 
 object PlanStore {

@@ -86,31 +86,61 @@ class FixtureCalendarProvider(
 
 /**
  * Google Calendar API. OAuth lives in the web client's consent flow; this side only ever
- * holds server-side tokens, stored envelope-encrypted in `calendar_connections`.
+ * holds server-side tokens, stored envelope-encrypted in `calendar_connections`. An expired
+ * access token (Google's live ~1 hour) is refreshed once through the OAuth token endpoint
+ * before the fetch is retried, and the fresh pair is persisted back through the envelope —
+ * so a long-running demo never needs a re-consent. [baseUrl] and the refresh callbacks are
+ * injectable so the retry contract is unit-tested against a local HTTP server.
  */
 class GoogleCalendarProvider(
   private val config: Config,
   private val connectionId: String,
-  private val accessToken: String,
+  accessToken: String,
+  private val baseUrl: String = "https://www.googleapis.com",
+  private val refresher: (() -> GoogleOAuth.TokenResponse)? = null,
+  private val onTokensRefreshed: ((GoogleOAuth.TokenResponse) -> Unit)? = null,
 ) : CalendarProvider {
+  private var currentAccessToken = accessToken
   private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
   private val json = Json { ignoreUnknownKeys = true }
 
   override fun name(): String = "Google Calendar"
 
   override fun fetchEvents(startMs: Long, endMs: Long): List<BriefingEvent> {
+    val first = fetchWithToken(currentAccessToken, startMs, endMs)
+    if ((first.first == 401 || first.first == 403) && refresher != null) {
+      // The stored pair expired or was revoked. Refresh exactly once, persist, retry once.
+      // A second 401 means the refresh itself was refused — propagate, never loop.
+      val fresh = refresher()
+      currentAccessToken = fresh.access_token
+      onTokensRefreshed?.invoke(fresh)
+      val retried = fetchWithToken(currentAccessToken, startMs, endMs)
+      if (retried.first == 401 || retried.first == 403) {
+        error("calendar fetch failed after token refresh: ${retried.first}")
+      }
+      return parseEvents(retried)
+    }
+    if (first.first == 401 || first.first == 403) {
+      error("calendar fetch failed: ${first.first}")
+    }
+    return parseEvents(first)
+  }
+
+  private fun fetchWithToken(token: String, startMs: Long, endMs: Long): Pair<Int, String?> {
     val calendarId = config.googleCalendarId ?: "primary"
     val url =
-      "https://www.googleapis.com/calendar/v3/calendars/${calendarId.encodeURL()}/events" +
+      "$baseUrl/calendar/v3/calendars/${calendarId.encodeURL()}/events" +
         "?timeMin=${iso(startMs)}&timeMax=${iso(endMs)}&singleEvents=true&orderBy=startTime"
-    val request =
-      Request.Builder().url(url).header("Authorization", "Bearer $accessToken").build()
+    val request = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
     client.newCall(request).execute().use { response ->
-      if (!response.isSuccessful) error("calendar fetch failed: ${response.code}")
-      val body = response.body?.string() ?: return emptyList()
-      val parsed = json.decodeFromString<CalendarList>(body)
-      return parsed.items.map { it.toEvent() }
+      return response.code to response.body?.string()
     }
+  }
+
+  private fun parseEvents(attempt: Pair<Int, String?>): List<BriefingEvent> {
+    val body = attempt.second ?: return emptyList()
+    val parsed = json.decodeFromString<CalendarList>(body)
+    return parsed.items.map { it.toEvent() }
   }
 
   override fun providerIdOf(event: BriefingEvent): Long? = null
@@ -216,6 +246,24 @@ object GoogleOAuth {
           "VALUES (?, ?, ?, ?, ?, ?, 'connected', ?, ?)",
         listOf(connectionId, workspaceId, provider, account, envelope, keyProvider.keyId, System.currentTimeMillis(), System.currentTimeMillis()),
       )
+    }
+  }
+
+  /** Exchanges a stored refresh token for a fresh access-token pair (grant_type=refresh_token). */
+  fun refreshAccessToken(config: Config, refreshToken: String): TokenResponse {
+    val body =
+      "refresh_token=${refreshToken.encodeURL()}" +
+        "&client_id=${config.googleClientId!!.encodeURL()}" +
+        "&client_secret=${config.googleClientSecret!!.encodeURL()}" +
+        "&grant_type=refresh_token"
+    val request =
+      Request.Builder()
+        .url("https://oauth2.googleapis.com/token")
+        .post(body.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
+        .build()
+    client.newCall(request).execute().use { response ->
+      if (!response.isSuccessful) error("token refresh failed: ${response.code}")
+      return json.decodeFromString(response.body!!.string())
     }
   }
 }
