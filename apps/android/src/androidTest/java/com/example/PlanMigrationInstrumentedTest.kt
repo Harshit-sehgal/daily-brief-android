@@ -3,12 +3,14 @@ package com.example
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
+import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.data.database.AppDatabase
 import com.example.data.database.PlanMigrations
+import com.example.data.database.installNonArchivedDefaultScheduleIndex
 import com.example.data.prefs.SettingKeys
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -105,13 +107,14 @@ class PlanMigrationInstrumentedTest {
           PlanMigrations.MIGRATION_6_7,
           PlanMigrations.MIGRATION_7_8,
           PlanMigrations.MIGRATION_8_9,
+          PlanMigrations.MIGRATION_9_10,
         )
         .build()
     val migrated = room.openHelper.writableDatabase
 
     migrated.query("PRAGMA user_version").use { cursor ->
       assertTrue(cursor.moveToFirst())
-      assertEquals(9, cursor.getInt(0))
+      assertEquals(10, cursor.getInt(0))
     }
     migrated.query("SELECT * FROM briefing_events WHERE id = 'provider_42'").use { cursor ->
       assertTrue(cursor.moveToFirst())
@@ -224,13 +227,14 @@ class PlanMigrationInstrumentedTest {
           migrateSeededV6,
           PlanMigrations.MIGRATION_7_8,
           PlanMigrations.MIGRATION_8_9,
+          PlanMigrations.MIGRATION_9_10,
         )
         .build()
     val migrated = room.openHelper.writableDatabase
 
     migrated.query("PRAGMA user_version").use { cursor ->
       assertTrue(cursor.moveToFirst())
-      assertEquals(9, cursor.getInt(0))
+      assertEquals(10, cursor.getInt(0))
     }
     migrated.query(
         "SELECT title, notes, columnId, parentId, dueAt, effortMinutes " +
@@ -315,13 +319,14 @@ class PlanMigrationInstrumentedTest {
           migrateSeededV6,
           PlanMigrations.MIGRATION_7_8,
           PlanMigrations.MIGRATION_8_9,
+          PlanMigrations.MIGRATION_9_10,
         )
         .build()
     val migrated = room.openHelper.writableDatabase
 
     migrated.query("PRAGMA user_version").use { cursor ->
       assertTrue(cursor.moveToFirst())
-      assertEquals(9, cursor.getInt(0))
+      assertEquals(10, cursor.getInt(0))
     }
     listOf(
         "v6_board" to "plan_boards",
@@ -412,13 +417,14 @@ class PlanMigrationInstrumentedTest {
           migrateSeededV6,
           PlanMigrations.MIGRATION_7_8,
           seedAtV8,
+          PlanMigrations.MIGRATION_9_10,
         )
         .build()
     val migrated = room.openHelper.writableDatabase
 
     migrated.query("PRAGMA user_version").use { cursor ->
       assertTrue(cursor.moveToFirst())
-      assertEquals(9, cursor.getInt(0))
+      assertEquals(10, cursor.getInt(0))
     }
     // The real baseline came through the rebuild with its payload intact.
     migrated.query("SELECT boardId, itemsJson, blocksJson FROM plan_baselines WHERE id = 'kept'")
@@ -668,6 +674,13 @@ class PlanMigrationInstrumentedTest {
       assertEquals(10, cursor.getInt(0))
     }
 
+    // The fixture catalog is empty, so the board the saved views hang off has to exist for the
+    // FK to accept the rows the constraint tests insert.
+    migrated.execSQL(
+      "INSERT INTO plan_boards (id,name,nameKey,rank,isDefault,archivedAt,createdAt,updatedAt) " +
+        "VALUES ('b1','Board','board',0,0,NULL,0,0)"
+    )
+
     // One saved view per (boardId, surface, nameKey): the first insert fits, a duplicate name
     // on the same board+surface is refused by the database itself.
     migrated.execSQL(
@@ -691,25 +704,44 @@ class PlanMigrationInstrumentedTest {
     )
 
     // At most one non-archived default: a second default is refused; an archived default is a
-    // different kind of row and stays legal.
-    migrated.execSQL(
+    // different kind of row and stays legal. The work_schedules half of this constraint cannot
+    // ride the migration — Room's schema has no way to express a partial index, so the exported
+    // v10 schema (what Room validates against) carries the saved_views index only. The partial
+    // index lands in AppDatabase's onCreate callback for fresh installs instead; prove the
+    // fresh-install path here, since the application-layer guard is the primary enforcement for
+    // upgraded installs either way.
+    room.close()
+    context.deleteDatabase(databaseName)
+    val fresh =
+      Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+        .addCallback(
+          object : RoomDatabase.Callback() {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+              super.onCreate(db)
+              installNonArchivedDefaultScheduleIndex(db)
+            }
+          },
+        )
+        .build()
+    val freshDb = fresh.openHelper.writableDatabase
+    freshDb.execSQL(
       "INSERT INTO work_schedules (id,name,nameKey,timeZoneId,isDefault,minimumChunkMinutes," +
         "maximumChunkMinutes,bufferMinutes,rank,createdAt,updatedAt) " +
         "VALUES ('s1','Default','default','UTC',1,30,120,0,0,0,0)"
     )
     assertFailsWithConstraint {
-      migrated.execSQL(
+      freshDb.execSQL(
         "INSERT INTO work_schedules (id,name,nameKey,timeZoneId,isDefault,minimumChunkMinutes," +
           "maximumChunkMinutes,bufferMinutes,rank,createdAt,updatedAt) " +
           "VALUES ('s2','Second','second','UTC',1,30,120,0,1,0,0)"
       )
     }
-    migrated.execSQL(
+    freshDb.execSQL(
       "INSERT INTO work_schedules (id,name,nameKey,timeZoneId,isDefault,minimumChunkMinutes," +
-        "maximumChunkMinutes,bufferMinutes,rank,createdAt,updatedAt) " +
-        "VALUES ('s3','Archived default','archived default','UTC',1,30,120,0,2,0,100)"
+        "maximumChunkMinutes,bufferMinutes,rank,archivedAt,createdAt,updatedAt) " +
+        "VALUES ('s3','Archived default','archived default','UTC',1,30,120,0,2,100,0,0)"
     )
-    room.close()
+    fresh.close()
   }
 
   private fun assertFailsWithConstraint(block: () -> Unit) {

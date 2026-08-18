@@ -26,6 +26,19 @@ import com.example.data.model.WorkSchedule
 import com.example.data.model.WorkScheduleWindow
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * The one place the "one non-archived default working schedule" partial index is created:
+ * Room's schema has no way to express a WHERE clause, so it cannot ride a migration or the
+ * exported schema; the app registers it in its onCreate callback for fresh installs, and
+ * tests register the same helper so the fresh-install path is pinned where migrations are.
+ */
+fun installNonArchivedDefaultScheduleIndex(db: SupportSQLiteDatabase) {
+  db.execSQL(
+    "CREATE UNIQUE INDEX IF NOT EXISTS index_work_schedules_one_non_archived_default " +
+      "ON work_schedules (isDefault) WHERE isDefault = 1 AND archivedAt IS NULL"
+  )
+}
+
 @Dao
 interface EventDao {
   /**
@@ -228,15 +241,13 @@ abstract class AppDatabase : RoomDatabase() {
               )
               // Room cannot express partial indexes, so the "one non-archived default
               // schedule" constraint rides the onCreate callback for fresh installs;
-              // upgrades get it from MIGRATION_9_10. Idempotent either way.
+              // upgraded installs keep the application-layer guard, which is the primary
+              // enforcement everywhere. Idempotent either way.
               .addCallback(
                 object : RoomDatabase.Callback() {
                   override fun onCreate(db: SupportSQLiteDatabase) {
                     super.onCreate(db)
-                    db.execSQL(
-                      "CREATE UNIQUE INDEX IF NOT EXISTS index_work_schedules_one_non_archived_default " +
-                        "ON work_schedules (isDefault) WHERE isDefault = 1 AND archivedAt IS NULL"
-                    )
+                    installNonArchivedDefaultScheduleIndex(db)
                   }
                 },
               )

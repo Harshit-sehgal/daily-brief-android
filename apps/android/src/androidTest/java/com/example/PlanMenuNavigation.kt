@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 
 /**
  * How a journey reaches the Plan's secondary commands.
@@ -42,7 +43,7 @@ object PlanMenu {
 
   fun AndroidComposeTestRule<*, *>.openManageViews() {
     openViewOptions()
-    onNodeWithTag("plan_manage_views").performClick()
+    onNodeWithTag("plan_manage_views").performScrollTo().performClick()
     waitUntilExactlyOneExists(hasTestTag("plan_manage_views_dialog"), timeoutMillis = 10_000)
   }
 
@@ -75,6 +76,6 @@ object PlanMenu {
   /** Saving the current view is a View options command, like everything else about presentation. */
   fun AndroidComposeTestRule<*, *>.startSavingView() {
     openViewOptions()
-    onNodeWithTag("save_plan_view").performClick()
+    onNodeWithTag("save_plan_view").performScrollTo().performClick()
   }
 }

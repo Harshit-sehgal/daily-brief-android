@@ -98,7 +98,7 @@ class PlanViewDepthJourneyInstrumentedTest {
 
     // Hide finished work.
     composeRule.openViewOptions()
-    composeRule.onNodeWithTag("outline_hide_completed").performClick()
+    composeRule.onNodeWithTag("outline_hide_completed").performScrollTo().performClick()
     composeRule.closeViewOptions()
     waitUntilGone(doneTitle)
 

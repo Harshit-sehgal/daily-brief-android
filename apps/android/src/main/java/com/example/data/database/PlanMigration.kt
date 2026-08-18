@@ -65,9 +65,11 @@ object PlanMigrations {
    * and at most one non-archived default working schedule. Indexes are additive, so the
    * migration is a pair of CREATE INDEX statements — no rebuild, no copy, no data risk.
    *
-   * Room cannot express partial indexes, so the work_schedules one also lands in an onCreate
-   * callback for fresh installs (see AppDatabase); the exported schema models the
-   * saved_views index natively.
+   * Room cannot express partial indexes, so only the saved_views index can ride the schema;
+   * the work_schedules one is created for fresh installs in AppDatabase's onCreate callback
+   * (see AppDatabase) while upgraded installs keep the application-layer guard, which remains
+   * the primary enforcement everywhere. The exported schema models exactly what this migration
+   * produces, which is what Room validates against on open.
    */
   val MIGRATION_9_10: Migration =
     object : Migration(9, 10) {
@@ -75,10 +77,6 @@ object PlanMigrations {
         db.execSQL(
           "CREATE UNIQUE INDEX IF NOT EXISTS `index_saved_views_boardId_surface_nameKey` " +
             "ON `saved_views` (`boardId`, `surface`, `nameKey`)"
-        )
-        db.execSQL(
-          "CREATE UNIQUE INDEX IF NOT EXISTS index_work_schedules_one_non_archived_default " +
-            "ON work_schedules (isDefault) WHERE isDefault = 1 AND archivedAt IS NULL"
         )
       }
     }

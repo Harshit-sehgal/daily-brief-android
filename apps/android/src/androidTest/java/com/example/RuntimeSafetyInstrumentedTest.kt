@@ -22,7 +22,7 @@ class RuntimeSafetyInstrumentedTest {
 
     database.query("PRAGMA user_version").use { cursor ->
       assertTrue(cursor.moveToFirst())
-      assertEquals(9, cursor.getInt(0))
+      assertEquals(10, cursor.getInt(0))
     }
 
     val columns = mutableSetOf<String>()

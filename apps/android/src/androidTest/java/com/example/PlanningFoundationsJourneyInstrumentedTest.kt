@@ -128,7 +128,7 @@ class PlanningFoundationsJourneyInstrumentedTest {
       composeRule.onNodeWithText("Outline").performClick()
       waitUntilDisplayed("screen_plan_outline")
       composeRule.openViewOptions()
-      composeRule.onNodeWithText(viewName, substring = true).performClick()
+      composeRule.onNodeWithText(viewName, substring = true).performScrollTo().performClick()
       waitUntilDisplayed("screen_gantt")
       composeRule.onNodeWithTag("gantt_range_90").assertIsSelected()
 
