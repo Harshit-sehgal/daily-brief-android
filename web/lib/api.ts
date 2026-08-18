@@ -13,6 +13,7 @@ import type {
   ScenarioOrdering,
   ScenarioResponse,
   SessionResponse,
+  SummaryResponse,
   Task,
   TodayResponse,
 } from "./types";
@@ -132,6 +133,10 @@ export const client = {
 
   checkout(): Promise<{ url: string }> {
     return api("/v1/billing/checkout", { method: "POST", body: "{}" });
+  },
+
+  summary(): Promise<SummaryResponse> {
+    return api("/v1/summary", { method: "POST", body: "{}" });
   },
 
   reconcile(): Promise<{ ok: boolean }> {

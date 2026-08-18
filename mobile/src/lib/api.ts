@@ -3,9 +3,12 @@ import * as SecureStore from "expo-secure-store";
 
 import type {
   ApplyResponse,
+  Board,
   PlanRun,
   PlanningRequest,
+  Project,
   SessionResponse,
+  SummaryResponse,
   Task,
   TodayResponse,
 } from "./types";
@@ -121,6 +124,18 @@ export const client = {
     return api("/v1/tasks");
   },
 
+  listProjects(): Promise<Project[]> {
+    return api("/v1/projects");
+  },
+
+  board(projectId: string): Promise<Board> {
+    return api(`/v1/projects/${projectId}`);
+  },
+
+  addProjectTask(projectId: string, task: Task): Promise<{ ok: boolean }> {
+    return api(`/v1/projects/${projectId}/tasks`, { method: "POST", body: JSON.stringify(task) });
+  },
+
   reconcile(): Promise<{ ok: boolean }> {
     return api("/v1/reconcile", { method: "POST" });
   },
@@ -143,5 +158,9 @@ export const client = {
 
   today(): Promise<TodayResponse> {
     return api("/v1/today");
+  },
+
+  summary(): Promise<SummaryResponse> {
+    return api("/v1/summary", { method: "POST", body: "{}" });
   },
 };

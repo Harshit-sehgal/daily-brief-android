@@ -240,6 +240,22 @@ Remaining in this stage: Projects/Board/Timeline, Gantt, alarms, Gemini summarie
 offline-first (local preview already exists), and the iOS side (XCFramework build is
 written and unverified on this Linux machine).
 
+Shipped 2026-08-18 (mobile depth): Projects/Board in the mobile Planner (project chips,
+tasks grouped by the board's stages, adds landing in the selected project), the offline
+preview fallback wired into "Plan my week" — when the server is unreachable the same
+request runs through the native `previewPlan` bridge (same Mapping, same engine; the
+proposal is labelled "offline preview" and Apply is hidden because the server stays
+authoritative), and the Daily brief as a server-side, quota-managed surface: `POST
+/v1/summary` behind a `SummaryProvider` seam (fixture mode for the journey, plain REST to
+Gemini's generateContent when `GEMINI_API_KEY` is set, 501 without one), the
+`gemini_usage` ledger (V5) with reserve-then-refuse in the request transaction and a
+refund when the provider fails, and quota shown next to the brief in both clients ("2 of
+3 used this month"). The journey's step 10 burns the fixture limit and watches the fourth
+request come back 429, then proves a second workspace's ledger is its own. **Alarms stay
+with the Android app** — it continues as the shipping product, and server-side push for
+the Expo client is post-V1 (needs a device-verifiable delivery path this machine cannot
+exercise).
+
 The existing Android app continues as the shipping product throughout, and does not block any
 of this.
 

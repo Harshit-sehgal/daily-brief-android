@@ -3,7 +3,7 @@ import { useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { client, savedSession } from "@/lib/api";
-import type { TodayResponse } from "@/lib/types";
+import type { SummaryResponse, TodayResponse } from "@/lib/types";
 
 function formatTime(epochMs: number): string {
   const d = new Date(epochMs);
@@ -13,6 +13,7 @@ function formatTime(epochMs: number): string {
 export default function TodayScreen() {
   const router = useRouter();
   const [today, setToday] = useState<TodayResponse | null>(null);
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -24,6 +25,7 @@ export default function TodayScreen() {
       }
       setError(null);
       setToday(await client.today());
+      setSummary(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "load failed");
     }
@@ -43,6 +45,18 @@ export default function TodayScreen() {
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "sync failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function writeBrief() {
+    setBusy(true);
+    setError(null);
+    try {
+      setSummary(await client.summary());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "brief failed");
     } finally {
       setBusy(false);
     }
@@ -71,6 +85,21 @@ export default function TodayScreen() {
       <Text style={styles.stats}>
         {today.busyMinutes} busy · {today.freeMinutes} free
       </Text>
+
+      {summary ? (
+        <View style={styles.brief}>
+          <Text style={styles.briefText}>{summary.text}</Text>
+          <Text style={styles.briefQuota}>
+            Daily brief · {summary.used} of {summary.limit} used this month
+            {summary.used >= summary.limit ? " · the monthly quota is spent" : ""}
+          </Text>
+        </View>
+      ) : null}
+      {!summary || (summary.used ?? 0) < (summary.limit ?? 3) ? (
+        <Pressable style={styles.primary} onPress={writeBrief} disabled={busy}>
+          <Text style={styles.primaryText}>{busy ? "Writing…" : "Write today's brief"}</Text>
+        </Pressable>
+      ) : null}
 
       {today.conflicts.length > 0 ? (
         <View style={styles.conflicts}>
@@ -123,6 +152,16 @@ const styles = StyleSheet.create({
   syncButton: { minHeight: 36, justifyContent: "center", paddingHorizontal: 12 },
   syncText: { color: "#3c87f7", fontSize: 14, fontWeight: "600" },
   stats: { fontSize: 14, opacity: 0.6, marginBottom: 8 },
+  brief: {
+    borderWidth: 1,
+    borderColor: "#c8c8d0",
+    borderRadius: 12,
+    padding: 12,
+    gap: 6,
+    marginBottom: 8,
+  },
+  briefText: { fontSize: 15, lineHeight: 21 },
+  briefQuota: { fontSize: 13, opacity: 0.6 },
   sectionTitle: { fontSize: 16, fontWeight: "700", marginTop: 16, marginBottom: 4 },
   card: { flexDirection: "row", gap: 12, paddingVertical: 10, alignItems: "baseline" },
   cardTime: { fontSize: 13, opacity: 0.6, minWidth: 92 },

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { client, savedSession, saveSession, clearSession, ApiError } from "@/lib/api";
-import type { BaselineComparison, BaselineSnapshot, BillingResponse, Board, CapacityResponse, PlanRun, PlanningRequest, PortfolioResponse, Project, ScenarioResponse, Task, TodayResponse } from "@/lib/types";
+import type { BaselineComparison, BaselineSnapshot, BillingResponse, Board, CapacityResponse, PlanRun, PlanningRequest, PortfolioResponse, Project, ScenarioResponse, SummaryResponse, Task, TodayResponse } from "@/lib/types";
 
 const FIXTURE = (process.env.NEXT_PUBLIC_FIXTURE ?? "1") === "1";
 const HOUR = 3_600_000;
@@ -79,6 +79,7 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
   const [effort, setEffort] = useState("60");
   const [due, setDue] = useState("");
   const [capacity, setCapacity] = useState<CapacityResponse | null>(null);
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [waitsFor, setWaitsFor] = useState<Record<string, string>>({});
   const [scenarios, setScenarios] = useState<ScenarioResponse | null>(null);
   const [preferredOrder, setPreferredOrder] = useState<string[] | null>(null);
@@ -296,6 +297,18 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
     }
   }
 
+  async function askSummary() {
+    setBusy(true);
+    setError(null);
+    try {
+      setSummary(await client.summary());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "brief failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function apply(runId: string) {
     setBusy(true);
     setError(null);
@@ -464,6 +477,20 @@ function Planner({ session }: { session: { token: string; workspaceId: string } 
             )}
           </p>
         )}
+        {summary && (
+          <div style={{ marginTop: 10, borderTop: "1px solid var(--hairline)", paddingTop: 10 }}>
+            <p style={{ margin: 0 }}>{summary.text}</p>
+            <p className="muted" style={{ marginTop: 6 }}>
+              Daily brief · {summary.used} of {summary.limit} used this month
+              {summary.used >= summary.limit && " · the monthly quota is spent"}
+            </p>
+          </div>
+        )}
+        <div className="row" style={{ marginTop: 8 }}>
+          <button onClick={askSummary} disabled={busy || (summary?.used ?? 0) >= (summary?.limit ?? 3)}>
+            Write today's brief
+          </button>
+        </div>
       </div>
 
       <div className="card">

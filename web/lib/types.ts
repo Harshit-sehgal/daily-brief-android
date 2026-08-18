@@ -292,3 +292,12 @@ export interface BillingResponse {
   usage: TierUsage;
   checkoutUrl?: string | null;
 }
+
+export interface SummaryResponse {
+  v: number;
+  date: string;
+  text: string;
+  source: string;
+  used: number;
+  limit: number;
+}

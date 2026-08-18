@@ -289,6 +289,28 @@ api_post /v1/baselines "{}" /tmp/opencode/journey-trial-baseline2.json
 [ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "baselines should open after upgrade"
 step "9. billing boundary    (+$(( $(start_ms) - T )) ms)"
 
+# Step 10: the daily brief — platform key on the server, per-tenant quota in the ledger.
+# The fixture provider writes a deterministic brief; the limit (3) comes from quota_json's
+# default. Three requests fit, the fourth is refused with 429, and the refusal rolls back
+# the reservation (the ledger never counts a request that did not run).
+api_post /v1/summary '{}' /tmp/opencode/journey-summary1.json "$TOKEN"
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "the daily brief should answer 200"
+jq -e '.text | length > 20' /tmp/opencode/journey-summary1.json >/dev/null || fail "the brief is empty"
+jq -e '.used == 1 and .limit == 3 and .source == "fixture"' /tmp/opencode/journey-summary1.json >/dev/null \
+  || fail "first brief quota wrong: $(jq -c '{used,limit,source}' /tmp/opencode/journey-summary1.json)"
+api_post /v1/summary '{}' /tmp/opencode/journey-summary2.json "$TOKEN"
+jq -e '.used == 2' /tmp/opencode/journey-summary2.json >/dev/null || fail "second brief did not count"
+api_post /v1/summary '{}' /tmp/opencode/journey-summary3.json "$TOKEN"
+jq -e '.used == 3' /tmp/opencode/journey-summary3.json >/dev/null || fail "third brief did not count"
+api_post /v1/summary '{}' /tmp/opencode/journey-summary4.json "$TOKEN"
+[ "$(cat /tmp/opencode/journey-status.txt)" = "429" ] || fail "the fourth brief should be refused with 429"
+# The trial workspace's ledger is its own: one request fits there.
+api_post /v1/summary '{}' /tmp/opencode/journey-trial-summary.json "$TRIAL_TOKEN"
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "the trial brief should answer 200"
+jq -e '.used == 1 and .limit == 3' /tmp/opencode/journey-trial-summary.json >/dev/null \
+  || fail "trial quota wrong: $(jq -c '{used,limit}' /tmp/opencode/journey-trial-summary.json)"
+step "10. daily brief        (+$(( $(start_ms) - T )) ms)"
+
 TOTAL=$(( $(start_ms) - T0 ))
 echo "== journey complete in ${TOTAL} ms"
 if [ "$TOTAL" -gt 90000 ]; then

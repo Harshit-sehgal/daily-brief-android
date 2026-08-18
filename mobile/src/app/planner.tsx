@@ -2,6 +2,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,9 +12,22 @@ import {
 } from "react-native";
 
 import { client, savedSession } from "@/lib/api";
-import type { PlanRun, Task, TodayResponse } from "@/lib/types";
+import type { Board, PlanRun, PlanningRequest, Project, Task, TodayResponse } from "@/lib/types";
 
 const DAY = 86_400_000;
+
+/** The native engine bridge runs only where a native module exists; on web the server
+ *  is the only planner. Lazy require so web bundling never touches the native module. */
+function engineBridge(): { previewPlan(requestJson: string): Promise<string> } | null {
+  if (Platform.OS === "web") return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("expo-planner-engine").default;
+    return typeof mod?.previewPlan === "function" ? mod : null;
+  } catch {
+    return null;
+  }
+}
 
 /** The server keys tasks by any unique id; a time+random suffix is enough for a demo task. */
 function newTaskId(): string {
@@ -34,12 +48,19 @@ function weekWindows() {
 export default function PlannerScreen() {
   const router = useRouter();
   const [session, setSession] = useState<{ token: string; workspaceId: string } | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [board, setBoard] = useState<Board | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [run, setRun] = useState<PlanRun | null>(null);
+  const [isPreview, setIsPreview] = useState(false);
   const [entryId, setEntryId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const loadBoard = useCallback(async (projectId: string) => {
+    setBoard(await client.board(projectId));
+  }, []);
 
   const refresh = useCallback(async () => {
     const s = await savedSession();
@@ -49,11 +70,15 @@ export default function PlannerScreen() {
     }
     setSession(s);
     try {
-      setTasks(await client.listTasks());
+      const ps = await client.listProjects();
+      setProjects(ps);
+      const first = ps.find((p) => p.isDefault)?.id ?? ps[0]?.id ?? null;
+      setSelectedId((current) => current && ps.some((p) => p.id === current) ? current : first);
+      if (first) await loadBoard(first);
     } catch (e) {
       setError(e instanceof Error ? e.message : "load failed");
     }
-  }, [router]);
+  }, [router, loadBoard]);
 
   useFocusEffect(
     useCallback(() => {
@@ -62,18 +87,19 @@ export default function PlannerScreen() {
   );
 
   async function addTask() {
-    if (!title.trim()) return;
+    if (!title.trim() || !selectedId) return;
     setBusy(true);
     setError(null);
     try {
-      await client.addTask({
+      await client.addProjectTask(selectedId, {
         id: newTaskId(),
-        boardId: "b1",
+        boardId: selectedId,
+        columnId: board?.stages[0]?.id ?? null,
         title: title.trim(),
-        rank: tasks.length,
+        rank: (board?.tasks.length ?? 0) + 1,
       });
       setTitle("");
-      await refresh();
+      await loadBoard(selectedId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "add failed");
     } finally {
@@ -81,13 +107,63 @@ export default function PlannerScreen() {
     }
   }
 
+  async function selectProject(id: string) {
+    setSelectedId(id);
+    setRun(null);
+    setError(null);
+    try {
+      await loadBoard(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "load failed");
+    }
+  }
+
+  function planRequest(tasks: Task[], now: number): PlanningRequest {
+    const rangeStart = now - (now % DAY);
+    return {
+      v: 1,
+      workspaceId: session!.workspaceId,
+      rangeStartMs: rangeStart,
+      rangeEndMs: rangeStart + 7 * DAY,
+      nowMs: rangeStart,
+      items: tasks.map((t, i) => ({
+        ...t,
+        boardId: selectedId ?? "b1",
+        rank: t.rank ?? i,
+        effortMinutes: t.effortMinutes ?? undefined,
+      })),
+      blocks: [],
+      fixedCommitments: [],
+      dependencies: [],
+      scheduleIdByTaskId: {},
+      preferredOrder: [],
+      schedules: [
+        {
+          id: "s1",
+          name: "Weekdays",
+          timeZoneId: "UTC",
+          isDefault: true,
+          minimumChunkMinutes: 30,
+          maximumChunkMinutes: 120,
+          bufferMinutes: 0,
+          rank: 0,
+          windows: weekWindows(),
+        },
+      ],
+      deadlinePolicy: "HARD",
+    };
+  }
+
   /** The client composes fixedCommitments from Today's events, as the web client does:
-   *  the server stays a pure planner, and the calendar's busy time is the client's reading. */
+   *  the server stays a pure planner, and the calendar's busy time is the client's reading.
+   *  When the server is unreachable, the same computation runs locally through the native
+   *  bridge (same Mapping, same engine) — preview only: Apply needs the server. */
   async function planMyWeek() {
-    if (!session) return;
+    if (!session || !board) return;
     setBusy(true);
     setError(null);
     setRun(null);
+    setIsPreview(false);
     try {
       let today: TodayResponse;
       try {
@@ -96,39 +172,18 @@ export default function PlannerScreen() {
         today = { date: "", events: [], blocks: [], conflicts: [], busyMinutes: 0, freeMinutes: 0 };
       }
       const now = Date.now();
-      const rangeStart = now - (now % DAY);
-      const nextRun = await client.plan({
-        v: 1,
-        workspaceId: session.workspaceId,
-        rangeStartMs: rangeStart,
-        rangeEndMs: rangeStart + 7 * DAY,
-        nowMs: rangeStart,
-        items: tasks.map((t, i) => ({
-          ...t,
-          boardId: "b1",
-          rank: t.rank ?? i,
-          effortMinutes: t.effortMinutes ?? undefined,
-        })),
-        blocks: [],
-        fixedCommitments: today.events.map((e) => ({ startAt: e.startTime, endAt: e.endTime })),
-        dependencies: [],
-        scheduleIdByTaskId: {},
-        preferredOrder: [],
-        schedules: [
-          {
-            id: "s1",
-            name: "Weekdays",
-            timeZoneId: "UTC",
-            isDefault: true,
-            minimumChunkMinutes: 30,
-            maximumChunkMinutes: 120,
-            bufferMinutes: 0,
-            rank: 0,
-            windows: weekWindows(),
-          },
-        ],
-        deadlinePolicy: "HARD",
-      });
+      const request = planRequest(board.tasks, now);
+      request.fixedCommitments = today.events.map((e) => ({ startAt: e.startTime, endAt: e.endTime }));
+      let nextRun: PlanRun;
+      try {
+        nextRun = await client.plan(request);
+      } catch (serverError) {
+        const bridge = engineBridge();
+        if (!bridge) throw serverError;
+        const raw = await bridge.previewPlan(JSON.stringify(request));
+        nextRun = JSON.parse(raw) as PlanRun;
+        setIsPreview(true);
+      }
       setRun(nextRun);
     } catch (e) {
       setError(e instanceof Error ? e.message : "planning failed");
@@ -138,7 +193,7 @@ export default function PlannerScreen() {
   }
 
   async function apply() {
-    if (!run) return;
+    if (!run || isPreview) return;
     setBusy(true);
     setError(null);
     try {
@@ -176,33 +231,70 @@ export default function PlannerScreen() {
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.projectRow}>
+        {projects.map((p) => (
+          <Pressable
+            key={p.id}
+            style={[styles.projectChip, p.id === selectedId && styles.projectChipActive]}
+            onPress={() => selectProject(p.id)}
+            disabled={busy}
+          >
+            <Text style={[styles.projectChipText, p.id === selectedId && styles.projectChipTextActive]}>
+              {p.name}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
+      {board && board.tasks.length === 0 ? <Text style={styles.empty}>No tasks yet</Text> : null}
+      {board
+        ? board.stages.map((stage) => {
+            const stageTasks = board.tasks.filter((t) => (t.columnId ?? null) === stage.id);
+            if (stageTasks.length === 0) return null;
+            return (
+              <View key={stage.id}>
+                <Text style={styles.stageTitle}>{stage.name}</Text>
+                {stageTasks.map((t) => (
+                  <View key={t.id} style={styles.taskRow}>
+                    <Text style={styles.taskTitle}>{t.title}</Text>
+                    <Text style={styles.taskMeta}>
+                      {t.effortMinutes != null ? `${t.effortMinutes}m` : "no estimate"}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            );
+          })
+        : null}
+
       <View style={styles.addRow}>
         <TextInput
           style={styles.input}
           value={title}
           onChangeText={setTitle}
-          placeholder="Add a task…"
+          placeholder={selectedId ? "Add a task…" : "Pick a project first"}
           placeholderTextColor="#9a9aa2"
           onSubmitEditing={addTask}
+          editable={!!selectedId}
         />
-        <Pressable style={styles.addButton} onPress={addTask} disabled={busy}>
+        <Pressable style={styles.addButton} onPress={addTask} disabled={busy || !selectedId}>
           <Text style={styles.addButtonText}>Add</Text>
         </Pressable>
       </View>
 
-      {tasks.length === 0 ? <Text style={styles.empty}>No tasks yet</Text> : null}
-      {tasks.map((t) => (
-        <View key={t.id} style={styles.taskRow}>
-          <Text style={styles.taskTitle}>{t.title}</Text>
-          <Text style={styles.taskMeta}>
-            {t.effortMinutes != null ? `${t.effortMinutes}m` : "no estimate"}
-          </Text>
-        </View>
-      ))}
-
-      <Pressable style={styles.primary} onPress={planMyWeek} disabled={busy || tasks.length === 0}>
+      <Pressable
+        style={styles.primary}
+        onPress={planMyWeek}
+        disabled={busy || (board?.tasks.length ?? 0) === 0}
+      >
         <Text style={styles.primaryText}>{busy ? "Planning…" : "Plan my week"}</Text>
       </Pressable>
+
+      {isPreview ? (
+        <Text style={styles.previewNote}>
+          Offline preview — the local engine planned this. Apply needs the server.
+        </Text>
+      ) : null}
 
       {run ? (
         <View style={styles.proposal}>
@@ -225,15 +317,19 @@ export default function PlannerScreen() {
           ))}
           <Text style={styles.health}>{run.result.health.assessment}</Text>
           <View style={styles.proposalActions}>
-            <Pressable style={styles.applyButton} onPress={apply} disabled={busy}>
-              <Text style={styles.applyText}>Apply</Text>
-            </Pressable>
+            {!isPreview ? (
+              <Pressable style={styles.applyButton} onPress={apply} disabled={busy}>
+                <Text style={styles.applyText}>Apply</Text>
+              </Pressable>
+            ) : null}
             <Pressable
-              style={styles.rejectButton}
+              style={isPreview ? styles.rejectFull : styles.rejectButton}
               onPress={() => setRun(null)}
               disabled={busy}
             >
-              <Text style={styles.rejectText}>Reject</Text>
+              <Text style={styles.rejectText}>
+                {isPreview ? "Dismiss preview" : "Reject"}
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -259,6 +355,22 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   scroll: { flex: 1 },
   content: { padding: 20, gap: 8, paddingBottom: 48 },
+  projectRow: { flexGrow: 0, marginBottom: 4 },
+  projectChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#c8c8d0",
+    marginRight: 8,
+    minHeight: 36,
+    justifyContent: "center",
+  },
+  projectChipActive: { backgroundColor: "#3c87f7", borderColor: "#3c87f7" },
+  projectChipText: { fontSize: 14, fontWeight: "600" },
+  projectChipTextActive: { color: "#ffffff" },
+  stageTitle: { fontSize: 13, fontWeight: "700", opacity: 0.6, marginTop: 10, marginBottom: 2 },
+  previewNote: { fontSize: 13, marginTop: 12, opacity: 0.7, color: "#b8860b" },
   addRow: { flexDirection: "row", gap: 8, alignItems: "center" },
   input: {
     flex: 1,
@@ -316,6 +428,15 @@ const styles = StyleSheet.create({
   },
   applyText: { color: "#ffffff", fontSize: 15, fontWeight: "600" },
   rejectButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#c8c8d0",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    minHeight: 48,
+  },
+  rejectFull: {
     flex: 1,
     borderWidth: 1,
     borderColor: "#c8c8d0",

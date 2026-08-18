@@ -19,6 +19,8 @@ import com.example.contract.ScenarioResponseWire
 import com.example.contract.ScenarioResultWire
 import com.example.contract.ScheduledBlockWire
 import com.example.contract.StageWire
+import com.example.contract.SummaryRequestWire
+import com.example.contract.SummaryResponseWire
 import com.example.contract.TaskVarianceWire
 import com.example.contract.TaskWire
 import com.example.contract.TierLimitsWire
@@ -40,6 +42,12 @@ import com.example.server.google.FixtureCalendarProvider
 import com.example.server.google.GoogleCalendarProvider
 import com.example.server.google.GoogleOAuth
 import com.example.server.plan.Journal
+import com.example.server.summary.FixtureSummaryProvider
+import com.example.server.summary.GeminiQuota
+import com.example.server.summary.GeminiSummaryProvider
+import com.example.server.summary.NotConfiguredSummaryProvider
+import com.example.server.summary.SummaryContext
+import com.example.server.summary.SummaryProvider
 import com.example.core.Mapping
 import com.example.core.Mapping.answerCapacity
 import com.example.core.Mapping.toEngine
@@ -131,6 +139,16 @@ fun Application.routes(config: Config) {
           config.stripeSecretKey != null && config.stripeWebhookSecret != null && config.stripePriceId != null ->
             StripeBillingProvider(config.stripeSecretKey, config.stripeWebhookSecret, config.stripePriceId)
           else -> NotConfiguredBillingProvider()
+        }
+
+      // The daily brief's seam: the platform key belongs to the server (invariant 4).
+      // Fixture mode runs the journey headless; a real deployment activates the REST seam
+      // when GEMINI_API_KEY is present; without one the seam answers honestly.
+      val summaryProvider: SummaryProvider =
+        when {
+          config.fixtureProvider -> FixtureSummaryProvider()
+          config.geminiApiKey != null -> GeminiSummaryProvider(config.geminiApiKey, config.geminiModel)
+          else -> NotConfiguredSummaryProvider()
         }
 
       post("/billing/webhook") {
@@ -819,10 +837,95 @@ fun Application.routes(config: Config) {
           val today = Today.forWorkspace(session.workspaceId, System.currentTimeMillis())
           call.respond(today)
         }
+
+        post("/summary") {
+          val session = sessions.require(call)
+          if (!summaryProvider.configured) {
+            call.respond(HttpStatusCode.NotImplemented, mapOf("error" to "no Gemini key configured on this deployment"))
+            return@post
+          }
+          val request = call.receive<SummaryRequestWire>()
+          val nowMs = System.currentTimeMillis()
+          val date =
+            request.date ?: java.time.Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()
+          val today =
+            Today.forWorkspace(
+              session.workspaceId,
+              java.time.Instant.parse("${date}T12:00:00Z").toEpochMilli(),
+            )
+          val context =
+            SummaryContext(
+              date = date,
+              dayName = java.time.LocalDate.parse(date).dayOfWeek.toString().lowercase().replaceFirstChar { it.uppercase() },
+              eventTitles = today.events.map { it.title },
+              blockCount = today.blocks.size,
+              conflictCount = today.conflicts.size,
+              busyMinutes = today.busyMinutes,
+              freeMinutes = today.freeMinutes,
+            )
+          val quotaJson =
+            Db.dataSource.connection.use { conn ->
+              conn.queryOne("SELECT quota_json FROM subscriptions WHERE workspace_id = ?", listOf(session.workspaceId)) {
+                it.getString(1)
+              } ?: "{}"
+            }
+          val limit = GeminiQuota.limitFrom(quotaJson)
+          val month = GeminiQuota.periodMonth(nowMs)
+          // Reserve-then-refuse in the request transaction (invariant 4): increment the
+          // ledger first; if the limit would be exceeded, roll back and say so.
+          val usedAfter: Long =
+            try {
+              Db.inTransaction { conn ->
+                val used =
+                  conn.queryOne(
+                    "SELECT requests FROM gemini_usage WHERE workspace_id = ? AND period_month = ? FOR UPDATE",
+                    listOf(session.workspaceId, month),
+                  ) { it.getLong(1) } ?: 0L
+                if (GeminiQuota.refuses(used, limit)) {
+                  throw QuotaExceeded(used, limit)
+                }
+                conn.execute(
+                  "INSERT INTO gemini_usage (workspace_id, period_month, requests, input_tokens, output_tokens) VALUES (?, ?, 1, 0, 0) " +
+                    "ON CONFLICT (workspace_id, period_month) DO UPDATE SET requests = gemini_usage.requests + 1",
+                  listOf(session.workspaceId, month),
+                )
+                used + 1
+              }
+            } catch (e: QuotaExceeded) {
+              call.respond(HttpStatusCode.TooManyRequests, mapOf("error" to "summary quota exhausted — ${e.used} of ${e.limit} used this month"))
+              return@post
+            }
+          val text =
+            try {
+              summaryProvider.summarize(context).text
+            } catch (t: Throwable) {
+              // The provider failed; the reservation is refunded so the failure is not counted.
+              Db.dataSource.connection.use { conn ->
+                conn.execute(
+                  "UPDATE gemini_usage SET requests = requests - 1 WHERE workspace_id = ? AND period_month = ?",
+                  listOf(session.workspaceId, month),
+                )
+              }
+              throw t
+            }
+          call.respond(
+            SummaryResponseWire(
+              v = PlannerApi.VERSION,
+              date = date,
+              text = text,
+              source = if (config.fixtureProvider) "fixture" else "platform",
+              used = usedAfter.toInt(),
+              limit = limit,
+            ),
+          )
+        }
       }
     }
   }
 }
+
+/** The typed quota refusal; the request transaction rolls back the reservation with it. */
+private class QuotaExceeded(val used: Long, val limit: Int) : Exception()
 
 @Serializable
 data class SessionResponse(val workspaceId: String, val token: String)

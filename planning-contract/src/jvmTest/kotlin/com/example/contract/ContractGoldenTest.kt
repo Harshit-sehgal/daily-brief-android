@@ -369,6 +369,16 @@ class ContractGoldenTest {
     )
   }
 
+  private fun canonicalSummary(): SummaryResponseWire =
+    SummaryResponseWire(
+      v = PlannerApi.VERSION,
+      date = "2026-08-18",
+      text = "Your Tuesday has 3 events and 2 plan blocks, with one overlap to sort out. You have 240 minutes free across the day.",
+      source = "fixture",
+      used = 2,
+      limit = 3,
+    )
+
   private fun canonicalBilling(): BillingResponseWire =
     BillingResponseWire(
       v = PlannerApi.VERSION,
