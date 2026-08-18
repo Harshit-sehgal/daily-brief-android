@@ -37,6 +37,14 @@ done
 
 # ── Server ────────────────────────────────────────────────────────────────────────────────
 step "Build + boot server"
+# A previous run's server (or a stray dev server) squatting the API port turns step 1's
+# signup into a success against stale code and step 3 into a 401 with no explanation.
+# Check before booting. A server is `java -cp ... com.example.server.MainKt` — the launcher
+# script's path is gone from its cmdline after exec, so match the main class instead.
+if ss -tlnp 2>/dev/null | grep -q ":$PORT_API\b"; then
+  OWNER=$(ss -tlnp 2>/dev/null | grep ":$PORT_API\b" | sed -E 's/.*users:\(\("([^"]+)".*/\1/' | head -1)
+  fail "port $PORT_API is taken by pid $OWNER (stray server?). Kill it and re-run."
+fi
 (cd "$ROOT" && ./gradlew --offline :server:installDist >/dev/null 2>&1)
 ENVELOPE_KEY=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
 DATABASE_URL="$DB_URL" DATABASE_USER=postgres DATABASE_PASSWORD=postgres \
