@@ -3,10 +3,10 @@
 #
 # macOS only: Kotlin/Native cannot cross-compile Apple targets from Linux. Run this on a
 # Mac with the repo checked out, then point the mobile app's Swift module at the produced
-# planning-core/build/PlannerCore.xcframework (see mobile/README.md "iOS").
+# packages/planning-core/build/PlannerCore.xcframework (see apps/mobile/README.md "iOS").
 #
 # The framework is one static binary per slice with baseName "PlannerCore" (set in
-# planning-core/build.gradle.kts) — the same name Swift imports as a module.
+# packages/planning-core/build.gradle.kts) — the same name Swift imports as a module.
 set -euo pipefail
 
 # Resolve the repo root regardless of where the script is invoked from, so a call from
@@ -18,8 +18,8 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
   :planning-core:linkReleaseFrameworkIosSimulatorArm64
 
 xcodebuild -create-xcframework \
-  -framework "planning-core/build/bin/iosArm64/releaseFramework/PlannerCore.framework" \
-  -framework "planning-core/build/bin/iosSimulatorArm64/releaseFramework/PlannerCore.framework" \
-  -output "planning-core/build/PlannerCore.xcframework"
+  -framework "packages/planning-core/build/bin/iosArm64/releaseFramework/PlannerCore.framework" \
+  -framework "packages/planning-core/build/bin/iosSimulatorArm64/releaseFramework/PlannerCore.framework" \
+  -output "packages/planning-core/build/PlannerCore.xcframework"
 
-echo "== planning-core/build/PlannerCore.xcframework ready"
+echo "== packages/planning-core/build/PlannerCore.xcframework ready"

@@ -16,12 +16,12 @@ in the SaaS stages starts until it is stable. `:server` is the SaaS service (WP-
 Postgres, unit-tested (`:server:test` in the gate) and acceptance-tested by
 `scripts/journey.sh`, which runs the whole signup→plan→apply→undo loop against docker
 Postgres in ~1.5 s; `scripts/verify.sh --journey` is the gate plus that acceptance. The
-`web/` client (Next.js, Planner + Today only) talks to it; the server is authoritative
-for Apply. `mobile/` is the Expo app (Login, Today, Planner, Settings) on the same
-server; its `planner-engine` local module runs `planning-core`'s `EnginePreview` on-device
+`apps/web/` client (Next.js, Planner + Today only) talks to it; the server is authoritative
+for Apply. `apps/mobile/` is the Expo app (Login, Today, Planner, Settings) on the same
+server; its `planner-engine` local module runs `packages/planning-core`'s `EnginePreview` on-device
 for preview — the server stays authoritative for Apply. `:planning-contract` is now KMP
 too (WP-M3), so the frozen wire types are portable with the engine; `Mapping` and
-`EnginePreview` live in `planning-core`'s `commonMain`, and the mobile preview meets a
+`EnginePreview` live in `packages/planning-core`'s `commonMain`, and the mobile preview meets a
 server run at `EnginePreview` — same computation, same proposals; `EnginePreviewTest` pins
 the equality.
 
@@ -70,11 +70,11 @@ test bugs, and `scripts/emulator.sh` handles both:
 If `adb install` fails with `Failure calling service package: Broken pipe`, push
 the APK to `/data/local/tmp` and `pm install -r -t` it instead.
 
-**Mobile builds need three manual edits to the generated `mobile/android/`** (gitignored,
+**Mobile builds need three manual edits to the generated `apps/mobile/android/`** (gitignored,
 so re-apply after every `expo prebuild`) — `kotlinVersion=2.3.20` in `gradle.properties`,
 and in `build.gradle` a KGP 2.3.20 buildscript classpath, `ext.compileSdkVersion = 36`
 before the expo-root-project apply, and `mavenLocal()`. Rationale and exact shapes:
-`mobile/README.md`. The mobile project compiles at Kotlin 2.3.20 because the Expo
+`apps/mobile/README.md`. The mobile project compiles at Kotlin 2.3.20 because the Expo
 toolchain's pika plugin caps there, and the engine AARs are Kotlin 2.4.10 (metadata
 2.4.0) — a compiler reads metadata up to one minor version ahead. Build the Android app
 with `scripts/publish-engine-local.sh --mobile` + `./gradlew :app:assembleRelease`
@@ -82,7 +82,7 @@ with `scripts/publish-engine-local.sh --mobile` + `./gradlew :app:assembleReleas
 
 **The API 36 emulator image never presents the mobile app's window** (first-frame
 reveal deadlock — zero frames, splash stuck, input never activates; the native Compose
-app renders fine on the same image). Documented in `mobile/README.md`; the wire-level
+app renders fine on the same image). Documented in `apps/mobile/README.md`; the wire-level
 journey the app drives is covered by `scripts/journey.sh`, so the mobile feature work is
 verifiable without the device.
 
@@ -92,7 +92,7 @@ verifiable without the device.
 | --- | --- | --- |
 | Pure schedule maths | `:planning-core` `core/` | No Android, no Compose — unit-tested directly on the JVM |
 | Domain model | `:planning-core` `data/model/` | The Room entities. They still carry Room annotations, which is the one thing keeping them out of `commonMain` |
-| Storage | `data/database/` | Room; schema is exported to `app/schemas/` |
+| Storage | `data/database/` | Room; schema is exported to `apps/android/schemas/` |
 | Sources | `data/api/` | `DeviceCalendarSync`, `NotionClient`, `GeminiClient` |
 | Secrets | `data/security/SecretStore` | Keystore-backed; never in Room |
 | Coordination | `data/repository/BriefingRepository` | The only place sources and storage meet |
@@ -146,7 +146,7 @@ for anything new. Date arithmetic especially: it is where midnight, DST and
   a ledger write.
 - **Room schema changes need a migration**, not a wipe: saved integrations, keys
   and boards have to survive. Bump the version, add a `Migration`, and let the
-  exported schema in `app/schemas/` update.
+  exported schema in `apps/android/schemas/` update.
 - **Recovery windows belong to the user.** Undo used to expire after a fixed 30
   seconds everywhere, which is a content-imposed time limit (WCAG 2.2.1 Timing Adjustable) and
   about how long it takes a screen reader to reach the snackbar. `UndoWindowPolicy`

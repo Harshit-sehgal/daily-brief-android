@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "summary": "1 later, 1 pulled forward, 1 scheduled since.",
+  "rows": [
+    {
+      "itemId": "task-a",
+      "title": "Write schema",
+      "baselineStartMs": 1735693200000,
+      "currentStartMs": 1735718400000,
+      "baselineMinutes": 90,
+      "currentMinutes": 90,
+      "driftMinutes": 25200000,
+      "addedSinceBaseline": false,
+      "removedSinceBaseline": false
+    },
+    {
+      "itemId": "task-c",
+      "title": "Seed fixtures",
+      "baselineStartMs": null,
+      "currentStartMs": null,
+      "baselineMinutes": 0,
+      "currentMinutes": 30,
+      "driftMinutes": null,
+      "addedSinceBaseline": true,
+      "removedSinceBaseline": false
+    }
+  ]
+}

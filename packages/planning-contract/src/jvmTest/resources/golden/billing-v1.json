@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "tier": "free",
+  "status": "trial",
+  "trialEndsAt": 1736352000000,
+  "limits": {
+    "maxProjects": 1,
+    "baselines": false,
+    "capacity": false
+  },
+  "usage": {
+    "projects": 1,
+    "baselines": 0
+  },
+  "checkoutUrl": "https://checkout.example/daily-brief/free?workspace=ws-1"
+}

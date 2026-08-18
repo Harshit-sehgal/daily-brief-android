@@ -23,7 +23,7 @@ are still achievable.
 | **Wedge** | Hybrid | Auto-plan + Today is the free 90-second magic moment. Project depth — Gantt, dependencies, capacity, critical path, plan health, baselines, scenarios — is Pro. Neither half is deleted. |
 | **ICP** | Independent consultants and high-end freelancers running 3–8 concurrent client projects against a meeting-heavy calendar | Capacity analytics and dependencies answer commercial questions ("can I take another client next week?"), not productivity-theatre ones. Expansion path: consultant → consultant + subcontractor → small consultancy → team capacity. |
 | **Out of scope forever** | Invoicing, CRM, expenses, proposals, contracts, time sheets | The boundary is *commitment → realistic execution plan*. Other software handles getting paid. |
-| **Engine** | Kotlin Multiplatform `planning-core` | One engine shared by a JVM planning service, Android, and later iOS. No TypeScript rewrite of the scheduling maths. |
+| **Engine** | Kotlin Multiplatform `packages/planning-core` | One engine shared by a JVM planning service, Android, and later iOS. No TypeScript rewrite of the scheduling maths. |
 | **Stack** | Next.js web · TypeScript SaaS API · Kotlin/Ktor planner · Postgres · Expo mobile with native Kotlin/Swift modules | Language ownership is clean: product UI in TypeScript, planning intelligence in Kotlin. |
 | **Scope of the current step** | Specification + engine extraction | No Next.js app, auth, Stripe, deployed Postgres, Ktor service, Expo, iOS, or UI implementation. |
 
@@ -86,7 +86,7 @@ renames**.
 
 - Journal codecs untangled from the Room migration file: `PlanMutationCodec`,
   `PlanCatalogMutationCodec`, `WorkingScheduleMutationCodec`, `SavedViewCodec` and
-  `WorkingCalendarMapper` now live in `planning-core`, with `LegacyNameKeys` extracted as the
+  `WorkingCalendarMapper` now live in `packages/planning-core`, with `LegacyNameKeys` extracted as the
   pure part of the migration file.
 - `PriorityQueue` replaced by a private lexicographic min-heap in `CriticalPathEngine`,
   preserving the determinism the tests pin.
@@ -105,10 +105,10 @@ the process note.
 
 | | Files | Lines | Share |
 | --- | ---: | ---: | ---: |
-| `planning-core/commonMain` | 14 | 2,549 | **33%** of the module |
-| `planning-core/jvmShared` | 20 | 5,157 | 67% |
+| `packages/planning-core/commonMain` | 14 | 2,549 | **33%** of the module |
+| `packages/planning-core/jvmShared` | 20 | 5,157 | 67% |
 | — of which engine core (`core/` only) | — | 1,784 / 5,148 | **34.7%** portable |
-| `planning-core` tests | 30 suites | — | 222 tests, 0 failures |
+| `packages/planning-core` tests | 30 suites | — | 222 tests, 0 failures |
 | `app` tests | 40 suites | — | 179 tests, 0 failures |
 
 Two denominators, both quoted in places; `05-kmp-portability-audit.md` reconciles them.
@@ -323,7 +323,7 @@ for what follows. One judgement call remains, and it does not block any stage:
 1. ~~**Kotlin/Native target**~~ — **resolved**: `linuxX64` landed (WP-7), the compiler enforces
    `commonMain` purity, and `iosArm64`/`iosSimulatorArm64` followed with the mobile MVP.
 2. **Monorepo reshuffle** — `apps/ services/ packages/` was deferred until the web app exists
-   so `app/` moves once rather than twice. The web app now exists; the reshuffle is due but
+   so `apps/android/` moves once rather than twice. The web app now exists; the reshuffle is due but
    can wait for a point where the tree is otherwise quiet.
 
 And one standing decision, recorded rather than asked: the three Android-only features from D1

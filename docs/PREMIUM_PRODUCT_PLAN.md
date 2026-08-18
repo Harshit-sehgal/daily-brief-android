@@ -307,9 +307,9 @@ Pending proof before visual/release sign-off: Plan and Task editor at 200% font 
 
 ## Code anchors
 
-- Root navigation and shared editor: `app/src/main/java/com/example/ui/DailyBriefApp.kt`
-- Calendar commitment model: `app/src/main/java/com/example/data/model/BriefingEvent.kt`
-- Source merge rules: `app/src/main/java/com/example/data/repository/SyncMergePolicy.kt`
-- Workspace preference normalization: `app/src/main/java/com/example/ui/viewmodel/WorkspacePreferencePolicy.kt`
-- Day, Timeline, Week and Board surfaces: `app/src/main/java/com/example/ui/screens/`
+- Root navigation and shared editor: `apps/android/src/main/java/com/example/ui/DailyBriefApp.kt`
+- Calendar commitment model: `apps/android/src/main/java/com/example/data/model/BriefingEvent.kt`
+- Source merge rules: `apps/android/src/main/java/com/example/data/repository/SyncMergePolicy.kt`
+- Workspace preference normalization: `apps/android/src/main/java/com/example/ui/viewmodel/WorkspacePreferencePolicy.kt`
+- Day, Timeline, Week and Board surfaces: `apps/android/src/main/java/com/example/ui/screens/`
 - Verification entry point: `scripts/verify.sh`

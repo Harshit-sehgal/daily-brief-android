@@ -66,7 +66,7 @@ otherwise.
 6. **`minSdk` is 24 and the engine's dates are `java.time`-backed.** `:app` therefore has core
    library desugaring enabled. Do not remove it while `minSdk < 26`.
 7. **Some tests read the source tree at runtime.** `CommonMainPurityTest` and
-   `UiConsistencyTest` do. Their Gradle inputs are declared in `planning-core/build.gradle.kts`;
+   `UiConsistencyTest` do. Their Gradle inputs are declared in `packages/packages/planning-core/build.gradle.kts`;
    if you add another such test, declare its inputs or it will silently report stale results.
 
 ### Rules that are not negotiable
@@ -113,7 +113,7 @@ the invariants, and both decide the contract.
 **Size:** large. The last root blocker in `core/`, and unlike `WorkingCalendar` this one has a
 caller blast radius.
 
-**Goal:** `planning-core/src/jvmShared/kotlin/com/example/core/ScheduleAnalysis.kt` (374 lines)
+**Goal:** `packages/planning-core/src/jvmShared/kotlin/com/example/core/ScheduleAnalysis.kt` (374 lines)
 moves to `commonMain`, unblocking 861 lines behind it.
 
 **What it needs replacing:** `java.util.Calendar`, `java.util.TimeZone`,
@@ -251,7 +251,7 @@ state restoration.
 **Size:** small in lines, **highest blast radius in the module.** Read this whole section before
 touching it.
 
-`planning-core/src/jvmShared/kotlin/com/example/data/database/LegacyNameKeys.kt` is 22 lines:
+`packages/planning-core/src/jvmShared/kotlin/com/example/data/database/LegacyNameKeys.kt` is 22 lines:
 
 ```kotlin
 fun nameKey(value: String): String =
@@ -347,7 +347,7 @@ kept as the fast duplicate with the better error message, per the plan.
 
 **Size:** trivial. **Precondition: WP-1 merged.**
 
-`app/src/main/java/com/example/data/api/NotionClient.kt` line ~76 holds a transitional
+`apps/android/src/main/java/com/example/data/api/NotionClient.kt` line ~76 holds a transitional
 `commonZone` conversion introduced because `IsoDates` moved before `ScheduleAnalysis`. Once both
 speak `kotlinx-datetime`, delete the bridge and the comment above it.
 
@@ -398,7 +398,7 @@ Two constraints currently enforced only in application code must become real dat
 constraints: `saved_views` unique on `(boardId, surface, nameKey)`, and `work_schedules`
 "exactly one non-archived default" as a partial unique index.
 
-Source the exact column types from `app/schemas/com.example.data.database.AppDatabase/9.json` —
+Source the exact column types from `apps/android/schemas/com.example.data.database.AppDatabase/9.json` —
 it is the authoritative current schema. Both constraints, the per-workspace re-scoping of
 Room's global unique indexes, and the composite FKs are proven against a real Postgres 16 by
 `db/verify-schema.sh` — four refusals must appear or the script exits non-zero.
@@ -449,7 +449,7 @@ JVM, kotlinx-serialization-json 1.8.1) turns it into executable bytes:
 
 ## WP-13 — The vertical slice  (complete, commits `f9f0d24` + `ffd10be`)
 
-`:server` (Ktor + Flyway V1 + `SyncMergePolicy` in `planning-core`), `web/` (Next.js
+`:server` (Ktor + Flyway V1 + `SyncMergePolicy` in `packages/planning-core`), `apps/web/` (Next.js
 Planner + Today), the OAuth leg, and both acceptances: `scripts/journey.sh` drives the
 loop headless against docker Postgres + fixture provider in ~1.5 s (wired into the gate as
 `verify.sh --journey`), and `docs/saas/10-wp13-journey-runbook.md` walks the same loop on
@@ -473,7 +473,7 @@ manually against a real Google account (runbook).
   `:planning-core` (jvm) and `:planning-contract`. The engine's Room-annotated models are inert
   JVM data classes, usable directly; the service maps contract DTOs ⇄ engine types and never
   reimplements a decision the engine owns.
-- **`web/`** — Next.js + TypeScript, two screens only: Planner (tasks, Plan my week, the
+- **`apps/web/`** — Next.js + TypeScript, two screens only: Planner (tasks, Plan my week, the
   proposal with reasons, apply/undo) and Today (overlaps + day shape). No Projects, no Board,
   no Gantt. The client renders; the server is authoritative for Apply.
 - **Google OAuth** — one consent covers identity + calendar scopes. Server-side tokens, stored
@@ -493,13 +493,13 @@ manually against a real Google account (runbook).
 
 ### Porting that this package needs
 
-- **`SyncMergePolicy` moves into `planning-core`** (jvmShared). It is pure today except
+- **`SyncMergePolicy` moves into `packages/planning-core`** (jvmShared). It is pure today except
   `DeviceCalendarSync.providerEventId` (the `device_<id>_<begin>` convention). The policy takes
   a `providerIdOf: (BriefingEvent) -> Long?` parameter; the app passes its device extractor,
   the server passes its Google one. The policy's own test suite moves with it and runs in both
   places — the rules are the same code, never a re-implementation.
 - Everything else the worker touches (`ScheduleAnalysis`, codecs, models) is already in
-  `planning-core`.
+  `packages/planning-core`.
 
 ### Acceptance
 
@@ -523,23 +523,23 @@ proper, Expo mobile depth (WP-16 shipped its MVP).
   then scenarios/baselines/portfolio, then Stripe. **All shipped 2026-08-18:** Stage 4.1–4.5
   commits `4d0fad8` `7b71a92` `89b52be` `63ba4ff` `3db8714`.
 - **WP-16 mobile — MVP shipped 2026-08-18** (`19b0d71` + WP-M3 + WP-M2/M4 commits).
-  Expo + React Native UI, `planning-core` via KMP. **Local engine previews; the server is
+  Expo + React Native UI, `packages/planning-core` via KMP. **Local engine previews; the server is
   authoritative for Apply.**
 
   Delivered as four mobile-first packages:
 
-  - **WP-M1** (`19b0d71`) — `planning-core` gains `iosArm64`/`iosSimulatorArm64`; the
+  - **WP-M1** (`19b0d71`) — `packages/planning-core` gains `iosArm64`/`iosSimulatorArm64`; the
     `LegacyNameKeys` iOS `actual` lands (`precomposedStringWithCompatibilityMapping` +
     `en_US_POSIX`); `legacyTrim`/`legacyStableId`/`LegacyMd5` shared into `commonMain`.
     Verified: `scripts/verify.sh` green; iOS compiles only on macOS.
-  - **WP-M2** — the `mobile/` Expo app: Login (fixture demo + Google OAuth with
+  - **WP-M2** — the `apps/mobile/` Expo app: Login (fixture demo + Google OAuth with
     `auth-callback`), Today, Planner (Plan my week, proposal with reasons, Apply, Undo),
     Settings. `tsc --noEmit` and `expo export --platform web` clean.
-  - **WP-M3** — the local engine bridge. `Mapping` moves from `:server` into `planning-core`
+  - **WP-M3** — the local engine bridge. `Mapping` moves from `:server` into `packages/planning-core`
     `commonMain` (`com.example.core`) with `EnginePreview.previewPlan(requestJson)` — one
     String in, one String out — and `:planning-contract` converts to KMP so the wire types
     are portable with the engine (golden files and 19 tests unchanged, moved to `jvmTest`).
-    `mobile/modules/planner-engine` is the native module: Kotlin `AsyncFunction` on Android
+    `apps/mobile/modules/planner-engine` is the native module: Kotlin `AsyncFunction` on Android
     (via the mavenLocal AARs), Swift on iOS (`EnginePreview.shared` from the `PlannerCore`
     XCFramework), a web stub, and a typed TS client. `scripts/publish-engine-local.sh`
     gained `--mobile` (publishes the AARs at compileSdk 36, the max the RN 0.86 toolchain
@@ -547,11 +547,11 @@ proper, Expo mobile depth (WP-16 shipped its MVP).
   - **WP-M4** — the mobile MVP wired end to end: debug + release APKs build with the engine
     embedded; the release APK installs and its JS bundle runs on the emulator (login
     hierarchy renders). Interactive on-device driving is blocked by an emulator-image
-    first-frame bug (documented in `mobile/README.md` "Known limitation"); the journey the
+    first-frame bug (documented in `apps/mobile/README.md` "Known limitation"); the journey the
     app drives — signup → tasks → plan → apply → today → undo — is green at the wire level
     against the fixture server.
 
-  Traps learned (all documented in `mobile/README.md`): RN 0.86 pins AGP 8.12.0 + Kotlin
+  Traps learned (all documented in `apps/mobile/README.md`): RN 0.86 pins AGP 8.12.0 + Kotlin
   2.1.20, and the Expo toolchain's pika plugin caps at Kotlin 2.3.20 — so the mobile
   project compiles at 2.3.20 against the 2.4.10-built engine AARs (compiler N reads
   metadata N+1), with three manual edits to the generated `android/` that must be re-applied

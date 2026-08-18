@@ -19,7 +19,7 @@ automated `journey.sh` acceptance in the gate), **Stage 4 is complete** (Capacit
 Projects/Board, dependencies and critical path, scenarios/baselines/portfolio, and
 billing with the tier boundary enforced server-side), and **the Stage 5 mobile MVP has
 shipped** (WP-M1…WP-M4: an Expo app with Login/Today/Planner/Settings wired to the Ktor
-server, plus the `planner-engine` local-preview module running `planning-core`'s engine
+server, plus the `planner-engine` local-preview module running `packages/planning-core`'s engine
 on-device). All engine defects are closed (WP-9, `4aac835`, `df1ef68`).
 What is left is the depth trail behind each shipped surface: token refresh and
 sync-worker hardening (WP-14), the Expo-side push-token wiring, the Capacity and
@@ -172,7 +172,7 @@ have written designs with the failure mode named.
 One journey, excellent, nothing else: **sign in → connect a calendar → add tasks → "Plan my
 week" → see a proposal with reasons → apply → see it on Today.**
 
-- Ktor planning service wrapping `planning-core`; the API calls it, never reimplements it.
+- Ktor planning service wrapping `packages/planning-core`; the API calls it, never reimplements it.
 - Next.js + TypeScript for Today and Planner only. No Projects, no Board, no Gantt.
 - Google Calendar sync as a background worker: OAuth server-side, tokens encrypted at rest,
   `SyncMergePolicy`'s rules ported exactly — **times and location are source-owned; wording and
@@ -226,7 +226,7 @@ Only once the loop is used. In `01-product-teardown.md` priority order:
 
 ## Stage 5 — Mobile  (MVP shipped 2026-08-18)
 
-Expo + React Native for the UI, native Kotlin/Swift modules where needed, `planning-core` via
+Expo + React Native for the UI, native Kotlin/Swift modules where needed, `packages/planning-core` via
 KMP for local preview and offline planning.
 
 **The rule that keeps this sane:** the local engine is for *preview, simulation and instant
@@ -235,18 +235,18 @@ a commit cannot disagree about what is possible — only about what is current.
 
 What shipped (WP-M1…WP-M4):
 
-- `planning-core` gained `iosArm64`/`iosSimulatorArm64` (WP-M1) so iOS can load the same
+- `packages/planning-core` gained `iosArm64`/`iosSimulatorArm64` (WP-M1) so iOS can load the same
   engine; `LegacyNameKeys` has a real iOS `actual`.
-- The `planner-engine` native module (`mobile/modules/planner-engine`): `previewPlan(json)`
+- The `planner-engine` native module (`apps/mobile/modules/planner-engine`): `previewPlan(json)`
   — one String in, one String out through `EnginePreview` in `commonMain`, which reuses the
   exact `Mapping` the server runs. `:planning-contract` became KMP so the contract types are
   portable with the engine.
-- The `mobile/` Expo app: Login (fixture demo + Google OAuth), Today, Planner (Plan my
+- The `apps/mobile/` Expo app: Login (fixture demo + Google OAuth), Today, Planner (Plan my
   week / proposal / Apply / Undo) and Settings, talking to `:server`.
 - Android ships: the AARs publish with `scripts/publish-engine-local.sh --mobile` (compileSdk
   36), and both debug and release APKs build with the engine embedded. On-device interactive
   smoke testing is blocked by an emulator-image first-frame bug on this machine — see
-  `mobile/README.md` "Known limitation" — so the on-device evidence is: APK installs, JS
+  `apps/mobile/README.md` "Known limitation" — so the on-device evidence is: APK installs, JS
   runs, every screen's view hierarchy lays out, and the full signup→plan→apply→undo journey
   is green against the fixture server at the wire level.
 
@@ -262,7 +262,7 @@ the KMP targets, `baseName = "PlannerCore"` matches the Swift `import PlannerCor
 output paths follow the KMP `releaseFramework` convention, and the module's podspec
 statically links it. Two fixes landed: the repo-root resolution now survives invocation
 from any directory (the old `dirname "$0"` broke from elsewhere), and the script's
-comment points at `mobile/README.md` "iOS" instead of a README that does not exist. What
+comment points at `apps/mobile/README.md` "iOS" instead of a README that does not exist. What
 remains unverifiable here is the actual `xcodebuild -create-xcframework` step and a
 Swift compile against it — both need a Mac.
 

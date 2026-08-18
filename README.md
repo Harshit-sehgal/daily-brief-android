@@ -228,7 +228,7 @@ env -u KEYSTORE_PATH -u STORE_PASSWORD -u KEY_ALIAS -u KEY_PASSWORD \
 ```
 
 Release builds enable R8 optimization and resource shrinking. The Room Gradle
-plugin exports schema history to `app/schemas`; commit newly generated schema
+plugin exports schema history to `apps/android/schemas`; commit newly generated schema
 JSON whenever the database version or entities change.
 
 ### Current recorded evidence
@@ -296,7 +296,7 @@ tests from another terminal:
 ```bash
 adb wait-for-device
 adb shell getprop sys.boot_completed
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r apps/android/build/outputs/apk/debug/app-debug.apk
 ./gradlew --no-daemon --stacktrace connectedDebugAndroidTest
 ```
 

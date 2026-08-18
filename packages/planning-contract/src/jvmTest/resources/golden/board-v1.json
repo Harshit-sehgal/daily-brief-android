@@ -1,0 +1,54 @@
+{
+  "v": 1,
+  "project": {
+    "v": 1,
+    "id": "project-1",
+    "workspaceId": "ws-1",
+    "name": "Client A",
+    "isDefault": false,
+    "rank": 0,
+    "archivedAt": null
+  },
+  "stages": [
+    {
+      "id": "stage-todo",
+      "name": "To Do",
+      "rank": 0,
+      "archivedAt": null
+    },
+    {
+      "id": "stage-progress",
+      "name": "In Progress",
+      "rank": 1,
+      "archivedAt": null
+    },
+    {
+      "id": "stage-done",
+      "name": "Done",
+      "rank": 2,
+      "archivedAt": null
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-a",
+      "boardId": "project-1",
+      "columnId": "stage-todo",
+      "parentId": null,
+      "title": "Write schema",
+      "notes": null,
+      "rank": 0,
+      "startConstraint": null,
+      "dueAt": 1735858800000,
+      "effortMinutes": 90,
+      "progress": 0,
+      "priority": "high",
+      "owner": null,
+      "schedulingMode": "auto",
+      "locked": false,
+      "isMilestone": false,
+      "completedAt": null,
+      "archivedAt": null
+    }
+  ]
+}

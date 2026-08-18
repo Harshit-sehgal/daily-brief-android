@@ -50,7 +50,7 @@ ENVELOPE_KEY=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
 DATABASE_URL="$DB_URL" DATABASE_USER=postgres DATABASE_PASSWORD=postgres \
   SESSION_SECRET="journey-session-secret-0123456789abcdef" \
   ENVELOPE_KEY_HEX="$ENVELOPE_KEY" FIXTURE_PROVIDER=1 PORT="$PORT_API" \
-  "$ROOT/server/build/install/server/bin/server" >/tmp/opencode/journey-server.log 2>&1 &
+  "$ROOT/services/server/build/install/server/bin/server" >/tmp/opencode/journey-server.log 2>&1 &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true; docker stop "$CONTAINER" >/dev/null 2>&1 || true' EXIT
 

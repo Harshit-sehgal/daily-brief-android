@@ -130,7 +130,7 @@ baselines, scenarios, portfolio rollups, journal + Undo.
 - Logic worth testing → pure object pattern (`ScheduleAnalysis`, `TimelineLayout`,
   `SyncMergePolicy`, `WorkspacePreferencePolicy`, `EventDraftEdits`, `DayPulse`).
 - Room schema changes need a version bump + Migration + exported schema update
-  (`app/schemas/`); plan-scoped tables cascade from their board.
+  (`apps/android/schemas/`); plan-scoped tables cascade from their board.
 - Secrets never touch Room (`SECRET_SETTING_KEYS` → `SecretStore`).
 - One schedule lane: `BriefingRepository.SCHEDULE_MUTEX` serializes sync/mutations.
 - Deletes fail closed; Undo is compare-and-set; undo windows owned by
@@ -179,7 +179,7 @@ Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
 - [x] **WP-12** the planner API contract FROZEN at v1 (`b229dfd`).
 - [x] **WP-13** the vertical slice (`f9f0d24` + `ffd10be`): sign in → connect calendar →
   add tasks → Plan my week → proposal with reasons → apply → Today. `:server` Ktor
-  module + Next.js `web/` client; automated journey in the gate + real-account runbook.
+  module + Next.js `apps/web/` client; automated journey in the gate + real-account runbook.
 - [x] **WP-14** sync-worker hardening — see the work log; the worker shipped with WP-13,
   hardening (token refresh, fetch retries, sync ledger) landed after.
 - [x] **WP-15** depth and paid tier: Capacity (4.1), Board (4.2), dependencies (4.3),
@@ -356,8 +356,8 @@ file paths and engine signatures (see section C above).
   array/object codecs). One stale comment fixed in `SavedViewCodec.kt`.
 - `GanttInteraction` split: px/dp geometry (`GanttDirectManipulationPolicy`,
   `GanttManipulationTargets`, `GanttDirectManipulationTargets`) moved to
-  `app/src/main/java/com/example/core/GanttDirectManipulation.kt` + its tests to
-  `app/src/test/.../GanttDirectManipulationTest.kt`; the engine keeps
+  `apps/android/src/main/java/com/example/core/GanttDirectManipulation.kt` + its tests to
+  `apps/android/src/test/.../GanttDirectManipulationTest.kt`; the engine keeps
   `GanttBlockDraft` (Serializable for `rememberSaveable`), `GanttBlockEditPolicy`,
   `GanttWorkingBands`, `GanttDragTarget`.
 - Date-time cluster: **blocked** — no `kotlinx-datetime` in the offline Gradle cache

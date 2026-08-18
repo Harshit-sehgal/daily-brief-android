@@ -22,7 +22,13 @@ dependencyResolutionManagement {
 
 rootProject.name = "Daily Brief"
 
+// The 2026-08-19 reshuffle: apps/ services/ packages/. Module names are unchanged so
+// scripts and CI keep spelling :app, :server, :planning-core, :planning-contract.
 include(":app")
+project(":app").projectDir = file("apps/android")
 include(":planning-core")
+project(":planning-core").projectDir = file("packages/planning-core")
 include(":planning-contract")
+project(":planning-contract").projectDir = file("packages/planning-contract")
 include(":server")
+project(":server").projectDir = file("services/server")

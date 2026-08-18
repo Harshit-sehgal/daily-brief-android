@@ -1,0 +1,113 @@
+{
+  "v": 1,
+  "scenarios": [
+    {
+      "key": "due",
+      "name": "Due date first",
+      "rationale": "Whatever is due soonest gets the first free slot.",
+      "preferredOrder": [],
+      "result": {
+        "v": 1,
+        "proposals": [
+          {
+            "itemId": "task-a",
+            "startAt": 1735693200000,
+            "endAt": 1735698600000,
+            "reason": "working time"
+          }
+        ],
+        "unplaced": [
+          {
+            "itemId": "task-c",
+            "reason": "no effort stated"
+          }
+        ],
+        "explanation": "Nothing is saved until you apply it. 1 of 2 tasks placed.",
+        "health": {
+          "assessment": "OVERCOMMITTED",
+          "workingMinutes": 2400,
+          "capacityAfterCommitmentsMinutes": 1500,
+          "overloadMinutes": 300,
+          "missingEstimateCount": 1,
+          "unscheduledDemandMinutes": 0,
+          "demands": [
+            {
+              "itemId": "task-a",
+              "remainingEffortMinutes": 90,
+              "scheduledMinutes": 90,
+              "unscheduledMinutes": 0
+            }
+          ],
+          "risks": [
+            {
+              "kind": "DEADLINE_CAPACITY",
+              "itemId": null,
+              "explanation": "Capacity runs out before the deadline"
+            }
+          ],
+          "repairs": [],
+          "warnings": [
+            "One task states no effort"
+          ],
+          "explanation": "The week is overcommitted by 5 hours"
+        }
+      }
+    },
+    {
+      "key": "priority",
+      "name": "Priority first",
+      "rationale": "Urgent and high-priority work is placed before anything else.",
+      "preferredOrder": [
+        "task-a",
+        "task-b"
+      ],
+      "result": {
+        "v": 1,
+        "proposals": [
+          {
+            "itemId": "task-a",
+            "startAt": 1735693200000,
+            "endAt": 1735698600000,
+            "reason": "working time"
+          }
+        ],
+        "unplaced": [
+          {
+            "itemId": "task-c",
+            "reason": "no effort stated"
+          }
+        ],
+        "explanation": "Nothing is saved until you apply it. 1 of 2 tasks placed.",
+        "health": {
+          "assessment": "OVERCOMMITTED",
+          "workingMinutes": 2400,
+          "capacityAfterCommitmentsMinutes": 1500,
+          "overloadMinutes": 300,
+          "missingEstimateCount": 1,
+          "unscheduledDemandMinutes": 0,
+          "demands": [
+            {
+              "itemId": "task-a",
+              "remainingEffortMinutes": 90,
+              "scheduledMinutes": 90,
+              "unscheduledMinutes": 0
+            }
+          ],
+          "risks": [
+            {
+              "kind": "DEADLINE_CAPACITY",
+              "itemId": null,
+              "explanation": "Capacity runs out before the deadline"
+            }
+          ],
+          "repairs": [],
+          "warnings": [
+            "One task states no effort"
+          ],
+          "explanation": "The week is overcommitted by 5 hours"
+        }
+      }
+    }
+  ],
+  "spread": "Both approaches place the same work by the same evening."
+}

@@ -17,7 +17,7 @@ ADB="$SDK/platform-tools/adb"
 BUILD_TOOLS="$(ls -d "$SDK"/build-tools/* 2>/dev/null | sort -V | tail -1 || true)"
 APPLICATION_ID="com.aistudio.dailybrief.jxhvqy"
 ACTIVITY="$APPLICATION_ID/com.example.MainActivity"
-UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+UNSIGNED="apps/android/build/outputs/apk/release/app-release-unsigned.apk"
 WORK="$(mktemp -d)"
 KEEP=0
 

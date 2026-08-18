@@ -1,0 +1,1538 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 10,
+    "identityHash": "bf8b7cd69bbfa99797034fd2ff4c05a7",
+    "entities": [
+      {
+        "tableName": "briefing_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `startTime` INTEGER NOT NULL, `endTime` INTEGER NOT NULL, `source` TEXT NOT NULL, `description` TEXT, `isDeadline` INTEGER NOT NULL, `isUrgent` INTEGER NOT NULL, `isAllDay` INTEGER NOT NULL, `location` TEXT, `kanbanStatus` TEXT NOT NULL, `kanbanBoard` TEXT NOT NULL, `userEdited` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startTime",
+            "columnName": "startTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endTime",
+            "columnName": "endTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isDeadline",
+            "columnName": "isDeadline",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isUrgent",
+            "columnName": "isUrgent",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isAllDay",
+            "columnName": "isAllDay",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "location",
+            "columnName": "location",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "kanbanStatus",
+            "columnName": "kanbanStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kanbanBoard",
+            "columnName": "kanbanBoard",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userEdited",
+            "columnName": "userEdited",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "daily_briefings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`dateString` TEXT NOT NULL, `briefText` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `signature` TEXT NOT NULL, PRIMARY KEY(`dateString`))",
+        "fields": [
+          {
+            "fieldPath": "dateString",
+            "columnName": "dateString",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "briefText",
+            "columnName": "briefText",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "signature",
+            "columnName": "signature",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "dateString"
+          ]
+        }
+      },
+      {
+        "tableName": "system_settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `value` TEXT NOT NULL, PRIMARY KEY(`key`))",
+        "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        }
+      },
+      {
+        "tableName": "plan_boards",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `nameKey` TEXT NOT NULL, `rank` INTEGER NOT NULL, `isDefault` INTEGER NOT NULL, `archivedAt` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nameKey",
+            "columnName": "nameKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rank",
+            "columnName": "rank",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isDefault",
+            "columnName": "isDefault",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "archivedAt",
+            "columnName": "archivedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_plan_boards_nameKey",
+            "unique": true,
+            "columnNames": [
+              "nameKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_plan_boards_nameKey` ON `${TABLE_NAME}` (`nameKey`)"
+          },
+          {
+            "name": "index_plan_boards_rank",
+            "unique": false,
+            "columnNames": [
+              "rank"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_boards_rank` ON `${TABLE_NAME}` (`rank`)"
+          }
+        ]
+      },
+      {
+        "tableName": "plan_columns",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `boardId` TEXT NOT NULL, `name` TEXT NOT NULL, `nameKey` TEXT NOT NULL, `rank` INTEGER NOT NULL, `archivedAt` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`boardId`) REFERENCES `plan_boards`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "boardId",
+            "columnName": "boardId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nameKey",
+            "columnName": "nameKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rank",
+            "columnName": "rank",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "archivedAt",
+            "columnName": "archivedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_plan_columns_boardId_nameKey",
+            "unique": true,
+            "columnNames": [
+              "boardId",
+              "nameKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_plan_columns_boardId_nameKey` ON `${TABLE_NAME}` (`boardId`, `nameKey`)"
+          },
+          {
+            "name": "index_plan_columns_boardId_id",
+            "unique": true,
+            "columnNames": [
+              "boardId",
+              "id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_plan_columns_boardId_id` ON `${TABLE_NAME}` (`boardId`, `id`)"
+          },
+          {
+            "name": "index_plan_columns_boardId_rank",
+            "unique": false,
+            "columnNames": [
+              "boardId",
+              "rank"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_columns_boardId_rank` ON `${TABLE_NAME}` (`boardId`, `rank`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plan_boards",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "boardId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "plan_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `boardId` TEXT NOT NULL, `columnId` TEXT, `parentId` TEXT, `title` TEXT NOT NULL, `notes` TEXT, `rank` INTEGER NOT NULL, `startConstraint` INTEGER, `dueAt` INTEGER, `effortMinutes` INTEGER, `progress` INTEGER NOT NULL, `priority` TEXT NOT NULL, `owner` TEXT, `schedulingMode` TEXT NOT NULL, `locked` INTEGER NOT NULL, `isMilestone` INTEGER NOT NULL, `completedAt` INTEGER, `archivedAt` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`boardId`) REFERENCES `plan_boards`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION , FOREIGN KEY(`columnId`) REFERENCES `plan_columns`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL , FOREIGN KEY(`boardId`, `columnId`) REFERENCES `plan_columns`(`boardId`, `id`) ON UPDATE NO ACTION ON DELETE NO ACTION , FOREIGN KEY(`parentId`) REFERENCES `plan_items`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL , FOREIGN KEY(`boardId`, `parentId`) REFERENCES `plan_items`(`boardId`, `id`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "boardId",
+            "columnName": "boardId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "columnId",
+            "columnName": "columnId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "parentId",
+            "columnName": "parentId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rank",
+            "columnName": "rank",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startConstraint",
+            "columnName": "startConstraint",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "dueAt",
+            "columnName": "dueAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "effortMinutes",
+            "columnName": "effortMinutes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "progress",
+            "columnName": "progress",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priority",
+            "columnName": "priority",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "owner",
+            "columnName": "owner",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "schedulingMode",
+            "columnName": "schedulingMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "locked",
+            "columnName": "locked",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isMilestone",
+            "columnName": "isMilestone",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedAt",
+            "columnName": "completedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "archivedAt",
+            "columnName": "archivedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_plan_items_boardId_id",
+            "unique": true,
+            "columnNames": [
+              "boardId",
+              "id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_plan_items_boardId_id` ON `${TABLE_NAME}` (`boardId`, `id`)"
+          },
+          {
+            "name": "index_plan_items_boardId_columnId_rank",
+            "unique": false,
+            "columnNames": [
+              "boardId",
+              "columnId",
+              "rank"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_items_boardId_columnId_rank` ON `${TABLE_NAME}` (`boardId`, `columnId`, `rank`)"
+          },
+          {
+            "name": "index_plan_items_boardId_parentId",
+            "unique": false,
+            "columnNames": [
+              "boardId",
+              "parentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_items_boardId_parentId` ON `${TABLE_NAME}` (`boardId`, `parentId`)"
+          },
+          {
+            "name": "index_plan_items_columnId",
+            "unique": false,
+            "columnNames": [
+              "columnId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_items_columnId` ON `${TABLE_NAME}` (`columnId`)"
+          },
+          {
+            "name": "index_plan_items_parentId",
+            "unique": false,
+            "columnNames": [
+              "parentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_items_parentId` ON `${TABLE_NAME}` (`parentId`)"
+          },
+          {
+            "name": "index_plan_items_dueAt",
+            "unique": false,
+            "columnNames": [
+              "dueAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_items_dueAt` ON `${TABLE_NAME}` (`dueAt`)"
+          },
+          {
+            "name": "index_plan_items_archivedAt",
+            "unique": false,
+            "columnNames": [
+              "archivedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_items_archivedAt` ON `${TABLE_NAME}` (`archivedAt`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plan_boards",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "boardId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "plan_columns",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "columnId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "plan_columns",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "boardId",
+              "columnId"
+            ],
+            "referencedColumns": [
+              "boardId",
+              "id"
+            ]
+          },
+          {
+            "table": "plan_items",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "parentId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "plan_items",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "boardId",
+              "parentId"
+            ],
+            "referencedColumns": [
+              "boardId",
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "plan_blocks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `planItemId` TEXT NOT NULL, `startAt` INTEGER NOT NULL, `endAt` INTEGER NOT NULL, `position` INTEGER NOT NULL, `locked` INTEGER NOT NULL, `linkedEventId` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`planItemId`) REFERENCES `plan_items`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "planItemId",
+            "columnName": "planItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startAt",
+            "columnName": "startAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endAt",
+            "columnName": "endAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "locked",
+            "columnName": "locked",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "linkedEventId",
+            "columnName": "linkedEventId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_plan_blocks_planItemId_startAt",
+            "unique": false,
+            "columnNames": [
+              "planItemId",
+              "startAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_blocks_planItemId_startAt` ON `${TABLE_NAME}` (`planItemId`, `startAt`)"
+          },
+          {
+            "name": "index_plan_blocks_startAt_endAt",
+            "unique": false,
+            "columnNames": [
+              "startAt",
+              "endAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_blocks_startAt_endAt` ON `${TABLE_NAME}` (`startAt`, `endAt`)"
+          },
+          {
+            "name": "index_plan_blocks_linkedEventId",
+            "unique": false,
+            "columnNames": [
+              "linkedEventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_blocks_linkedEventId` ON `${TABLE_NAME}` (`linkedEventId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plan_items",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "planItemId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "plan_dependencies",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `boardId` TEXT NOT NULL, `predecessorId` TEXT NOT NULL, `successorId` TEXT NOT NULL, `type` TEXT NOT NULL, `lagMinutes` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`predecessorId`) REFERENCES `plan_items`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`successorId`) REFERENCES `plan_items`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`boardId`, `predecessorId`) REFERENCES `plan_items`(`boardId`, `id`) ON UPDATE NO ACTION ON DELETE NO ACTION , FOREIGN KEY(`boardId`, `successorId`) REFERENCES `plan_items`(`boardId`, `id`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "boardId",
+            "columnName": "boardId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "predecessorId",
+            "columnName": "predecessorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "successorId",
+            "columnName": "successorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lagMinutes",
+            "columnName": "lagMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_plan_dependencies_predecessorId_successorId",
+            "unique": true,
+            "columnNames": [
+              "predecessorId",
+              "successorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_plan_dependencies_predecessorId_successorId` ON `${TABLE_NAME}` (`predecessorId`, `successorId`)"
+          },
+          {
+            "name": "index_plan_dependencies_successorId",
+            "unique": false,
+            "columnNames": [
+              "successorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_dependencies_successorId` ON `${TABLE_NAME}` (`successorId`)"
+          },
+          {
+            "name": "index_plan_dependencies_boardId_predecessorId",
+            "unique": false,
+            "columnNames": [
+              "boardId",
+              "predecessorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_dependencies_boardId_predecessorId` ON `${TABLE_NAME}` (`boardId`, `predecessorId`)"
+          },
+          {
+            "name": "index_plan_dependencies_boardId_successorId",
+            "unique": false,
+            "columnNames": [
+              "boardId",
+              "successorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_dependencies_boardId_successorId` ON `${TABLE_NAME}` (`boardId`, `successorId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plan_items",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "predecessorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "plan_items",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "successorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "plan_items",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "boardId",
+              "predecessorId"
+            ],
+            "referencedColumns": [
+              "boardId",
+              "id"
+            ]
+          },
+          {
+            "table": "plan_items",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "boardId",
+              "successorId"
+            ],
+            "referencedColumns": [
+              "boardId",
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "saved_views",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `boardId` TEXT, `name` TEXT NOT NULL, `nameKey` TEXT NOT NULL, `surface` TEXT NOT NULL, `filtersJson` TEXT NOT NULL, `grouping` TEXT NOT NULL, `sortJson` TEXT NOT NULL, `columnsJson` TEXT NOT NULL, `rangeDays` INTEGER, `zoom` TEXT, `collapsedIdsJson` TEXT NOT NULL, `pinned` INTEGER NOT NULL, `rank` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`boardId`) REFERENCES `plan_boards`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "boardId",
+            "columnName": "boardId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nameKey",
+            "columnName": "nameKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "surface",
+            "columnName": "surface",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filtersJson",
+            "columnName": "filtersJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "grouping",
+            "columnName": "grouping",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sortJson",
+            "columnName": "sortJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "columnsJson",
+            "columnName": "columnsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rangeDays",
+            "columnName": "rangeDays",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "zoom",
+            "columnName": "zoom",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "collapsedIdsJson",
+            "columnName": "collapsedIdsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pinned",
+            "columnName": "pinned",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rank",
+            "columnName": "rank",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_saved_views_boardId_surface_rank",
+            "unique": false,
+            "columnNames": [
+              "boardId",
+              "surface",
+              "rank"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_saved_views_boardId_surface_rank` ON `${TABLE_NAME}` (`boardId`, `surface`, `rank`)"
+          },
+          {
+            "name": "index_saved_views_surface_pinned",
+            "unique": false,
+            "columnNames": [
+              "surface",
+              "pinned"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_saved_views_surface_pinned` ON `${TABLE_NAME}` (`surface`, `pinned`)"
+          },
+          {
+            "name": "index_saved_views_boardId_surface_nameKey",
+            "unique": true,
+            "columnNames": [
+              "boardId",
+              "surface",
+              "nameKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_saved_views_boardId_surface_nameKey` ON `${TABLE_NAME}` (`boardId`, `surface`, `nameKey`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plan_boards",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "boardId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "work_schedules",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `nameKey` TEXT NOT NULL, `timeZoneId` TEXT NOT NULL, `isDefault` INTEGER NOT NULL, `minimumChunkMinutes` INTEGER NOT NULL, `maximumChunkMinutes` INTEGER NOT NULL, `bufferMinutes` INTEGER NOT NULL, `rank` INTEGER NOT NULL, `archivedAt` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nameKey",
+            "columnName": "nameKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timeZoneId",
+            "columnName": "timeZoneId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isDefault",
+            "columnName": "isDefault",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minimumChunkMinutes",
+            "columnName": "minimumChunkMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maximumChunkMinutes",
+            "columnName": "maximumChunkMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bufferMinutes",
+            "columnName": "bufferMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rank",
+            "columnName": "rank",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "archivedAt",
+            "columnName": "archivedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_work_schedules_nameKey",
+            "unique": true,
+            "columnNames": [
+              "nameKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_work_schedules_nameKey` ON `${TABLE_NAME}` (`nameKey`)"
+          },
+          {
+            "name": "index_work_schedules_isDefault_rank",
+            "unique": false,
+            "columnNames": [
+              "isDefault",
+              "rank"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_work_schedules_isDefault_rank` ON `${TABLE_NAME}` (`isDefault`, `rank`)"
+          },
+          {
+            "name": "index_work_schedules_archivedAt",
+            "unique": false,
+            "columnNames": [
+              "archivedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_work_schedules_archivedAt` ON `${TABLE_NAME}` (`archivedAt`)"
+          }
+        ]
+      },
+      {
+        "tableName": "work_schedule_windows",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `scheduleId` TEXT NOT NULL, `kind` TEXT NOT NULL, `dayOfWeek` INTEGER, `localDate` TEXT, `startMinute` INTEGER NOT NULL, `endMinute` INTEGER NOT NULL, `isClosed` INTEGER NOT NULL, `rank` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`scheduleId`) REFERENCES `work_schedules`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleId",
+            "columnName": "scheduleId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dayOfWeek",
+            "columnName": "dayOfWeek",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "localDate",
+            "columnName": "localDate",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "startMinute",
+            "columnName": "startMinute",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endMinute",
+            "columnName": "endMinute",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isClosed",
+            "columnName": "isClosed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rank",
+            "columnName": "rank",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_work_schedule_windows_scheduleId_kind_dayOfWeek_rank",
+            "unique": false,
+            "columnNames": [
+              "scheduleId",
+              "kind",
+              "dayOfWeek",
+              "rank"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_work_schedule_windows_scheduleId_kind_dayOfWeek_rank` ON `${TABLE_NAME}` (`scheduleId`, `kind`, `dayOfWeek`, `rank`)"
+          },
+          {
+            "name": "index_work_schedule_windows_scheduleId_kind_localDate_rank",
+            "unique": false,
+            "columnNames": [
+              "scheduleId",
+              "kind",
+              "localDate",
+              "rank"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_work_schedule_windows_scheduleId_kind_localDate_rank` ON `${TABLE_NAME}` (`scheduleId`, `kind`, `localDate`, `rank`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "work_schedules",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "scheduleId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "plan_item_schedules",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`planItemId` TEXT NOT NULL, `workScheduleId` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`planItemId`), FOREIGN KEY(`planItemId`) REFERENCES `plan_items`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`workScheduleId`) REFERENCES `work_schedules`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "planItemId",
+            "columnName": "planItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "workScheduleId",
+            "columnName": "workScheduleId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "planItemId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_plan_item_schedules_workScheduleId",
+            "unique": false,
+            "columnNames": [
+              "workScheduleId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_item_schedules_workScheduleId` ON `${TABLE_NAME}` (`workScheduleId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plan_items",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "planItemId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "work_schedules",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "workScheduleId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "plan_mutations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `boardId` TEXT, `mutationType` TEXT NOT NULL, `targetType` TEXT NOT NULL, `targetIdsJson` TEXT NOT NULL, `summary` TEXT NOT NULL, `beforeJson` TEXT, `afterJson` TEXT, `status` TEXT NOT NULL, `origin` TEXT NOT NULL, `schemaVersion` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `undoneAt` INTEGER, `expiresAt` INTEGER, PRIMARY KEY(`id`), FOREIGN KEY(`boardId`) REFERENCES `plan_boards`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "boardId",
+            "columnName": "boardId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "mutationType",
+            "columnName": "mutationType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetType",
+            "columnName": "targetType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetIdsJson",
+            "columnName": "targetIdsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "summary",
+            "columnName": "summary",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "beforeJson",
+            "columnName": "beforeJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "afterJson",
+            "columnName": "afterJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "origin",
+            "columnName": "origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "schemaVersion",
+            "columnName": "schemaVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "undoneAt",
+            "columnName": "undoneAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "expiresAt",
+            "columnName": "expiresAt",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_plan_mutations_boardId_createdAt",
+            "unique": false,
+            "columnNames": [
+              "boardId",
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_mutations_boardId_createdAt` ON `${TABLE_NAME}` (`boardId`, `createdAt`)"
+          },
+          {
+            "name": "index_plan_mutations_status_createdAt",
+            "unique": false,
+            "columnNames": [
+              "status",
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_mutations_status_createdAt` ON `${TABLE_NAME}` (`status`, `createdAt`)"
+          },
+          {
+            "name": "index_plan_mutations_expiresAt",
+            "unique": false,
+            "columnNames": [
+              "expiresAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_mutations_expiresAt` ON `${TABLE_NAME}` (`expiresAt`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plan_boards",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "boardId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "plan_baselines",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `boardId` TEXT NOT NULL, `name` TEXT NOT NULL, `nameKey` TEXT NOT NULL, `capturedAt` INTEGER NOT NULL, `itemsJson` TEXT NOT NULL, `blocksJson` TEXT NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`boardId`) REFERENCES `plan_boards`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "boardId",
+            "columnName": "boardId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nameKey",
+            "columnName": "nameKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "capturedAt",
+            "columnName": "capturedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemsJson",
+            "columnName": "itemsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "blocksJson",
+            "columnName": "blocksJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_plan_baselines_boardId_capturedAt",
+            "unique": false,
+            "columnNames": [
+              "boardId",
+              "capturedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plan_baselines_boardId_capturedAt` ON `${TABLE_NAME}` (`boardId`, `capturedAt`)"
+          },
+          {
+            "name": "index_plan_baselines_boardId_nameKey",
+            "unique": true,
+            "columnNames": [
+              "boardId",
+              "nameKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_plan_baselines_boardId_nameKey` ON `${TABLE_NAME}` (`boardId`, `nameKey`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plan_boards",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "boardId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'bf8b7cd69bbfa99797034fd2ff4c05a7')"
+    ]
+  }
+}

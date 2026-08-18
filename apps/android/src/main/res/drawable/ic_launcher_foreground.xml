@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Outer Clipboard Board (centered within 66dp safe-zone) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M38,30 h32 c2.2,0 4,1.8 4,4 v40 c0,2.2 -1.8,4 -4,4 h-32 c-2.2,0 -4,-1.8 -4,-4 v-40 c0,-2.2 1.8,-4 4,-4 z" />
+        
+    <!-- Top Doc Clip binder mechanism -->
+    <path
+        android:fillColor="#68D391"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M46,26 h16 v5 h-16 z" />
+
+    <!-- Document Lines checklist status indicator -->
+    <path
+        android:strokeColor="#90CDF4"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:pathData="M42,42 h24" />
+        
+    <path
+        android:strokeColor="#90CDF4"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:pathData="M42,50 h16" />
+
+    <!-- Bold Checkmark symbol -->
+    <path
+        android:strokeColor="#68D391"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M42,62 l4,4 l14,-14" />
+</vector>

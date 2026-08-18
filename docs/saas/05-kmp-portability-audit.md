@@ -168,7 +168,7 @@ audit:
 
 - **Journal codecs untangled from the Room migration file.** `PlanMutationCodec`,
   `WorkingScheduleMutationCodec`, `PlanCatalogMutationCodec`, `SavedViewCodec` and
-  `WorkingCalendarMapper` now live in `planning-core`'s `jvmShared`
+  `WorkingCalendarMapper` now live in `packages/planning-core`'s `jvmShared`
   (`com.example.data.repository` / `com.example.data.database`), with their tests moved to
   `jvmTest`. `PlanMigration.kt` keeps only migrations, delegating identity helpers
   (`nameKey`/`stableId`) to `LegacyNameKeys` and schedule defaults to `WorkScheduleDefaults`;
@@ -177,7 +177,7 @@ audit:
   recorded in the git history of this pass.
 - **`GanttInteraction` split.** The px/dp touch geometry — `GanttDirectManipulationPolicy`,
   `GanttManipulationTargets`, `GanttDirectManipulationTargets` — moved back to `:app`
-  (`com.example.core.GanttDirectManipulation`, with its tests in `app/src/test`). The engine
+  (`com.example.core.GanttDirectManipulation`, with its tests in `apps/android/src/test`). The engine
   keeps the time policy (`GanttBlockEditPolicy`), the saveable draft (`GanttBlockDraft`,
   `Serializable` for `rememberSaveable`) and `GanttWorkingBands`; `GanttBlockDraft` keeps the
   JVM marker, which is why this file remains in `jvmShared`.
@@ -191,7 +191,7 @@ audit:
   encoding of exactly what the server computes. `:planning-contract` converted to KMP so the
   contract types are importable from `commonMain` (golden files and 19 tests unchanged, now
   in `jvmTest`); the mobile `planner-engine` module compiles them into the app AAR.
-  `EnginePreviewTest` (in `planning-core`'s `jvmTest`) pins the round trip, determinism,
+  `EnginePreviewTest` (in `packages/planning-core`'s `jvmTest`) pins the round trip, determinism,
   version refusal, and the equality with the server's mapping path.
 - 2026-08-18: `iosArm64`/`iosSimulatorArm64` targets added (configure everywhere, build on
   macOS only); `LegacyNameKeys.ios.kt` actual lands (`precomposedStringWithCompatibilityMapping`
@@ -201,7 +201,7 @@ audit:
   99% → 99.9%: the only jvmShared lines left are the JVM `actual`. `scripts/build-ios-framework.sh`
   is the Mac-side XCFramework build.
 - 2026-08-17: `DependencyAnalysis`, `CriticalPathEngine`, `GuardedArithmetic` → `commonMain`;
-  codec/`WorkingCalendarMapper`/`SavedViewCodec` untangled into `planning-core`; `GanttInteraction`
+  codec/`WorkingCalendarMapper`/`SavedViewCodec` untangled into `packages/planning-core`; `GanttInteraction`
   split back into `:app`; `CommonMainPurityTest` added. All suites green (`scripts/verify.sh
   --fast`), 380 JVM tests.
 - 2026-08-17 (later): `SavedViewCodec` (252) and `WorkScheduleDefaults` (10) → `commonMain`;

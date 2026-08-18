@@ -1,6 +1,6 @@
 # Domain and architecture — V1 server
 
-The server runs the same `planning-core` the app runs. This document maps the Room schema to a
+The server runs the same `packages/planning-core` the app runs. This document maps the Room schema to a
 multi-tenant Postgres model and names the invariants that must be redesigned, not translated.
 
 ## Tenant and identity
@@ -35,7 +35,7 @@ project belongs to a `Client` (nullable for personal projects).
 
 Every entity gains `workspace_id`; every query is scoped by it. The codecs move verbatim:
 `PlanMutationCodec`, `WorkingScheduleMutationCodec`, `PlanCatalogMutationCodec` and
-`SavedViewCodec` are already JVM-portable in `planning-core`'s `jvmShared` and speak only
+`SavedViewCodec` are already JVM-portable in `packages/planning-core`'s `jvmShared` and speak only
 strings/lists — they serialize into the same journal encoding, so history survives the move.
 
 ## Service architecture

@@ -48,8 +48,8 @@ install_apk() {
 }
 
 echo "capture: installing"
-install_apk app/build/outputs/apk/debug/app-debug.apk
-install_apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+install_apk apps/android/build/outputs/apk/debug/app-debug.apk
+install_apk apps/android/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 
 run_harness() {
   "$ADB" shell am instrument -w -e class "com.example.PreviewGalleryCaptureTest#$1" \

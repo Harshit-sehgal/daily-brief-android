@@ -59,8 +59,8 @@ jobs:
           name: android-build-evidence
           if-no-files-found: warn
           path: |
-            app/build/outputs/apk/
-            app/build/reports/
+            apps/android/build/outputs/apk/
+            apps/android/build/reports/
             app/build/test-results/
             planning-core/build/test-results/
 
@@ -118,5 +118,5 @@ jobs:
           name: android-instrumentation-evidence-api-${{ matrix.api-level }}
           if-no-files-found: warn
           path: |
-            app/build/outputs/androidTest-results/
-            app/build/reports/androidTests/
+            apps/android/build/outputs/androidTest-results/
+            apps/android/build/reports/androidTests/

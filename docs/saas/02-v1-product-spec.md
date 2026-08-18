@@ -2,7 +2,7 @@
 
 For the consultant ICP: independent consultants whose time is sold, whose work product is
 scheduled, and whose calendar is not under their control. V1 is web-first (a server runs the
-same `planning-core` engine the app runs) with the Android app kept as the strongest client.
+same `packages/planning-core` engine the app runs) with the Android app kept as the strongest client.
 
 ## Information architecture
 

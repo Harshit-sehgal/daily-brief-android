@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "availableMinutes": 480,
+  "plannedMinutes": 135,
+  "spareMinutes": 480,
+  "verdict": "CAN_TAKE",
+  "sentence": "8 h available this week, 2.2 h planned, 8 h spare — an 8 h/week client fits.",
+  "moves": []
+}

@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "rows": [
+    {
+      "projectId": "project-1",
+      "projectName": "Client A",
+      "openTasks": 2,
+      "doneTasks": 1,
+      "statedEffortMinutes": 135,
+      "scheduledMinutes": 90,
+      "overdueTasks": 1,
+      "unestimatedTasks": 1,
+      "weekBlocks": [
+        {
+          "itemId": "task-a",
+          "title": "Write schema",
+          "startAt": 1735693200000,
+          "endAt": 1735698600000
+        }
+      ]
+    }
+  ],
+  "note": "1 open task states no effort, so every effort total here is a floor rather than a total."
+}

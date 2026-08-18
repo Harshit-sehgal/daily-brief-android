@@ -113,10 +113,10 @@ explicitly, then do them.
 
 ---
 
-## 🟡 D3 — `planning-core` was accumulating things that are not planning *(fixed)*
+## 🟡 D3 — `packages/planning-core` was accumulating things that are not planning *(fixed)*
 
 **Commit:** `43dea69` put `data/backup/RowBackupCodec.kt` (156 lines) into
-`planning-core/jvmShared`.
+`packages/planning-core/jvmShared`.
 
 **Contradicts:** the module's stated purpose in `CLAUDE.md` and `00-programme-plan.md` — "the
 scheduling engine and the domain model it works on", shared by a JVM planning service, Android
@@ -148,7 +148,7 @@ moving a file between source sets invalidates it. Moving two files left `jvmTest
 and the guard reported the *previous* layout's percentage — the one number the whole
 portability effort is tracked by.
 
-**Fixed:** `planning-core/build.gradle.kts` now declares `src/commonMain/kotlin` and
+**Fixed:** `packages/packages/planning-core/build.gradle.kts` now declares `src/commonMain/kotlin` and
 `src/jvmShared/kotlin` as inputs of the `jvmTest` task.
 
 ---
@@ -183,7 +183,7 @@ entirely rather than move deeper into it.
 | --- | --- | --- | --- |
 | D1 | Widget, PDF export, backup/restore built against the V1 exclusion list | 🔴 | **Resolved** — spec amended to separate Android surface from web V1 scope; code kept |
 | D2 | Deadline behaviour changed without the flagged approval | 🟠 | **Resolved** — accepted and recorded in `00` §6 |
-| D3 | `RowBackupCodec` misplaced in `planning-core` | 🟡 | **Fixed** — moved to `:app` with its test; module 32% → 33% |
+| D3 | `RowBackupCodec` misplaced in `packages/planning-core` | 🟡 | **Fixed** — moved to `:app` with its test; module 32% → 33% |
 | D4 | Purity guard could report stale numbers | 🟡 | Fixed this pass |
 | D5 | Two unblocked files left in `jvmShared` | 🟢 | Fixed this pass |
 | D6 | Phases 2–5 delivered as planned | 🟢 | No action |
