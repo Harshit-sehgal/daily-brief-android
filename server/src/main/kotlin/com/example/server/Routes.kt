@@ -43,6 +43,11 @@ import com.example.server.google.FixtureCalendarProvider
 import com.example.server.google.GoogleCalendarProvider
 import com.example.server.google.GoogleOAuth
 import com.example.server.plan.Journal
+import com.example.server.push.ExpoPushProvider
+import com.example.server.push.FixturePushProvider
+import com.example.server.push.NotConfiguredPushProvider
+import com.example.server.push.PushPayload
+import com.example.server.push.PushProvider
 import com.example.server.summary.FixtureSummaryProvider
 import com.example.server.summary.GeminiQuota
 import com.example.server.summary.GeminiSummaryProvider
@@ -71,6 +76,7 @@ import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.authentication
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
@@ -79,6 +85,11 @@ import io.ktor.server.auth.bearer
 import io.ktor.server.auth.authenticate
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Mac
@@ -150,6 +161,16 @@ fun Application.routes(config: Config) {
           config.fixtureProvider -> FixtureSummaryProvider()
           config.geminiApiKey != null -> GeminiSummaryProvider(config.geminiApiKey, config.geminiModel)
           else -> NotConfiguredSummaryProvider()
+        }
+
+      // The push seam: the registry lives in push_tokens (tenant-bound), delivery goes through
+      // the provider. Fixture mode records deliveries for the journey; a deployment with
+      // EXPO_ACCESS_TOKEN rings real phones; without one the seam stays silent.
+      val pushProvider: PushProvider =
+        when {
+          config.fixtureProvider -> FixturePushProvider()
+          config.expoAccessToken != null -> ExpoPushProvider(config.expoAccessToken)
+          else -> NotConfiguredPushProvider()
         }
 
       post("/billing/webhook") {
@@ -811,6 +832,27 @@ fun Application.routes(config: Config) {
           val now = System.currentTimeMillis()
           val (blocks, entryId) = Journal.applyProposal(session.workspaceId, projectId, proposals, now)
           PlanStore.markRun(session.workspaceId, runId, "accepted")
+          // Fire-and-forget: a committed plan is the one moment worth a phone's attention.
+          // The delivery is bounded by the provider's timeouts and wrapped so a push outage
+          // can never fail an apply that already committed.
+          runCatching {
+            val tokens =
+              Db.dataSource.connection.use { conn ->
+                conn.query("SELECT token FROM push_tokens WHERE workspace_id = ?", listOf(session.workspaceId)) {
+                  it.getString(1)
+                }
+              }
+            tokens.forEach { token ->
+              pushProvider.send(
+                token,
+                PushPayload(
+                  title = "Your plan was applied",
+                  body = if (blocks.size == 1) "1 block applied to your week" else "${blocks.size} blocks applied to your week",
+                  data = mapOf("type" to "plan-applied", "entryId" to entryId),
+                ),
+              )
+            }
+          }
           call.respond(ApplyResponse(blocks.size, entryId))
         }
 
@@ -920,6 +962,64 @@ fun Application.routes(config: Config) {
             ),
           )
         }
+
+        // Push: the registry is tenant-bound by primary key — a token registered by one
+        // workspace can never be delivered to by another. The trigger is Apply: a committed
+        // plan is the one moment worth a phone's attention, and the delivery is
+        // fire-and-forget so a push outage never fails an apply.
+        post("/devices") {
+          val session = sessions.require(call)
+          val body = call.receive<DeviceRequest>()
+          if (body.token.isBlank()) {
+            call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "push token cannot be empty"))
+            return@post
+          }
+          val now = System.currentTimeMillis()
+          Db.dataSource.connection.use { conn ->
+            conn.execute(
+              "INSERT INTO push_tokens (workspace_id, token, platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?) " +
+                "ON CONFLICT (workspace_id, token) DO UPDATE SET platform = excluded.platform, updated_at = excluded.updated_at",
+              listOf(session.workspaceId, body.token, body.platform ?: "expo", now, now),
+            )
+          }
+          call.respond(mapOf("ok" to true))
+        }
+
+        delete("/devices") {
+          val session = sessions.require(call)
+          val body = call.receive<DeviceRequest>()
+          Db.dataSource.connection.use { conn ->
+            conn.execute(
+              "DELETE FROM push_tokens WHERE workspace_id = ? AND token = ?",
+              listOf(session.workspaceId, body.token),
+            )
+          }
+          call.respond(mapOf("ok" to true))
+        }
+
+        // Fixture-only: the journey reads the recorded deliveries and proves the payload and
+        // the tenant isolation. Never wired outside fixture mode.
+        if (config.fixtureProvider && pushProvider is FixturePushProvider) {
+          get("/fixture/push-deliveries") {
+            val token = call.request.queryParameters["token"]
+            call.respond(
+              buildJsonObject {
+                putJsonArray("deliveries") {
+                  pushProvider.deliveriesFor(token).forEach {
+                    addJsonObject {
+                      put("token", it.token)
+                      put("title", it.title)
+                      put("body", it.body)
+                      putJsonObject("data") {
+                        it.data.forEach { (key, value) -> put(key, value) }
+                      }
+                    }
+                  }
+                }
+              },
+            )
+          }
+        }
       }
     }
   }
@@ -927,6 +1027,13 @@ fun Application.routes(config: Config) {
 
 /** The typed quota refusal; the request transaction rolls back the reservation with it. */
 private class QuotaExceeded(val used: Long, val limit: Int) : Exception()
+
+/** The push registry's wire shape: a token plus the platform that minted it. */
+@kotlinx.serialization.Serializable
+private data class DeviceRequest(
+  val token: String = "",
+  val platform: String? = null,
+)
 
 @Serializable
 data class SessionResponse(val workspaceId: String, val token: String)

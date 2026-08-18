@@ -36,6 +36,8 @@ data class Config(
   /** The daily brief's platform key (invariant 4): the server holds it, tenants never see it. */
   val geminiApiKey: String? = null,
   val geminiModel: String = "gemini-2.0-flash",
+  /** Push: the Expo service's access token; absent means a deployment never rings a phone. */
+  val expoAccessToken: String? = null,
 ) {
   companion object {
     fun fromEnv(env: Map<String, String> = System.getenv()): Config =
@@ -60,6 +62,7 @@ data class Config(
         stripePriceId = env["STRIPE_PRICE_ID"],
         geminiApiKey = env["GEMINI_API_KEY"],
         geminiModel = env["GEMINI_MODEL"] ?: "gemini-2.0-flash",
+        expoAccessToken = env["EXPO_ACCESS_TOKEN"],
       )
 
     private fun requireEnv(env: Map<String, String>, name: String): String =

@@ -311,6 +311,60 @@ jq -e '.used == 1 and .limit == 3' /tmp/opencode/journey-trial-summary.json >/de
   || fail "trial quota wrong: $(jq -c '{used,limit}' /tmp/opencode/journey-trial-summary.json)"
 step "10. daily brief        (+$(( $(start_ms) - T )) ms)"
 
+# Step 11: push. The registry is tenant-bound: tokens A and B belong to the main workspace,
+# C to the trial workspace. B is deleted before the apply. Applying a fresh plan must
+# deliver exactly one notification — to A — with the right payload, and never to B or C.
+api_post /v1/devices '{"token":"journey-token-a","platform":"expo"}' /tmp/opencode/journey-device-a.json "$TOKEN"
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "device registration should answer 200"
+api_post /v1/devices '{"token":"journey-token-b","platform":"expo"}' /tmp/opencode/journey-device-b.json "$TOKEN"
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "second device registration should answer 200"
+curl -sS -o /dev/null -w '%{http_code}' -X DELETE "http://localhost:8090/v1/devices" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"token":"journey-token-b"}' > /tmp/opencode/journey-status.txt
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "device deregistration should answer 200"
+api_post /v1/devices '{"token":"trial-token-c","platform":"expo"}' /tmp/opencode/journey-trial-device.json "$TRIAL_TOKEN"
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "trial device registration should answer 200"
+# A fresh run on the main workspace; applying it is what triggers delivery. The request is
+# the step-4 shape (same items, same windows) — the server is stateless about items.
+PUSH_PLAN_REQUEST=$(jq -cn \
+  --argjson now "$NOW" \
+  --arg ws "$WS" \
+  --argjson windows "$WINDOWS" \
+  '{v:1, workspaceId:$ws,
+    rangeStartMs:$now, rangeEndMs:($now+7*86400000), nowMs:$now,
+    items:[
+      {id:"t1", boardId:"b1", title:"Write the proposal", rank:0, effortMinutes:90, dueAt:($now+17*3600000)},
+      {id:"t2", boardId:"b1", title:"Prep the slides", rank:1, effortMinutes:45},
+      {id:"t3", boardId:"b1", title:"Review the deck", rank:2, effortMinutes:60, dueAt:($now+40*3600000)}
+    ],
+    blocks:[], dependencies:[], fixedCommitments:[], scheduleIdByTaskId:{}, preferredOrder:[],
+    schedules:[{id:"s1", name:"Weekdays", timeZoneId:"UTC", isDefault:true, minimumChunkMinutes:30, maximumChunkMinutes:120, bufferMinutes:0, rank:0, windows:$windows}],
+    deadlinePolicy:"HARD"}')
+api_post /v1/plan "$PUSH_PLAN_REQUEST" /tmp/opencode/journey-push-plan.json "$TOKEN"
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "push leg: plan should answer 200"
+PUSH_RUN=$(jq -r .runId /tmp/opencode/journey-push-plan.json)
+[ -n "$PUSH_RUN" ] && [ "$PUSH_RUN" != "null" ] || fail "push leg: the plan run did not produce a runId"
+api_post "/v1/plan/$PUSH_RUN/apply" '{}' /tmp/opencode/journey-push-apply.json "$TOKEN"
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "push leg: apply should answer 200"
+PUSH_ENTRY=$(jq -r .entryId /tmp/opencode/journey-push-apply.json)
+[ -n "$PUSH_ENTRY" ] || fail "push leg: apply returned no entryId"
+curl -sS -o /tmp/opencode/journey-push-deliveries.json -w '%{http_code}' \
+  "http://localhost:8090/v1/fixture/push-deliveries" -H "Authorization: Bearer $TOKEN" \
+  > /tmp/opencode/journey-status.txt
+[ "$(cat /tmp/opencode/journey-status.txt)" = "200" ] || fail "push deliveries should answer 200"
+jq -e '.deliveries | length == 1' /tmp/opencode/journey-push-deliveries.json >/dev/null \
+  || fail "expected exactly one delivery, got: $(jq -c '.deliveries | map(.token)' /tmp/opencode/journey-push-deliveries.json)"
+jq -e '.deliveries[0].token == "journey-token-a"' /tmp/opencode/journey-push-deliveries.json >/dev/null \
+  || fail "the delivery went to the wrong token"
+jq -e --arg e "$PUSH_ENTRY" '.deliveries[0].data.entryId == $e' /tmp/opencode/journey-push-deliveries.json >/dev/null \
+  || fail "the delivery does not name the applied entry: $(jq -c '.deliveries[0]' /tmp/opencode/journey-push-deliveries.json)"
+jq -e '.deliveries[0].title == "Your plan was applied"' /tmp/opencode/journey-push-deliveries.json >/dev/null \
+  || fail "the delivery has the wrong title"
+# The deleted token B and the trial workspace's token C must never have been delivered to.
+jq -e '.deliveries | map(.token) | index("journey-token-b") == null and index("trial-token-c") == null' /tmp/opencode/journey-push-deliveries.json >/dev/null \
+  || fail "a delivery leaked to a deregistered or foreign token"
+step "11. push               (+$(( $(start_ms) - T )) ms)"
+
 TOTAL=$(( $(start_ms) - T0 ))
 echo "== journey complete in ${TOTAL} ms"
 if [ "$TOTAL" -gt 90000 ]; then

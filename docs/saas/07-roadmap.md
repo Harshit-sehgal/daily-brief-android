@@ -19,7 +19,8 @@ automated `journey.sh` acceptance in the gate), and **the Stage 5 mobile MVP has
 (WP-M1…WP-M4: an Expo app with Login/Today/Planner/Settings wired to the Ktor server, plus
 the `planner-engine` local-preview module running `planning-core`'s engine on-device).
 What is left is Stage 4 depth (Capacity, Board, dependencies, scenarios, billing), the
-remaining Stage 5 depth (Projects, Gantt, alarms, Gemini summaries, offline-first), and
+remaining Stage 5 depth (Projects, Gantt, Gemini summaries, offline-first, the Expo-side
+push-token wiring — the server half is shipped), and
 the open engine defects below.
 
 **Next: Stage 2** — the multi-tenant domain model and a frozen planner contract. Execution detail
@@ -246,9 +247,9 @@ What shipped (WP-M1…WP-M4):
   runs, every screen's view hierarchy lays out, and the full signup→plan→apply→undo journey
   is green against the fixture server at the wire level.
 
-Remaining in this stage: Projects/Board/Timeline, Gantt, alarms, Gemini summaries,
-offline-first (local preview already exists), and the iOS side (XCFramework build is
-written and unverified on this Linux machine).
+Remaining in this stage: Projects/Board/Timeline, Gantt, Gemini summaries, the Expo-side
+push-token wiring (the server half is shipped), offline-first (local preview already exists),
+and the iOS side (XCFramework build is written and unverified on this Linux machine).
 
 The iOS build script got its Linux-side review 2026-08-18: the two framework tasks match
 the KMP targets, `baseName = "PlannerCore"` matches the Swift `import PlannerCore`, the
@@ -271,9 +272,21 @@ Gemini's generateContent when `GEMINI_API_KEY` is set, 501 without one), the
 refund when the provider fails, and quota shown next to the brief in both clients ("2 of
 3 used this month"). The journey's step 10 burns the fixture limit and watches the fourth
 request come back 429, then proves a second workspace's ledger is its own. **Alarms stay
-with the Android app** — it continues as the shipping product, and server-side push for
-the Expo client is post-V1 (needs a device-verifiable delivery path this machine cannot
-exercise).
+with the Android app** — it continues as the shipping product.
+
+Shipped 2026-08-18 (server push): the server-side half of "alarms" for the Expo client —
+a tenant-bound device registry (`push_tokens`, V6) with `POST /v1/devices` /
+`DELETE /v1/devices` (the primary key is `(workspace_id, token)`, so one tenant can
+never ring another's phone), a `PushProvider` seam (fixture recorder for the journey,
+plain REST to Expo's push service when `EXPO_ACCESS_TOKEN` is set, silent when it is
+not), and the one meaningful trigger: Apply. Every applied run sends "Your plan was
+applied" to the workspace's tokens, fire-and-forget — the delivery is wrapped so a push
+outage can never fail an apply that already committed. The journey's step 11 registers
+two tokens on the main workspace and one on the trial workspace, deregisters one, applies
+a fresh plan, and asserts exactly one delivery (the right token, the applied entry's id
+in `data`, never the deleted or the foreign token). What remains is the Expo-side
+wiring — `expo-notifications` is not installed, and installing it means a prebuild this
+machine cannot verify — so that client hook-up is documented as the device-side step.
 
 The existing Android app continues as the shipping product throughout, and does not block any
 of this.
