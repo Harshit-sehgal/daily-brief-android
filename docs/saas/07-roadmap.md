@@ -250,6 +250,15 @@ Remaining in this stage: Projects/Board/Timeline, Gantt, alarms, Gemini summarie
 offline-first (local preview already exists), and the iOS side (XCFramework build is
 written and unverified on this Linux machine).
 
+The iOS build script got its Linux-side review 2026-08-18: the two framework tasks match
+the KMP targets, `baseName = "PlannerCore"` matches the Swift `import PlannerCore`, the
+output paths follow the KMP `releaseFramework` convention, and the module's podspec
+statically links it. Two fixes landed: the repo-root resolution now survives invocation
+from any directory (the old `dirname "$0"` broke from elsewhere), and the script's
+comment points at `mobile/README.md` "iOS" instead of a README that does not exist. What
+remains unverifiable here is the actual `xcodebuild -create-xcframework` step and a
+Swift compile against it — both need a Mac.
+
 Shipped 2026-08-18 (mobile depth): Projects/Board in the mobile Planner (project chips,
 tasks grouped by the board's stages, adds landing in the selected project), the offline
 preview fallback wired into "Plan my week" — when the server is unreachable the same
