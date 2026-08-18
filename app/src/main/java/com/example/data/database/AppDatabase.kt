@@ -157,7 +157,7 @@ interface SettingDao {
     PlanMutation::class,
     PlanBaseline::class,
   ],
-  version = 9,
+  version = 10,
   exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -224,6 +224,21 @@ abstract class AppDatabase : RoomDatabase() {
                 PlanMigrations.MIGRATION_6_7,
                 PlanMigrations.MIGRATION_7_8,
                 PlanMigrations.MIGRATION_8_9,
+                PlanMigrations.MIGRATION_9_10,
+              )
+              // Room cannot express partial indexes, so the "one non-archived default
+              // schedule" constraint rides the onCreate callback for fresh installs;
+              // upgrades get it from MIGRATION_9_10. Idempotent either way.
+              .addCallback(
+                object : RoomDatabase.Callback() {
+                  override fun onCreate(db: SupportSQLiteDatabase) {
+                    super.onCreate(db)
+                    db.execSQL(
+                      "CREATE UNIQUE INDEX IF NOT EXISTS index_work_schedules_one_non_archived_default " +
+                        "ON work_schedules (isDefault) WHERE isDefault = 1 AND archivedAt IS NULL"
+                    )
+                  }
+                },
               )
               // Versions 1 and 2 only ever existed on development builds, and
               // there is no migration for them — without this, opening one of

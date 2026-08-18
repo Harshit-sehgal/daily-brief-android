@@ -60,6 +60,30 @@ object PlanMigrations {
     }
 
   /**
+   * Gives the catalog the two constraints that previously lived only in application code
+   * (docs/saas/03-domain-and-architecture.md §4): one saved view per name per board+surface,
+   * and at most one non-archived default working schedule. Indexes are additive, so the
+   * migration is a pair of CREATE INDEX statements — no rebuild, no copy, no data risk.
+   *
+   * Room cannot express partial indexes, so the work_schedules one also lands in an onCreate
+   * callback for fresh installs (see AppDatabase); the exported schema models the
+   * saved_views index natively.
+   */
+  val MIGRATION_9_10: Migration =
+    object : Migration(9, 10) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE UNIQUE INDEX IF NOT EXISTS `index_saved_views_boardId_surface_nameKey` " +
+            "ON `saved_views` (`boardId`, `surface`, `nameKey`)"
+        )
+        db.execSQL(
+          "CREATE UNIQUE INDEX IF NOT EXISTS index_work_schedules_one_non_archived_default " +
+            "ON work_schedules (isDefault) WHERE isDefault = 1 AND archivedAt IS NULL"
+        )
+      }
+    }
+
+  /**
    * Gives baselines the foreign key they should have had.
    *
    * SQLite cannot add one to a live table, so the table is rebuilt and its rows copied. Any baseline

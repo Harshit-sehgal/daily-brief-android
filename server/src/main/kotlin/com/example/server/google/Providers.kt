@@ -5,6 +5,7 @@ import com.example.server.Config
 import com.example.server.db.Db
 import com.example.server.db.Db.execute
 import com.example.server.db.Envelope
+import com.example.server.key.KeyProviders
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -207,12 +208,13 @@ object GoogleOAuth {
 
   fun storeToken(config: Config, workspaceId: String, provider: String, account: String, tokenJson: String) {
     val connectionId = java.util.UUID.randomUUID().toString()
-    val envelope = Envelope.wrap(config.envelopeKeyHex, workspaceId, "calendar_connection_$connectionId", tokenJson)
+    val keyProvider = KeyProviders.from(config)
+    val envelope = Envelope.wrap(keyProvider, workspaceId, "calendar_connection_$connectionId", tokenJson)
     Db.inTransaction { conn ->
       conn.execute(
         "INSERT INTO calendar_connections (id, workspace_id, provider, external_account, token_ciphertext, token_kms_key_id, status, created_at, updated_at) " +
           "VALUES (?, ?, ?, ?, ?, ?, 'connected', ?, ?)",
-        listOf(connectionId, workspaceId, provider, account, envelope, "dev-key", System.currentTimeMillis(), System.currentTimeMillis()),
+        listOf(connectionId, workspaceId, provider, account, envelope, keyProvider.keyId, System.currentTimeMillis(), System.currentTimeMillis()),
       )
     }
   }

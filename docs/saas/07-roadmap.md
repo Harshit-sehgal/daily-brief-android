@@ -137,10 +137,20 @@ is the six-month rewrite this stage exists to avoid.
   single-writer database. Postgres needs `SERIALIZABLE` or `SELECT … FOR UPDATE` on the journal
   row plus the affected entities. The codecs port unchanged once 1.3 lands.
 - **`SecretStore`** → KMS envelope encryption. Keep the design: AAD bound to the setting key,
-  never destroy ciphertext on a failed read.
+  never destroy ciphertext on a failed read. **Shipped 2026-08-18:** the envelope now stands on
+  a `KeyProvider` seam — `LocalKeyProvider` (the dev master hex) and `AwsKmsKeyProvider`
+  (KMS Encrypt/Decrypt over plain REST, SigV4 hand-rolled and pinned byte-for-byte to AWS's
+  documented test vector, no SDK). The stored envelope shape is unchanged, so rotation and
+  migration stay out of the data path; `calendar_connections.token_kms_key_id` records which
+  authority wrapped the key.
 - **Two constraints live only in app code** and must become real Postgres constraints:
   `saved_views` unique on `(boardId, surface, nameKey)`, and `work_schedules` "exactly one
-  non-archived default" as a partial unique index.
+  non-archived default" as a partial unique index. **Shipped 2026-08-18 (app schema v10):**
+  the `saved_views` unique index is native Room; Room cannot express partial indexes, so the
+  `work_schedules` one rides `MIGRATION_9_10` for upgrades and an onCreate callback for fresh
+  installs, and `PlanMigrationInstrumentedTest` watches the database refuse the violations —
+  a duplicate view name on a board+surface, a second non-archived default, and the archived
+  default that stays legal.
 
 ### 2.3 Freeze the planner API
 

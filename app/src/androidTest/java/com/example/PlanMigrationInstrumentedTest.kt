@@ -643,4 +643,81 @@ class PlanMigrationInstrumentedTest {
       }
     assertEquals((Calendar.MONDAY..Calendar.FRIDAY).toSet(), days)
   }
+
+  @Test
+  fun migrationFrom9AddsTheTwoRealConstraintsAndRejectsTheirViolations() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null).use { database ->
+      createV5Schema(database)
+      database.version = 5
+    }
+    val room =
+      Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+        .addMigrations(
+          PlanMigrations.MIGRATION_5_6,
+          PlanMigrations.MIGRATION_6_7,
+          PlanMigrations.MIGRATION_7_8,
+          PlanMigrations.MIGRATION_8_9,
+          PlanMigrations.MIGRATION_9_10,
+        )
+        .build()
+    val migrated = room.openHelper.writableDatabase
+
+    migrated.query("PRAGMA user_version").use { cursor ->
+      assertTrue(cursor.moveToFirst())
+      assertEquals(10, cursor.getInt(0))
+    }
+
+    // One saved view per (boardId, surface, nameKey): the first insert fits, a duplicate name
+    // on the same board+surface is refused by the database itself.
+    migrated.execSQL(
+      "INSERT INTO saved_views (id,boardId,name,nameKey,surface,filtersJson,grouping,sortJson," +
+        "columnsJson,collapsedIdsJson,pinned,rank,createdAt,updatedAt) " +
+        "VALUES ('v1','b1','Week','week','plan','{}','none','[]','[]','[]',0,0,0,0)"
+    )
+    assertFailsWithConstraint {
+      migrated.execSQL(
+        "INSERT INTO saved_views (id,boardId,name,nameKey,surface,filtersJson,grouping,sortJson," +
+          "columnsJson,collapsedIdsJson,pinned,rank,createdAt,updatedAt) " +
+          "VALUES ('v2','b1','Week','week','plan','{}','none','[]','[]','[]',0,1,0,0)"
+      )
+    }
+
+    // The same name on a different surface is a different view — the constraint is the pair.
+    migrated.execSQL(
+      "INSERT INTO saved_views (id,boardId,name,nameKey,surface,filtersJson,grouping,sortJson," +
+        "columnsJson,collapsedIdsJson,pinned,rank,createdAt,updatedAt) " +
+        "VALUES ('v3','b1','Week','week','today','{}','none','[]','[]','[]',0,2,0,0)"
+    )
+
+    // At most one non-archived default: a second default is refused; an archived default is a
+    // different kind of row and stays legal.
+    migrated.execSQL(
+      "INSERT INTO work_schedules (id,name,nameKey,timeZoneId,isDefault,minimumChunkMinutes," +
+        "maximumChunkMinutes,bufferMinutes,rank,createdAt,updatedAt) " +
+        "VALUES ('s1','Default','default','UTC',1,30,120,0,0,0,0)"
+    )
+    assertFailsWithConstraint {
+      migrated.execSQL(
+        "INSERT INTO work_schedules (id,name,nameKey,timeZoneId,isDefault,minimumChunkMinutes," +
+          "maximumChunkMinutes,bufferMinutes,rank,createdAt,updatedAt) " +
+          "VALUES ('s2','Second','second','UTC',1,30,120,0,1,0,0)"
+      )
+    }
+    migrated.execSQL(
+      "INSERT INTO work_schedules (id,name,nameKey,timeZoneId,isDefault,minimumChunkMinutes," +
+        "maximumChunkMinutes,bufferMinutes,rank,createdAt,updatedAt) " +
+        "VALUES ('s3','Archived default','archived default','UTC',1,30,120,0,2,0,100)"
+    )
+    room.close()
+  }
+
+  private fun assertFailsWithConstraint(block: () -> Unit) {
+    try {
+      block()
+      assertTrue("the database accepted a row its constraint should refuse", false)
+    } catch (_: android.database.SQLException) {
+      // the constraint did its job
+    }
+  }
 }

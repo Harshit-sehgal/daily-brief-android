@@ -206,6 +206,9 @@ data class PlanDependency(
   indices = [
     Index(value = ["boardId", "surface", "rank"]),
     Index(value = ["surface", "pinned"]),
+    // The uniqueness PlanRepository checks in code (03 §4: "two constraints live only in
+    // application code") is now real: one view per name per board+surface.
+    Index(value = ["boardId", "surface", "nameKey"], unique = true),
   ],
 )
 data class SavedView(

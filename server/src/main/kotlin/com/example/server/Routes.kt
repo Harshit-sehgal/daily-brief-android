@@ -38,6 +38,7 @@ import com.example.server.db.Db.newId
 import com.example.server.db.Db.query
 import com.example.server.db.Db.queryOne
 import com.example.server.db.Envelope
+import com.example.server.key.KeyProviders
 import com.example.server.google.FixtureCalendarProvider
 import com.example.server.google.GoogleCalendarProvider
 import com.example.server.google.GoogleOAuth
@@ -1102,7 +1103,7 @@ fun providerFor(config: Config, workspaceId: String): com.example.server.google.
         listOf(workspaceId),
       ) { rs -> rs.getString("id") to rs.getString("token_ciphertext") }
     } ?: error("no connected calendar for workspace $workspaceId")
-  val stored = Envelope.unwrap(config.envelopeKeyHex, workspaceId, "calendar_connection_${connection.first}", connection.second)
+  val stored = Envelope.unwrap(KeyProviders.from(config), workspaceId, "calendar_connection_${connection.first}", connection.second)
     ?: error("could not unwrap the stored token for workspace $workspaceId")
   val token = GoogleOAuth.json.decodeFromString<GoogleOAuth.TokenResponse>(stored)
   // The slice does not refresh: a short-lived access token expires during a long demo, and
