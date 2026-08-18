@@ -137,6 +137,10 @@ class PlanRepository internal constructor(private val database: AppDatabase) {
   suspend fun blocksForBoardOnce(boardId: String): List<PlanBlock> =
     withContext(Dispatchers.IO) { planDao.getBlocksForBoard(boardId) }
 
+  /** One block, wherever its board lives - the notification actions do not know the board. */
+  suspend fun blockByIdOnce(blockId: String): PlanBlock? =
+    withContext(Dispatchers.IO) { planDao.getBlock(blockId) }
+
   fun observeDependencies(boardId: String): Flow<List<PlanDependency>> =
     planDao.observeDependencies(boardId)
 
@@ -507,6 +511,15 @@ class PlanRepository internal constructor(private val database: AppDatabase) {
         )
         settingDao.insertSetting(
           SystemSetting(
+            SettingKeys.PLAN_OUTLINE_QUERY,
+            state.filters[SavedPlanViewState.FILTER_TEXT].orEmpty(),
+          )
+        )
+        settingDao.insertSetting(
+          SystemSetting(SettingKeys.UI_DENSITY, densityKeyForViewZoom(state.zoom))
+        )
+        settingDao.insertSetting(
+          SystemSetting(
             SettingKeys.PLAN_OUTLINE_COLLAPSED,
             SettingKeys.encodeList(state.collapsedItemIds.sorted()),
           )
@@ -518,6 +531,17 @@ class PlanRepository internal constructor(private val database: AppDatabase) {
         settingDao.insertSetting(SystemSetting(SettingKeys.ACTIVE_SAVED_PLAN_VIEW_ID, view.id))
         SavedPlanView(view, state)
       }
+    }
+
+  /**
+   * The saved-view codec stores zoom as "compact"/"comfortable"/"expanded"; the app's density
+   * setting speaks "compact"/"cozy"/"relaxed". The vocabulary changed after the codec froze.
+   */
+  private fun densityKeyForViewZoom(zoom: String?): String =
+    when (zoom) {
+      "compact" -> "compact"
+      "expanded" -> "relaxed"
+      else -> "cozy"
     }
 
   /**

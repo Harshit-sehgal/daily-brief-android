@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -17,7 +18,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,9 +34,11 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.core.TimeFormatter
 import com.example.ui.components.RowIconButton
 import com.example.ui.theme.MinimumTouchTarget
 import com.example.ui.theme.Space
+import com.example.ui.theme.UiDensity
 
 /**
  * One menu for everything the Plan can do that is not the work itself.
@@ -51,6 +56,7 @@ internal fun PlanOverflowMenu(
   onHistory: () -> Unit,
   onExport: (Boolean) -> Unit,
   onExportPdf: () -> Unit,
+  onExportPng: () -> Unit,
 ) {
   var open by remember { mutableStateOf(false) }
   Box {
@@ -118,6 +124,14 @@ internal fun PlanOverflowMenu(
         },
         modifier = Modifier.testTag("plan_export_pdf"),
       )
+      DropdownMenuItem(
+        text = { Text("Export plan (image)") },
+        onClick = {
+          open = false
+          onExportPng()
+        },
+        modifier = Modifier.testTag("plan_export_png"),
+      )
     }
   }
 }
@@ -135,6 +149,8 @@ internal fun PlanViewOptionsDialog(
   sort: OutlineSort,
   grouping: OutlineGrouping,
   hideCompleted: Boolean,
+  query: String,
+  density: UiDensity,
   collapsedCount: Int,
   savedViews: List<com.example.data.repository.SavedPlanView>,
   activeViewId: String?,
@@ -146,6 +162,8 @@ internal fun PlanViewOptionsDialog(
   onSort: (OutlineSort) -> Unit,
   onGrouping: (OutlineGrouping) -> Unit,
   onHideCompleted: (Boolean) -> Unit,
+  onQueryChange: (String) -> Unit,
+  onDensity: (UiDensity) -> Unit,
   onExpandAll: () -> Unit,
   onApplyView: (com.example.data.repository.SavedPlanView) -> Unit,
   onSaveView: () -> Unit,
@@ -193,6 +211,42 @@ internal fun PlanViewOptionsDialog(
               modifier =
                 Modifier.heightIn(min = MinimumTouchTarget)
                   .testTag("outline_grouping_${option.key}"),
+            )
+          }
+        }
+
+        OptionHeading("Search")
+        OutlinedTextField(
+          value = query,
+          onValueChange = onQueryChange,
+          label = { Text("Filter by title or note") },
+          singleLine = true,
+          trailingIcon = {
+            if (query.isNotEmpty()) {
+              IconButton(onClick = { onQueryChange("") }) {
+                Icon(Icons.Default.Close, contentDescription = "Clear search")
+              }
+            }
+          },
+          modifier =
+            Modifier.fillMaxWidth()
+              .heightIn(min = MinimumTouchTarget)
+              .testTag("outline_query"),
+        )
+
+        OptionHeading("Density")
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(Space.xs),
+          verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+          UiDensity.entries.forEach { option ->
+            FilterChip(
+              selected = option == density,
+              onClick = { onDensity(option) },
+              label = { Text(option.label) },
+              modifier =
+                Modifier.heightIn(min = MinimumTouchTarget)
+                  .testTag("outline_density_${option.key}"),
             )
           }
         }
@@ -411,6 +465,7 @@ internal fun PlanToolsDialog(
   onWeeklyReview: () -> Unit,
   onBaselines: () -> Unit,
   onPortfolio: () -> Unit,
+  onFocusTimer: () -> Unit,
   onDismiss: () -> Unit,
 ) {
   if (!visible) return
@@ -445,6 +500,10 @@ internal fun PlanToolsDialog(
         ToolRow("Across every plan", "Open work and unscheduled effort on every board.", "plan_portfolio_open") {
           onDismiss()
           onPortfolio()
+        }
+        ToolRow("Focus timer", "A countdown anchored to one plan block.", "plan_focus_timer") {
+          onDismiss()
+          onFocusTimer()
         }
       }
     },
@@ -484,5 +543,88 @@ private fun OptionHeading(text: String) {
     style = MaterialTheme.typography.labelSmall,
     color = MaterialTheme.colorScheme.onSurfaceVariant,
     modifier = Modifier.padding(top = Space.xs).semantics { heading() },
+  )
+}
+
+/** One plan block that can anchor a focus session: what it is, and when it sits. */
+internal data class FocusCandidate(
+  val blockId: String,
+  val itemTitle: String,
+  val startAtMs: Long,
+  val endAtMs: Long,
+)
+
+/**
+ * A focus timer anchored to a plan block. The dialog lists the board's blocks that still have
+ * time left; choosing one arms a single alarm at the session's end and the receiver turns it
+ * into a notification with Done and Defer actions. One session at a time.
+ */
+@Composable
+internal fun FocusTimerDialog(
+  visible: Boolean,
+  candidates: List<FocusCandidate>,
+  formatter: TimeFormatter,
+  onStart: (FocusCandidate) -> Unit,
+  onCancelActive: () -> Unit,
+  onDismiss: () -> Unit,
+) {
+  if (!visible) return
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text("Focus timer") },
+    text = {
+      Column(
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+        modifier =
+          Modifier.heightIn(max = 420.dp)
+            .verticalScroll(rememberScrollState())
+            .testTag("plan_focus_dialog"),
+      ) {
+        if (candidates.isEmpty()) {
+          Text(
+            "No plan blocks remain in the next day. Apply a plan first, or add a block.",
+            style = MaterialTheme.typography.bodyMedium,
+          )
+        }
+        candidates.forEach { candidate ->
+          TextButton(
+            onClick = { onStart(candidate) },
+            modifier =
+              Modifier.fillMaxWidth()
+                .heightIn(min = MinimumTouchTarget)
+                .testTag("plan_focus_start_${candidate.blockId}"),
+          ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+              Text(
+                candidate.itemTitle,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+              )
+              Text(
+                "${formatter.time(candidate.startAtMs)}–${formatter.time(candidate.endAtMs)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+          }
+        }
+        HorizontalDivider()
+        TextButton(
+          onClick = onCancelActive,
+          modifier = Modifier.heightIn(min = MinimumTouchTarget).testTag("plan_focus_cancel"),
+        ) {
+          Text("Cancel the running timer")
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(
+        onClick = onDismiss,
+        modifier = Modifier.heightIn(min = MinimumTouchTarget).testTag("plan_focus_close"),
+      ) {
+        Text("Done")
+      }
+    },
+    modifier = Modifier.testTag("plan_focus_dialog_root"),
   )
 }

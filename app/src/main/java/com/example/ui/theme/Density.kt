@@ -39,6 +39,14 @@ enum class UiDensity(val key: String, val label: String, val blurb: String) {
   }
 }
 
+/** The saved-view codec's zoom vocabulary is older ("comfortable", "expanded"); keep one mapping. */
+fun UiDensity.toViewZoom(): String =
+  when (this) {
+    UiDensity.Compact -> "compact"
+    UiDensity.Cozy -> "comfortable"
+    UiDensity.Relaxed -> "expanded"
+  }
+
 @Immutable
 data class DensityTokens(
   /** Visual minimum height of a row; interactive rows also honor [MinimumTouchTarget]. */

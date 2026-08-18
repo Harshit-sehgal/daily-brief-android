@@ -189,6 +189,55 @@ class PlanOutlineProjectorTest {
     assertEquals(OutlineSort.DUE, OutlineSort.byKey("due"))
   }
 
+  @Test
+  fun `query matches titles and notes case-insensitively and hides the rest`() {
+    val rows =
+      PlanOutlineProjector.project(
+        listOf(
+          item("launch", rank = 0, title = "Launch newsletter"),
+          item("copy", parentId = "launch", rank = 1, title = "Draft copy"),
+          item("invoice", rank = 2, title = "Invoice the client", notes = "mention the NEWSLETTER deal"),
+          item("other", rank = 3, title = "Tidy desk"),
+        ),
+        OutlinePresentation(query = "newsletter"),
+      )
+
+    assertEquals(listOf("launch", "invoice"), rows.map { it.item.id })
+    // A non-matching child of a matching parent is hidden, exactly as a hidden parent hides
+    // nothing above it: the filter decides what exists, the walk decides how it is arranged.
+    assertFalse(rows.first { it.item.id == "launch" }.hasChildren)
+    assertFalse(rows.first { it.item.id == "invoice" }.isOrphan)
+  }
+
+  @Test
+  fun `a matched child of a non-matching parent surfaces as an orphan`() {
+    val rows =
+      PlanOutlineProjector.project(
+        listOf(
+          item("inbox", rank = 0, title = "Tidy desk"),
+          item("needle", parentId = "inbox", rank = 1, title = "Find the invoice"),
+        ),
+        OutlinePresentation(query = "invoice"),
+      )
+
+    assertEquals(listOf("needle"), rows.map { it.item.id })
+    assertTrue(rows.first { it.item.id == "needle" }.isOrphan)
+  }
+
+  @Test
+  fun `query combines with hiding completed work`() {
+    val rows =
+      PlanOutlineProjector.project(
+        listOf(
+          item("done-match", rank = 0, title = "Ship release", progress = 100),
+          item("open-match", rank = 1, title = "Plan release notes"),
+        ),
+        OutlinePresentation(hideCompleted = true, query = "release"),
+      )
+
+    assertEquals(listOf("open-match"), rows.map { it.item.id })
+  }
+
   private fun item(
     id: String,
     parentId: String? = null,
@@ -198,13 +247,16 @@ class PlanOutlineProjectorTest {
     priority: String = "normal",
     effortMinutes: Int? = null,
     progress: Int = 0,
+    title: String = id,
+    notes: String? = null,
   ) =
     PlanItem(
       id = id,
       boardId = "board",
       columnId = "column",
       parentId = parentId,
-      title = id,
+      title = title,
+      notes = notes,
       rank = rank,
       dueAt = dueAt,
       effortMinutes = effortMinutes,

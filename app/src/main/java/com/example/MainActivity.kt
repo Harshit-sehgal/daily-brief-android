@@ -1,5 +1,7 @@
 package com.example
 
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,6 +14,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -35,6 +40,11 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     BriefingAndReminderReceiver.createNotificationChannels(this)
+    registerLaunchShortcuts(this)
+
+    val initialDestination =
+      intent.getStringExtra(EXTRA_DESTINATION)
+        ?.takeIf { it in setOf(DestinationShortcut.PLAN, DestinationShortcut.TODAY) }
 
     setContent {
       val viewModel: BriefingViewModel = viewModel()
@@ -71,10 +81,57 @@ class MainActivity : ComponentActivity() {
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
           ) {
-            DailyBriefApp(viewModel = viewModel, isDarkTheme = darkTheme)
+            DailyBriefApp(
+              viewModel = viewModel,
+              isDarkTheme = darkTheme,
+              initialDestination = initialDestination,
+            )
           }
         }
       }
     }
+  }
+
+  companion object {
+    const val EXTRA_DESTINATION = "extra_destination"
+
+    /** The destination values the launch shortcuts carry. */
+    object DestinationShortcut {
+      const val PLAN = "Plan"
+      const val TODAY = "Home"
+    }
+  }
+
+  /** Two dynamic shortcuts - the Plan and Today - each with a destination deep link. */
+  private fun registerLaunchShortcuts(context: Context) {
+    if (!ShortcutManagerCompat.isRequestPinShortcutSupported(context)) return
+    val planIntent =
+      Intent(context, MainActivity::class.java).apply {
+        action = Intent.ACTION_MAIN
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        putExtra(EXTRA_DESTINATION, DestinationShortcut.PLAN)
+      }
+    val todayIntent =
+      Intent(context, MainActivity::class.java).apply {
+        action = Intent.ACTION_MAIN
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        putExtra(EXTRA_DESTINATION, DestinationShortcut.TODAY)
+      }
+    val shortcuts =
+      listOf(
+        ShortcutInfoCompat.Builder(context, "shortcut_plan")
+          .setShortLabel("Plan")
+          .setLongLabel("Open the Plan")
+          .setIcon(IconCompat.createWithResource(context, R.drawable.ic_stat_daily_brief))
+          .setIntent(planIntent)
+          .build(),
+        ShortcutInfoCompat.Builder(context, "shortcut_today")
+          .setShortLabel("Today")
+          .setLongLabel("Open Today")
+          .setIcon(IconCompat.createWithResource(context, R.drawable.ic_stat_daily_brief))
+          .setIntent(todayIntent)
+          .build(),
+      )
+    ShortcutManagerCompat.addDynamicShortcuts(context, shortcuts)
   }
 }

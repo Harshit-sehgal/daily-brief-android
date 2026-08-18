@@ -34,6 +34,7 @@ import com.example.core.BaselineVariance
 import com.example.core.BaselineComparison
 import android.content.Intent
 import com.example.data.backup.BackupManager
+import com.example.export.ImagePlanExporter
 import com.example.export.PdfPlanLayout
 import com.example.export.PdfPlanExporter
 import com.example.export.PdfRow
@@ -52,6 +53,7 @@ import com.example.data.model.PlanItemSchedule
 import com.example.data.model.PlanMutation
 import com.example.data.model.PlanSurface
 import com.example.data.prefs.SettingKeys
+import com.example.data.plan.FocusTimerPolicy
 import com.example.data.repository.BriefingRepository
 import com.example.data.repository.BoardDeleteOutcome
 import com.example.data.repository.EventDeleteOutcome
@@ -66,6 +68,7 @@ import com.example.data.repository.SavedPlanViewState
 import com.example.receiver.AlarmScheduler
 import com.example.ui.theme.Accents
 import com.example.ui.theme.UiDensity
+import com.example.ui.theme.toViewZoom
 import com.example.receiver.BriefingAndReminderReceiver
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -673,6 +676,12 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
       .map { OutlineGrouping.byKey(it?.value) }
       .stateIn(viewModelScope, SharingStarted.Eagerly, OutlineGrouping.SECTION)
 
+  val outlineQuery: StateFlow<String> =
+    repository
+      .settingFlow(SettingKeys.PLAN_OUTLINE_QUERY)
+      .map { it?.value.orEmpty() }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
   /** Empty means every lane; a preset is a filter, never a deletion. */
   val visibleBoardColumnIds: StateFlow<Set<String>> =
     repository
@@ -683,6 +692,14 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
   fun setOutlineGrouping(grouping: OutlineGrouping) {
     viewModelScope.launch {
       repository.writeSetting(SettingKeys.PLAN_OUTLINE_GROUPING, grouping.key)
+      clearActiveSavedView()
+    }
+  }
+
+  fun setOutlineQuery(query: String) {
+    viewModelScope.launch {
+      // The saved-view codec caps filter values at 256 characters; keep the live query inside it.
+      repository.writeSetting(SettingKeys.PLAN_OUTLINE_QUERY, query.take(256))
       clearActiveSavedView()
     }
   }
@@ -1123,6 +1140,52 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
   }
 
   /**
+   * Starts a focus session anchored to one plan block: a single doze-friendly alarm at the
+   * session's end, which the receiver turns into a notification with Done and Defer actions.
+   */
+  fun startFocus(blockId: String, boardId: String) {
+    viewModelScope.launch {
+      try {
+        val block = planRepository.blockByIdOnce(blockId)
+        if (block == null) {
+          message("That block is gone")
+          return@launch
+        }
+        val item = planRepository.itemsForBoardOnce(boardId).firstOrNull { it.id == block.planItemId }
+        val spec =
+          FocusTimerPolicy.specFor(block, System.currentTimeMillis())
+            ?.let { FocusTimerPolicy.withTitle(it, item?.title ?: "Plan work") }
+        if (spec == null) {
+          message("That block has already ended")
+          return@launch
+        }
+        AlarmScheduler.scheduleFocus(appContext, spec)
+        val endLabel =
+          java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+            .format(java.time.Instant.ofEpochMilli(spec.endAtMs).atZone(java.time.ZoneId.systemDefault()))
+        message("Focus on \"${spec.title}\" until $endLabel")
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The focus timer could not be started")
+      }
+    }
+  }
+
+  fun cancelFocus() {
+    viewModelScope.launch {
+      try {
+        AlarmScheduler.cancelFocus(appContext)
+        message("Focus timer cancelled")
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "The focus timer could not be cancelled")
+      }
+    }
+  }
+
+  /**
    * The same plan as a printable PDF. The document is paginated and rendered entirely off the
    * main thread by [com.example.export.PdfPlanExporter]; the caller owns writing the bytes out.
    */
@@ -1158,6 +1221,46 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
         throw e
       } catch (e: Exception) {
         message(e.message ?: "That plan could not be exported as a PDF")
+      }
+    }
+  }
+
+  /**
+   * The same plan as one tall PNG sheet. Same pure layout as the PDF export, same caller-owned
+   * bytes; rendered off the main thread by [com.example.export.ImagePlanExporter].
+   */
+  fun exportActivePlanPng(onReady: (ByteArray) -> Unit) {
+    val board = activePlanBoard.value
+    if (board == null) {
+      message("Choose a plan board before exporting it")
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val relations = planGanttItems.value
+        val items =
+          relations.map { it.item }.filter { it.archivedAt == null }.sortedBy { it.rank }
+        val blocks = relations.flatMap { it.blocks }
+        val blocksByItem = blocks.groupBy(PlanBlock::planItemId)
+        val rows =
+          items.map { item ->
+            val itemBlocks = blocksByItem[item.id].orEmpty().sortedBy(PlanBlock::startAt)
+            val detail =
+              listOfNotNull(
+                item.effortMinutes?.let { "$it min" },
+                "${item.progress}%",
+                item.dueAt?.let { "due ${IsoDates.isoUtc(it)}" },
+                itemBlocks.size.let { n -> "$n block${if (n == 1) "" else "s"}" },
+              ).joinToString(" · ")
+            PdfRow(item.title, detail)
+          }
+        val generatedAt = IsoDates.isoUtc(System.currentTimeMillis())
+        val pages = PdfPlanLayout.pages("${board.name} — plan ($generatedAt)", generatedAt, rows)
+        onReady(ImagePlanExporter.render(pages))
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That plan could not be exported as an image")
       }
     }
   }
@@ -1262,15 +1365,20 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
     return SavedPlanViewState(
       surface = surface,
       filters =
-        if (outlineHideCompleted.value) {
-          mapOf(SavedPlanViewState.FILTER_HIDE_COMPLETED to "true")
-        } else {
-          emptyMap()
+        buildMap {
+          if (outlineHideCompleted.value) {
+            put(SavedPlanViewState.FILTER_HIDE_COMPLETED, "true")
+          }
+          val query = outlineQuery.value.trim()
+          if (query.isNotEmpty()) {
+            put(SavedPlanViewState.FILTER_TEXT, query)
+          }
         },
       grouping = outlineGrouping.value.key,
       sort = listOf(outlineSort.value.key),
       columns = visibleBoardColumnIds.value.sorted(),
       rangeDays = if (surface == PlanSurface.GANTT) ganttRangeDays.value else null,
+      zoom = uiDensity.value.toViewZoom(),
       collapsedItemIds = outlineCollapsedIds.value,
     )
   }
@@ -1319,9 +1427,11 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
     viewModelScope.launch {
       repository.writeSetting(SettingKeys.PLAN_OUTLINE_SORT, OutlineSort.MANUAL.key)
       repository.writeSetting(SettingKeys.PLAN_OUTLINE_HIDE_COMPLETED, false.toString())
+      repository.writeSetting(SettingKeys.PLAN_OUTLINE_QUERY, "")
       repository.writeSetting(SettingKeys.PLAN_OUTLINE_COLLAPSED, SettingKeys.encodeList(emptyList()))
       repository.writeSetting(SettingKeys.PLAN_OUTLINE_GROUPING, OutlineGrouping.SECTION.key)
       repository.writeSetting(SettingKeys.PLAN_BOARD_COLUMNS, SettingKeys.encodeList(emptyList()))
+      repository.writeSetting(SettingKeys.UI_DENSITY, UiDensity.Default.key)
       repository.writeSetting(SettingKeys.ACTIVE_SAVED_PLAN_VIEW_ID, "")
       message("View reset")
     }

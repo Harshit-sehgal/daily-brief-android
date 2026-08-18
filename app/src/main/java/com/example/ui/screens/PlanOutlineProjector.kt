@@ -47,6 +47,8 @@ data class OutlinePresentation(
   val sort: OutlineSort = OutlineSort.MANUAL,
   val grouping: OutlineGrouping = OutlineGrouping.SECTION,
   val hideCompleted: Boolean = false,
+  /** Case-insensitive substring over title and notes; kept short so a saved view stays portable. */
+  val query: String = "",
   val collapsedItemIds: Set<String> = emptySet(),
 )
 
@@ -62,7 +64,14 @@ internal object PlanOutlineProjector {
     if (items.isEmpty()) return emptyList()
     // Hiding finished work must not hide its unfinished subtasks; those surface as orphan rows,
     // which is exactly how the outline already reports a parent it cannot place.
-    val visible = if (presentation.hideCompleted) items.filter { it.progress < 100 } else items
+    val visible =
+      items.filter {
+        if (presentation.hideCompleted && it.progress >= 100) return@filter false
+        val query = presentation.query
+        if (query.isBlank()) return@filter true
+        it.title.contains(query, ignoreCase = true) ||
+          it.notes?.contains(query, ignoreCase = true) == true
+      }
     if (visible.isEmpty()) return emptyList()
 
     val ordered = visible.sortedWith(comparatorFor(presentation.sort))

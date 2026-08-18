@@ -239,7 +239,11 @@ private enum class Destination(
  * secondary route from Home and search, and every screen shares one editor.
  */
 @Composable
-fun DailyBriefApp(viewModel: BriefingViewModel, isDarkTheme: Boolean) {
+fun DailyBriefApp(
+  viewModel: BriefingViewModel,
+  isDarkTheme: Boolean,
+  initialDestination: String? = null,
+) {
   val context = LocalContext.current
   val density = LocalDensity.current
   val containerWidth = with(density) { LocalWindowInfo.current.containerSize.width.toDp() }
@@ -267,6 +271,13 @@ fun DailyBriefApp(viewModel: BriefingViewModel, isDarkTheme: Boolean) {
       launchRootName = stored.name
       if (!homeApplied && !userNavigated) destinationName = stored.name
       homeApplied = true
+    }
+  }
+  // A launch shortcut names its destination; honor it once, over the stored root.
+  LaunchedEffect(initialDestination) {
+    if (initialDestination != null && !homeApplied && !userNavigated) {
+      destinationName = initialDestination
+      userNavigated = true
     }
   }
   var backDestinationName by rememberSaveable { mutableStateOf<String?>(null) }

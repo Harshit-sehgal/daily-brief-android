@@ -111,12 +111,15 @@ fun PlanScreen(
   val weeklyReview by viewModel.weeklyReview.collectAsStateWithLifecycle()
   val autoPlan by viewModel.autoPlan.collectAsStateWithLifecycle()
   val planItems by viewModel.planItems.collectAsStateWithLifecycle()
+  val focusRelations by viewModel.planGanttItems.collectAsStateWithLifecycle()
   val context = LocalContext.current
   val activeSavedViewId by viewModel.activeSavedPlanViewId.collectAsStateWithLifecycle()
   val planHealth by viewModel.planHealth.collectAsStateWithLifecycle()
   val outlineSort by viewModel.outlineSort.collectAsStateWithLifecycle()
   val outlineGrouping by viewModel.outlineGrouping.collectAsStateWithLifecycle()
   val outlineHideCompleted by viewModel.outlineHideCompleted.collectAsStateWithLifecycle()
+  val outlineQuery by viewModel.outlineQuery.collectAsStateWithLifecycle()
+  val uiDensity by viewModel.uiDensity.collectAsStateWithLifecycle()
   val outlineCollapsed by viewModel.outlineCollapsedIds.collectAsStateWithLifecycle()
   val planColumns by viewModel.planColumns.collectAsStateWithLifecycle()
   val visibleColumnIds by viewModel.visibleBoardColumnIds.collectAsStateWithLifecycle()
@@ -142,6 +145,7 @@ fun PlanScreen(
   var showViewOptions by rememberSaveable { mutableStateOf(false) }
   var showTools by rememberSaveable { mutableStateOf(false) }
   var showManageViews by rememberSaveable { mutableStateOf(false) }
+  var showFocusTimer by rememberSaveable { mutableStateOf(false) }
   var baselineName by rememberSaveable { mutableStateOf("") }
   var pendingDeleteBaselineId by rememberSaveable { mutableStateOf<String?>(null) }
   val selectedSavedView = savedViews.firstOrNull { it.view.id == activeSavedViewId }
@@ -169,6 +173,20 @@ fun PlanScreen(
 
   fun exportPlanPdf() {
     pdfLauncher.launch("daily-brief-plan.pdf")
+  }
+
+  val pngLauncher =
+    rememberLauncherForActivityResult(
+      ActivityResultContracts.CreateDocument("image/png"),
+    ) { uri ->
+      if (uri != null) {
+        viewModel.exportActivePlanPng { bytes ->
+          context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+        }
+      }
+    }
+  fun exportPlanPng() {
+    pngLauncher.launch("daily-brief-plan.png")
   }
 
   val childPadding =
@@ -200,6 +218,7 @@ fun PlanScreen(
           onHistory = { showHistory = true },
           onExport = ::exportPlan,
           onExportPdf = ::exportPlanPdf,
+          onExportPng = ::exportPlanPng,
         )
       },
       modifier = Modifier.padding(horizontal = gutter),
@@ -287,6 +306,8 @@ fun PlanScreen(
     sort = outlineSort,
     grouping = outlineGrouping,
     hideCompleted = outlineHideCompleted,
+    query = outlineQuery,
+    density = uiDensity,
     collapsedCount = outlineCollapsed.size,
     savedViews = savedViews,
     activeViewId = activeSavedViewId,
@@ -297,6 +318,8 @@ fun PlanScreen(
     onSort = viewModel::setOutlineSort,
     onGrouping = viewModel::setOutlineGrouping,
     onHideCompleted = viewModel::setOutlineHideCompleted,
+    onQueryChange = viewModel::setOutlineQuery,
+    onDensity = viewModel::setDensity,
     onExpandAll = viewModel::expandAllOutlineTasks,
     // Choosing a view is the answer to the question the sheet asked, so the sheet is done.
     onApplyView = { saved ->
@@ -335,7 +358,40 @@ fun PlanScreen(
     onWeeklyReview = { showWeeklyReview = true },
     onBaselines = { showBaselines = true },
     onPortfolio = { viewModel.openPortfolio() },
+    onFocusTimer = { showFocusTimer = true },
     onDismiss = { showTools = false },
+  )
+  val focusCandidates =
+    remember(focusRelations, planItems, formatter) {
+      val now = System.currentTimeMillis()
+      val horizon = now + 24 * 60 * 60_000L
+      val titleByItem = planItems.associate { it.id to it.title }
+      focusRelations
+        .flatMap { it.blocks }
+        .filter { it.endAt in now until horizon }
+        .sortedBy { it.startAt }
+        .map { block ->
+          FocusCandidate(
+            blockId = block.id,
+            itemTitle = titleByItem[block.planItemId] ?: block.planItemId,
+            startAtMs = block.startAt,
+            endAtMs = block.endAt,
+          )
+        }
+    }
+  FocusTimerDialog(
+    visible = showFocusTimer,
+    candidates = focusCandidates,
+    formatter = formatter,
+    onStart = { candidate ->
+      val boardId = viewModel.activePlanBoardId.value
+      if (boardId != null) {
+        viewModel.startFocus(candidate.blockId, boardId)
+      }
+      showFocusTimer = false
+    },
+    onCancelActive = { viewModel.cancelFocus() },
+    onDismiss = { showFocusTimer = false },
   )
   BaselinesDialog(
     visible = showBaselines,

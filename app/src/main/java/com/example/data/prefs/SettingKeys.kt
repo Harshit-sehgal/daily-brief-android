@@ -54,6 +54,7 @@ object SettingKeys {
   const val PLAN_OUTLINE_HIDE_COMPLETED = "plan_outline_hide_completed"
   const val PLAN_OUTLINE_COLLAPSED = "plan_outline_collapsed"
   const val PLAN_OUTLINE_GROUPING = "plan_outline_grouping"
+  const val PLAN_OUTLINE_QUERY = "plan_outline_query"
 
   /** Which Board lanes are shown. Empty means every lane, which is the honest default. */
   const val PLAN_BOARD_COLUMNS = "plan_board_columns"

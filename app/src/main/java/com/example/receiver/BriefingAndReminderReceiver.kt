@@ -16,6 +16,8 @@ import com.example.R
 import com.example.core.ScheduleAnalysis
 import com.example.data.prefs.SettingKeys
 import com.example.data.repository.BriefingRepository
+import com.example.data.repository.PlanBlockInput
+import com.example.data.repository.PlanRepository
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -23,6 +25,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import com.example.data.plan.FocusSpec
 
 class BriefingAndReminderReceiver : BroadcastReceiver() {
   companion object {
@@ -34,13 +37,20 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
     val ACTION_MEETING_REMINDER = "${BuildConfig.APPLICATION_ID}.action.EVENT_REMINDER"
     val ACTION_REMINDER_MAINTENANCE =
       "${BuildConfig.APPLICATION_ID}.action.REMINDER_MAINTENANCE"
+    val ACTION_FOCUS_FINISHED = "${BuildConfig.APPLICATION_ID}.action.FOCUS_FINISHED"
+    val ACTION_FOCUS_DONE = "${BuildConfig.APPLICATION_ID}.action.FOCUS_DONE"
+    val ACTION_FOCUS_DEFER = "${BuildConfig.APPLICATION_ID}.action.FOCUS_DEFER"
 
     const val EXTRA_EVENT_ID = "extra_event_id"
     const val EXTRA_EVENT_TITLE = "extra_event_title"
     const val EXTRA_EVENT_TIME = "extra_event_time"
+    const val EXTRA_FOCUS_BLOCK_ID = "extra_focus_block_id"
+    const val EXTRA_FOCUS_ITEM_ID = "extra_focus_item_id"
+    const val EXTRA_FOCUS_TITLE = "extra_focus_title"
 
     private const val DAILY_BRIEF_NOTIFICATION_ID = 1001
     private const val EVENT_REMINDER_NOTIFICATION_ID = 1002
+    private const val FOCUS_NOTIFICATION_ID = 1003
 
     fun createNotificationChannels(context: Context) {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -101,6 +111,16 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
               intent.getStringExtra(EXTRA_EVENT_TITLE).orEmpty(),
               intent.getStringExtra(EXTRA_EVENT_TIME).orEmpty(),
             )
+          ACTION_FOCUS_FINISHED ->
+            showFocusFinished(
+              appContext,
+              intent.getStringExtra(EXTRA_FOCUS_BLOCK_ID).orEmpty(),
+              intent.getStringExtra(EXTRA_FOCUS_ITEM_ID).orEmpty(),
+              intent.getStringExtra(EXTRA_FOCUS_TITLE).orEmpty(),
+            )
+          ACTION_FOCUS_DONE -> completeFocusedItem(appContext, intent.getStringExtra(EXTRA_FOCUS_ITEM_ID).orEmpty())
+          ACTION_FOCUS_DEFER ->
+            deferFocusedBlock(appContext, intent.getStringExtra(EXTRA_FOCUS_BLOCK_ID).orEmpty())
           else -> Log.w(TAG, "Ignoring unexpected action $action")
         }
       } catch (e: Exception) {
@@ -184,6 +204,86 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
     )
   }
 
+  /** The end of a focus session, with the two actions that keep the work moving. */
+  private fun showFocusFinished(
+    context: Context,
+    blockId: String,
+    itemId: String,
+    title: String,
+  ) {
+    if (blockId.isBlank() && itemId.isBlank()) return
+    val label = title.ifBlank { "Focus" }
+    val doneIntent =
+      PendingIntent.getBroadcast(
+        context,
+        FOCUS_NOTIFICATION_ID,
+        Intent(context, BriefingAndReminderReceiver::class.java).apply {
+          action = ACTION_FOCUS_DONE
+          putExtra(EXTRA_FOCUS_ITEM_ID, itemId)
+        },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+    val deferIntent =
+      PendingIntent.getBroadcast(
+        context,
+        FOCUS_NOTIFICATION_ID + 1,
+        Intent(context, BriefingAndReminderReceiver::class.java).apply {
+          action = ACTION_FOCUS_DEFER
+          putExtra(EXTRA_FOCUS_BLOCK_ID, blockId)
+        },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+    notify(
+      context,
+      FOCUS_NOTIFICATION_ID,
+      CHANNEL_ID_BRIEF,
+      "Focus finished",
+      "$label — well done. Mark it done or give it another hour.",
+      NotificationCompat.PRIORITY_DEFAULT,
+      tag = "focus:${itemId.ifBlank { blockId }}",
+      actions =
+        listOf(
+          NotificationCompat.Action.Builder(0, "Done", doneIntent).build(),
+          NotificationCompat.Action.Builder(0, "Defer an hour", deferIntent).build(),
+        ),
+    )
+  }
+
+  /** Done completes the focused item through the journal, so Undo can take it back. */
+  private suspend fun completeFocusedItem(context: Context, itemId: String) {
+    if (itemId.isBlank()) return
+    try {
+      PlanRepository(context).setItemProgressWithUndo(itemId, 100)
+      Log.d(TAG, "Focused item $itemId completed")
+    } catch (e: Exception) {
+      Log.w(TAG, "Could not complete focused item $itemId", e)
+    }
+  }
+
+  /** Defer pushes the block an hour later through the journal, so Undo can take it back. */
+  private suspend fun deferFocusedBlock(context: Context, blockId: String) {
+    if (blockId.isBlank()) return
+    try {
+      val repository = PlanRepository(context)
+      val block = repository.blockByIdOnce(blockId) ?: return
+      val hour = 60 * 60_000L
+      repository.saveBlockWithUndo(
+        com.example.data.repository.PlanBlockInput(
+          id = block.id,
+          planItemId = block.planItemId,
+          startAt = block.startAt + hour,
+          endAt = block.endAt + hour,
+          position = block.position,
+          locked = block.locked,
+          linkedEventId = block.linkedEventId,
+        )
+      )
+      Log.d(TAG, "Focused block $blockId deferred by an hour")
+    } catch (e: Exception) {
+      Log.w(TAG, "Could not defer focused block $blockId", e)
+    }
+  }
+
   /** After a reboot or an app update every alarm has to be laid down again. */
   internal suspend fun restoreAlarms(context: Context) {
     val repository = BriefingRepository(context)
@@ -245,6 +345,7 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
     body: String,
     priority: Int,
     tag: String? = null,
+    actions: List<NotificationCompat.Action> = emptyList(),
   ) {
     val contentIntent =
       PendingIntent.getActivity(
@@ -256,7 +357,7 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
 
-    val notification =
+    val builder =
       NotificationCompat.Builder(context, channelId)
         .setSmallIcon(R.drawable.ic_stat_daily_brief)
         .setContentTitle(title)
@@ -265,7 +366,9 @@ class BriefingAndReminderReceiver : BroadcastReceiver() {
         .setPriority(priority)
         .setAutoCancel(true)
         .setContentIntent(contentIntent)
-        .build()
+    actions.forEach(builder::addAction)
+
+    val notification = builder.build()
 
     val manager = NotificationManagerCompat.from(context)
     // On Android 13+ posting without the runtime permission throws; the app

@@ -23,8 +23,11 @@ data class SavedPlanViewState(
   companion object {
     const val GROUP_NONE = "none"
 
-    /** The one filter the Outline offers today; stored as "true"/"false". */
+    /** The one filter the Outline offered at launch; stored as "true"/"false". */
     const val FILTER_HIDE_COMPLETED = "hideCompleted"
+
+    /** A free-text outline filter; stored as the query string. */
+    const val FILTER_TEXT = "text"
     val AllowedGroupings = setOf(GROUP_NONE, "status", "priority", "owner")
     val AllowedZooms = setOf("compact", "comfortable", "expanded")
     val AllowedRanges = setOf(7, 30, 90)

@@ -101,13 +101,15 @@ fun PlanOutlineScreen(
   val sort by viewModel.outlineSort.collectAsStateWithLifecycle()
   val grouping by viewModel.outlineGrouping.collectAsStateWithLifecycle()
   val hideCompleted by viewModel.outlineHideCompleted.collectAsStateWithLifecycle()
+  val query by viewModel.outlineQuery.collectAsStateWithLifecycle()
   val collapsedIds by viewModel.outlineCollapsedIds.collectAsStateWithLifecycle()
   val presentation =
-    remember(sort, grouping, hideCompleted, collapsedIds) {
+    remember(sort, grouping, hideCompleted, query, collapsedIds) {
       OutlinePresentation(
         sort = sort,
         grouping = grouping,
         hideCompleted = hideCompleted,
+        query = query,
         collapsedItemIds = collapsedIds,
       )
     }

@@ -8,6 +8,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.core.content.edit
 import com.example.data.model.BriefingEvent
+import com.example.data.plan.FocusSpec
 import java.util.Calendar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,6 +29,7 @@ object AlarmScheduler {
   private const val DAILY_BRIEF_REQUEST_CODE = 101
   private const val EVENT_REMINDER_REQUEST_CODE = 102
   private const val REMINDER_MAINTENANCE_REQUEST_CODE = 103
+  private const val FOCUS_REQUEST_CODE = 104
   private const val REMINDER_LEDGER = "scheduled_event_reminders"
   private const val REMINDER_IDS = "event_ids"
 
@@ -237,6 +239,51 @@ object AlarmScheduler {
     context
       .getSharedPreferences(REMINDER_LEDGER, Context.MODE_PRIVATE)
       .edit { putStringSet(REMINDER_IDS, ids.toSet()) }
+  }
+
+  /** One focus session at a time: starting one replaces any that is armed. */
+  suspend fun scheduleFocus(
+    context: Context,
+    spec: FocusSpec,
+  ) = withContext(Dispatchers.IO) {
+    cancelFocus(context)
+    val manager = alarmManager(context) ?: return@withContext
+    val pendingIntent =
+      focusIntent(
+        context,
+        spec,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      ) ?: return@withContext
+    try {
+      setInexact(manager, spec.endAtMs, pendingIntent)
+      Log.d(TAG, "Focus armed for ${spec.title} until ${spec.endAtMs}")
+    } catch (e: Exception) {
+      Log.e(TAG, "Could not schedule the focus timer", e)
+    }
+  }
+
+  suspend fun cancelFocus(context: Context) = withContext(Dispatchers.IO) {
+    val manager = alarmManager(context) ?: return@withContext
+    focusIntent(
+        context,
+        FocusSpec(blockId = "", itemId = "", title = "", endAtMs = 0),
+        PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+      )
+      ?.let {
+        manager.cancel(it)
+        it.cancel()
+      }
+  }
+
+  private fun focusIntent(context: Context, spec: FocusSpec, flags: Int): PendingIntent? {
+    val intent =
+      Intent(context, BriefingAndReminderReceiver::class.java).apply {
+        action = BriefingAndReminderReceiver.ACTION_FOCUS_FINISHED
+        putExtra(BriefingAndReminderReceiver.EXTRA_FOCUS_BLOCK_ID, spec.blockId)
+        putExtra(BriefingAndReminderReceiver.EXTRA_FOCUS_ITEM_ID, spec.itemId)
+        putExtra(BriefingAndReminderReceiver.EXTRA_FOCUS_TITLE, spec.title)
+      }
+    return PendingIntent.getBroadcast(context, FOCUS_REQUEST_CODE, intent, flags)
   }
 
   /** Doze-friendly and, unlike setExact*, needs no special permission. */
