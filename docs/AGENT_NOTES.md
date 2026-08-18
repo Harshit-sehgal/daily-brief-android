@@ -160,59 +160,44 @@ WP-9 engine defects     ✅ (defect 3 confirmed wanted before building)
 Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
 ```
 
-### Stage 1 status
+### Stage 1 status — all done
 
-- [ ] **WP-1** Port `ScheduleAnalysis` to `commonMain` (374 lines; the last root
-      blocker in `core/`, gating 861). Needs `kotlinx-datetime` + common SHA-256 for
-      `signature` (decision (a) — keep the daily-brief cache key byte-identical) +
-      `TimeZone` param type change across ~10 `:app` files. Signature fixture test
-      first. **Next up.**
-- [ ] **WP-2** Move the six files: `GanttLayout` (BigDecimal/BigInteger — keep the
-      Long-limit stability, `GanttLayoutTest` pins it), `PlanGanttLayout`,
-      `TimelineLayout`, `DayPulse`, `GanttZoom`, `PortfolioGantt`.
-- [ ] **WP-3** `GanttInteraction` off `java.io.Serializable` (Compose `Saver` in
-      `:app`, copy `NullableEventDraftSaver` shape) → 108 lines to `commonMain`.
-- [ ] **WP-4** `LegacyNameKeys` via `expect`/`actual` — fixture test of known
-      input→output pairs FIRST (NFKC name keys are stored on rows and compared on
-      Undo; `stableId` derives v5 import IDs). JVM actual stays byte-identical.
-- [ ] **WP-5** The three journal codecs (1,530 lines) as one unit — sealed
-      `PlanMutationState` cannot span source sets. Needs WP-4 + WP-6.
-- [ ] **WP-6** `WorkingCalendarMapper` off `Calendar` (239 lines; Sunday-is-1
-      convention preserved). Can precede WP-4; WP-5 needs both.
-- [x] **WP-7** `linuxX64` target added (room-common publishes linuxX64, so it works);
-      metadata compile is real and wired into `verify.sh`; planting a `java.util` import
-      fails the build (verified). Caught real JVM-only pollution the scan had missed —
-      `toSortedMap`/`toSortedSet`, `@JvmOverloads`, `String.format`, `java.lang.System` —
-      all replaced; `CommonMainPurityTest` scans the class now; `LegacyNameKeys` native
-      actual throws (compile-only target; JVM actual stays byte-identical). Toolchain
-      (~1.8 GB in `~/.konan`) needs one `--online` run, then `--offline` holds.
-- [ ] **WP-8** Delete the `NotionClient` `commonZone` bridge (line ~76) once
-      `ScheduleAnalysis` speaks kotlinx-datetime. Trivial.
-- [x] **WP-9** Defects 3 (SS/FF/SF — confirmed wanted, then built), 5 (benchmark
-      800 tasks / 4 weeks; measured 66 ms, no optimisation needed), 7 (coverage 5 → 17).
+- [x] **WP-1** Port `ScheduleAnalysis` to `commonMain` (`c32c7ad`).
+- [x] **WP-2** Move the six files (`34f4385`).
+- [x] **WP-3** `GanttInteraction` off `java.io.Serializable` (`3b5af10`).
+- [x] **WP-4** `LegacyNameKeys` via `expect`/`actual` (`2c7ea46`).
+- [x] **WP-5** The three journal codecs (`0bbdf42`).
+- [x] **WP-6** `WorkingCalendarMapper` off `Calendar` (`72e8db6`).
+- [x] **WP-7** `linuxX64` target added; purity compiler-enforced.
+- [x] **WP-8** `NotionClient` bridge deleted (`8a618ce`).
+- [x] **WP-9** Defects 3 (`4aac835`), 5 (`df1ef68`), 7 (`df1ef68`).
 
-### Stage 2+ (not started)
+### Stage 2+ — all done
 
-- [x] **WP-10** multi-tenant Postgres schema (tenancy from day one; `saved_views` unique
-  index + work_schedules partial unique index become real constraints; source column
-  types from `app/schemas/.../9.json`). `db/schema.sql`; proven by `db/verify-schema.sh`
-  against docker postgres:16 (4 expected refusals or the script fails).
-- [x] **WP-11** the four invariants redesigned (docs/saas/09-server-invariants.md):
-  SCHEDULE_MUTEX → per-tenant advisory lock with fetch outside; Undo staleness →
-  claim-the-entry + FOR UPDATE (SERIALIZABLE rejected); SecretStore → KMS envelope
-  (AAD = workspace + key, keep ciphertext on failed read); Gemini platform key +
-  per-tenant quota (reserve-then-refuse). Code sites carry REDESIGN markers.
-- [x] **WP-12** the planner API contract is FROZEN at v1: `:planning-contract` (plain JVM,
-  kotlinx-serialization-json 1.8.1) with wire DTOs, per-message versioning (newer refused,
-  unknown fields ignored), golden byte-identical files, whole-minute proposal rules, range
-  refusal as data. 19 tests; joined the verify.sh gate.
-- **WP-13** the vertical slice (in progress; brief in `08`): sign in → connect calendar →
-  add tasks → Plan my week → proposal with reasons → apply → Today, on a real Google account
-  in 90 seconds. `:server` Ktor module + Next.js `web/` client; SyncMergePolicy moves into
-  `planning-core` jvmShared with a provider-id extractor parameter. Exit: automated journey
-  against a fixture provider in the gate + a real-account runbook.
-- **WP-14..16** sync-worker hardening, depth + paid tier, Expo mobile. Summarised in `08`;
-  plan properly when WP-13 closes.
+- [x] **WP-10** multi-tenant Postgres schema (`2c65d34`, `da4ad63`).
+- [x] **WP-11** the four invariants redesigned (`f42b1e4`).
+- [x] **WP-12** the planner API contract FROZEN at v1 (`b229dfd`).
+- [x] **WP-13** the vertical slice (`f9f0d24` + `ffd10be`): sign in → connect calendar →
+  add tasks → Plan my week → proposal with reasons → apply → Today. `:server` Ktor
+  module + Next.js `web/` client; automated journey in the gate + real-account runbook.
+- [x] **WP-14** sync-worker hardening — see the work log; the worker shipped with WP-13,
+  hardening (token refresh, fetch retries, sync ledger) landed after.
+- [x] **WP-15** depth and paid tier: Capacity (4.1), Board (4.2), dependencies (4.3),
+  scenarios/baselines/portfolio (4.4), billing (4.5).
+- [x] **WP-16** mobile MVP + depth: WP-M1…WP-M4 (`19b0d71` + WP-M3 + WP-M2/M4),
+  Projects/Board, offline preview fallback, daily brief, "This week" strip.
+
+### Remaining after this pass (see work log)
+
+- Mobile: Expo push-token wiring (`expo-notifications` in the prebuild), Capacity
+  surface, Timeline/Gantt depth, offline-first beyond the preview fallback.
+- iOS: first `xcodebuild -create-xcframework` + Swift compile — needs a Mac.
+- Android product backlog: Saved View depth, Gantt depth (pinch/minimap/dependency
+  paths), change digest + weekly review, change log/restore points/audit UI, image/CSV
+  export + print layouts, shortcuts, notification actions, focus timer, typography QA.
+- Evaluation (manual): TalkBack/Switch/Voice, T1–T11, boundary matrix, API 24 / 16 KB,
+  physical providers, RTL, 200% text, process death, v3/v4 migration fixtures,
+  landscape/tablet/foldable renders.
 
 ### Product / HCI (not part of the WP flow)
 

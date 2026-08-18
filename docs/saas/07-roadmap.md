@@ -12,19 +12,22 @@ Sequencing principle, unchanged since the teardown: **the engine is the asset, t
 the product, and the Android app is the shipping proof.** Work that makes the engine portable
 and the domain model right comes before work that makes screens.
 
-Current position (updated 2026-08-18): **Stage 1 is complete** (engine core 100%
+Current position (updated 2026-08-19): **Stage 1 is complete** (engine core 100%
 portable, purity compiler-enforced via `linuxX64`, 422 JVM tests green), **Stages 2–3 are
 complete** (multi-tenant schema, frozen v1 contract, and the vertical slice with its
-automated `journey.sh` acceptance in the gate), and **the Stage 5 mobile MVP has shipped**
-(WP-M1…WP-M4: an Expo app with Login/Today/Planner/Settings wired to the Ktor server, plus
-the `planner-engine` local-preview module running `planning-core`'s engine on-device).
-What is left is Stage 4 depth (Capacity, Board, dependencies, scenarios, billing), the
-remaining Stage 5 depth (Projects, Gantt, Gemini summaries, offline-first, the Expo-side
-push-token wiring — the server half is shipped), and
-the open engine defects below.
+automated `journey.sh` acceptance in the gate), **Stage 4 is complete** (Capacity,
+Projects/Board, dependencies and critical path, scenarios/baselines/portfolio, and
+billing with the tier boundary enforced server-side), and **the Stage 5 mobile MVP has
+shipped** (WP-M1…WP-M4: an Expo app with Login/Today/Planner/Settings wired to the Ktor
+server, plus the `planner-engine` local-preview module running `planning-core`'s engine
+on-device). All engine defects are closed (WP-9, `4aac835`, `df1ef68`).
+What is left is the depth trail behind each shipped surface: token refresh and
+sync-worker hardening (WP-14), the Expo-side push-token wiring, the Capacity and
+Timeline/Gantt surfaces in the mobile app, and the iOS build's first Mac-side
+verification.
 
-**Next: Stage 2** — the multi-tenant domain model and a frozen planner contract. Execution detail
-in `08-work-packages.md`, WP-10 onward.
+**Next: the Stage 4/5 depth leftovers and WP-14 hardening** — see the per-stage sections below.
+Execution detail in `08-work-packages.md`.
 
 ---
 
@@ -247,9 +250,12 @@ What shipped (WP-M1…WP-M4):
   runs, every screen's view hierarchy lays out, and the full signup→plan→apply→undo journey
   is green against the fixture server at the wire level.
 
-Remaining in this stage: Projects/Board/Timeline, Gantt, Gemini summaries, the Expo-side
-push-token wiring (the server half is shipped), offline-first (local preview already exists),
-and the iOS side (XCFramework build is written and unverified on this Linux machine).
+Remaining in this stage: the Expo-side push-token wiring (`expo-notifications`, installed
+in the prebuild this machine cannot render — the server half shipped), the Capacity
+surface, the Timeline/Gantt depth, offline-first beyond the shipped preview fallback, and
+the iOS side (XCFramework build written and Linux-reviewed, unverified — `xcodebuild`
+and a Swift compile need a Mac). Projects/Board, the offline preview fallback, the daily
+brief with per-tenant quota, and the "This week" portfolio strip all shipped 2026-08-18.
 
 The iOS build script got its Linux-side review 2026-08-18: the two framework tasks match
 the KMP targets, `baseName = "PlannerCore"` matches the Swift `import PlannerCore`, the
@@ -299,15 +305,15 @@ of this.
 
 ---
 
-## Engine defects still open
+## Engine defects — all closed
 
-| # | Defect | Where it bites |
+| # | Defect | Resolution |
 | --- | --- | --- |
-| 3 | Only `FINISH_TO_START` dependencies are scheduled around; SS/FF/SF are disclosed as unplaced | Stage 4.3 — consultants with client hand-offs |
-| 5 | `AutoPlan` is O(tasks × chunks × free × taken) | Stage 3 — fine on a phone for one week, a shared server planning 8 projects over 4 weeks is different |
-| 7 | Coverage inverted against product value — `AutoPlan` is the sold feature and the least tested | Stage 1, alongside the date-time work |
+| 3 | Only `FINISH_TO_START` dependencies are scheduled around | **Fixed** (`4aac835`): `AutoPlan` schedules around all four types; SS/FF/SF disclosed as unplaced only when a slot genuinely cannot honour them |
+| 5 | `AutoPlan` is O(tasks × chunks × free × taken) | **Closed** (`df1ef68`): `AutoPlanBenchmarkTest` measures 800 tasks / 4 weeks at 66 ms — no optimisation needed; the tripwire is the deliverable |
+| 7 | Coverage inverted against product value | **Closed** (`df1ef68`): `AutoPlan` grew from 5 to 17 tests, matching `MultiSchedulePlanHealth` |
 
-Defects 1, 2, 4 and 6 are fixed (`b11ad72`).
+Defects 1, 2, 4 and 6 were fixed earlier (`b11ad72`).
 
 ---
 

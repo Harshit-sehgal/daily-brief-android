@@ -1,6 +1,6 @@
 # Daily Brief → SaaS: programme plan and status
 
-Living document. Status as of 2026-08-17, branch `saas-extraction`.
+Living document. Status as of 2026-08-19.
 
 Records what was decided, what has been done and proved, what was found along the way that
 changed the plan, and what is left. Where a claim is made, the evidence for it is named.
@@ -222,16 +222,20 @@ Four were fixed in `b11ad72`, ahead of the approval this document asked for; see
 2. ✅ **`AutoPlan` ignored `item.startConstraint`.** Fixed in the same commit.
 3. ⬜ **Only `FINISH_TO_START` dependencies are scheduled around.** SS/FF/SF produce an explicit
    `UnplacedTask` naming the limitation — disclosed, not silently dropped, which is the right
-   failure mode. Consultants with client hand-offs will want the other three. **Still open.**
+   failure mode. Consultants with client hand-offs will want the other three. **Fixed** in the
+   Stage 4.3 work (`4aac835`): the planner schedules around all four types in
+   dependency-topological order.
 4. ✅ **All-day events became full-day hard blocks.** The ViewModel fed every calendar row into
    `fixedCommitments` without filtering, so an all-day marker destroyed a day of capacity. Fixed.
 5. ⬜ **`AutoPlan` is O(tasks × chunks × free × taken).** Fine for one week on one device; a
-   concern for a multi-tenant server planning 8 projects over 4 weeks. **Still open**, and it
-   matters more now that the planner runs server-side in the V1 architecture.
+   concern for a multi-tenant server planning 8 projects over 4 weeks. **Closed** (`df1ef68`):
+   `AutoPlanBenchmarkTest` measured 66 ms for 800 tasks / 4 weeks — no optimisation was needed;
+   the benchmark stays as the tripwire.
 6. ✅ **Two buffer code paths.** Unified.
 7. ⬜ **Test coverage is inverted against product value.** Improved but not resolved: `AutoPlan`
    is now 282 lines with the contract suite referencing deadlines 20 times, against
-   `MultiSchedulePlanHealth`'s 17 tests for an assessment. **Still worth rebalancing.**
+   `MultiSchedulePlanHealth`'s 17 tests for an assessment. **Closed** (`df1ef68`): `AutoPlan`
+   grew to 17 tests, matching the assessment suite.
 
 ### Worth knowing: the crown jewel
 
@@ -286,8 +290,8 @@ project (the date-time cluster, the journal codecs, compiler-enforced purity), t
 multi-tenant domain model and a frozen planner contract, then the vertical slice, then depth
 and the paid tier, then mobile.
 
-The three engine defects still open (3, 5, 7) are scheduled there against the stage where each
-one starts to hurt.
+The three engine defects once open (3, 5, 7) were closed with the depth work — see
+`07-roadmap.md`.
 
 ---
 
@@ -314,13 +318,13 @@ Notes for anyone repeating this work:
 ## 9. Open questions for the user
 
 All earlier questions are closed — see `06-scope-deviations.md` for how, and `07-roadmap.md`
-for what follows. Two judgement calls remain, and neither blocks Stage 1:
+for what follows. One judgement call remains, and it does not block any stage:
 
-1. **Kotlin/Native target** — roughly 1 GB of toolchain buys compiler-enforced `commonMain` and
-   retires a guard that currently exists only because the compiler check fails open. Worth doing
-   with the date-time work (Stage 1.4), or defer until iOS actually starts?
-2. **Monorepo reshuffle** — `apps/ services/ packages/` is deferred until the web app exists so
-   `app/` moves once rather than twice. Confirm that ordering before Stage 3.
+1. ~~**Kotlin/Native target**~~ — **resolved**: `linuxX64` landed (WP-7), the compiler enforces
+   `commonMain` purity, and `iosArm64`/`iosSimulatorArm64` followed with the mobile MVP.
+2. **Monorepo reshuffle** — `apps/ services/ packages/` was deferred until the web app exists
+   so `app/` moves once rather than twice. The web app now exists; the reshuffle is due but
+   can wait for a point where the tree is otherwise quiet.
 
 And one standing decision, recorded rather than asked: the three Android-only features from D1
 stay. `git revert a5bc8c1 43dea69` remains available if you would rather carry less Android

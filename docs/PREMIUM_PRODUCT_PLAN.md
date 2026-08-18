@@ -1,6 +1,6 @@
 # Daily Brief premium product plan
 
-Status: Phase 0, the Phase 1A planning foundation, the Phase 1B Plan-native Board/Schedule-map cutover, the Phase 2 direct-manipulation slice, and the Phase 3 Plan Health/capacity slice are locally verified. Saved-view depth, auto-plan and scenarios, and the wider visual/device matrix remain open.
+Status: Phase 0, the Phase 1A planning foundation, the Phase 1B Plan-native Board/Schedule-map cutover, the Phase 2 direct-manipulation slice, and the Phase 3 Plan Health/capacity slice are locally verified. Saved-view depth, auto-plan and scenarios, change digest, weekly review, and the wider visual/device matrix remain open.
 
 ## Product decision
 

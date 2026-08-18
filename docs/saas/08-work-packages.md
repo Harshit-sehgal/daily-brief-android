@@ -516,10 +516,12 @@ Notion on the server, Gemini summaries, alarms/push, billing, scale-out beyond o
 proper, Expo mobile depth (WP-16 shipped its MVP).
 - **WP-14 Google Calendar sync worker** — OAuth server-side, tokens encrypted at rest,
   `SyncMergePolicy`'s rules ported exactly: times and location are source-owned, wording and
-  placement are user-owned, `userEdited` is sticky.
+  placement are user-owned, `userEdited` is sticky. **Worker shipped with WP-13; the
+  hardening (token refresh, fetch retries with backoff, sync ledger) shipped 2026-08-19.**
 - **WP-15 depth and paid tier** — Capacity first (it answers "can I take another client?", the
   ICP's actual question), then Projects/Board/Timeline, then dependencies and critical path,
-  then scenarios/baselines/portfolio, then Stripe.
+  then scenarios/baselines/portfolio, then Stripe. **All shipped 2026-08-18:** Stage 4.1–4.5
+  commits `4d0fad8` `7b71a92` `89b52be` `63ba4ff` `3db8714`.
 - **WP-16 mobile — MVP shipped 2026-08-18** (`19b0d71` + WP-M3 + WP-M2/M4 commits).
   Expo + React Native UI, `planning-core` via KMP. **Local engine previews; the server is
   authoritative for Apply.**

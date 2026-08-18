@@ -52,9 +52,10 @@ journey.
 
 ## Where time goes, and what the slice does not do
 
-- **Token refresh does not exist in the slice.** `providerFor` unwraps the stored token
-  and uses it as-is; Google access tokens live ~1 hour, so a long demo may need a fresh
-  sign-in. Refresh is WP-14 hardening.
+- **Token refresh is WP-14 hardening, now shipped.** An expired access token (Google's live
+  ~1 hour) is refreshed once through the OAuth endpoint, the fresh pair is stored back in the
+  envelope, and the fetch is retried — a long demo no longer needs a fresh sign-in. A refresh
+  that is itself refused (revoked consent) still fails the sync; that is the honest answer.
 - **The consent screen is the one thing outside the server's control** — it is Google's
   page. If the client is in "testing" state, the first sign-in adds a test user step.
   The 20 s budget assumes consent was already granted once.
