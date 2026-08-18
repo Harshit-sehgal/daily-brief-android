@@ -186,10 +186,13 @@ audit:
 
 - 2026-08-18 (WP-M3): `Mapping` moved from `:server` to `commonMain` (`com.example.core`),
   and `EnginePreview.previewPlan(requestJson)` added beside it — the mobile native bridge
-  (one String in, one String out) that makes a phone preview byte-compatible with a server
-  run. `:planning-contract` converted to KMP so the contract types are importable from
-  `commonMain` (golden files and 19 tests unchanged, now in `jvmTest`); the mobile
-  `planner-engine` module compiles them into the app AAR.
+  (one String in, one String out). A phone preview and a server run meet at `EnginePreview`,
+  so they compute the same proposals; the preview bytes are the contract's canonical
+  encoding of exactly what the server computes. `:planning-contract` converted to KMP so the
+  contract types are importable from `commonMain` (golden files and 19 tests unchanged, now
+  in `jvmTest`); the mobile `planner-engine` module compiles them into the app AAR.
+  `EnginePreviewTest` (in `planning-core`'s `jvmTest`) pins the round trip, determinism,
+  version refusal, and the equality with the server's mapping path.
 - 2026-08-18: `iosArm64`/`iosSimulatorArm64` targets added (configure everywhere, build on
   macOS only); `LegacyNameKeys.ios.kt` actual lands (`precomposedStringWithCompatibilityMapping`
   + `en_US_POSIX`); trim + name-based UUID shared into `commonMain` (`legacyTrim`,

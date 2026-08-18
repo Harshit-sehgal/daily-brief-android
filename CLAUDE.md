@@ -21,8 +21,9 @@ for Apply. `mobile/` is the Expo app (Login, Today, Planner, Settings) on the sa
 server; its `planner-engine` local module runs `planning-core`'s `EnginePreview` on-device
 for preview — the server stays authoritative for Apply. `:planning-contract` is now KMP
 too (WP-M3), so the frozen wire types are portable with the engine; `Mapping` and
-`EnginePreview` live in `planning-core`'s `commonMain`, and the mobile preview is
-byte-compatible with a server run because both meet at `EnginePreview`.
+`EnginePreview` live in `planning-core`'s `commonMain`, and the mobile preview meets a
+server run at `EnginePreview` — same computation, same proposals; `EnginePreviewTest` pins
+the equality.
 
 **`commonMain` purity is enforced by the compiler, with a fast scan in reserve.** The
 `linuxX64` target (WP-7) gives the metadata compilation a consumer, so

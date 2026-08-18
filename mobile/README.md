@@ -39,8 +39,9 @@ planning-contract v1 result JSON. Android runs `planning-core`'s `EnginePreview`
 mavenLocal `planner-engine`/`planning-core` AARs); iOS would run the same code through the
 `PlannerCore` XCFramework (built by `scripts/build-ios-framework.sh` on macOS — not
 verifiable on this Linux machine). The JSON contract means no engine type crosses the
-native boundary; a phone preview is byte-compatible with a server run because both meet
-at `EnginePreview`.
+native boundary; a phone preview and a server run meet at `EnginePreview`, so they compute
+the same proposals and cannot disagree about the plan (`EnginePreviewTest` pins the
+equality).
 
 ## Android build quirks (generated project, re-apply after every `expo prebuild`)
 
