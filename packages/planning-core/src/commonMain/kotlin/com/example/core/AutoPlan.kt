@@ -58,6 +58,16 @@ object AutoPlan {
     fixedCommitments: List<WorkingInterval>,
     dependencies: List<PlanDependency>,
     schedule: WorkingCalendarSpec,
+    /**
+     * Per-project working schedules, keyed by wire id. When non-empty, every item is placed
+     * inside [scheduleIdByItemId]'s schedule (falling back to [schedule]) instead of the one
+     * global calendar: a task assigned to a weekend schedule gets weekend working time, and
+     * the contract promise that a proposal's startAt sits inside the *item's* working
+     * interval holds.
+     */
+    schedules: Map<String, WorkingCalendarSpec> = emptyMap(),
+    /** Item id → schedule id; only read when [schedules] is non-empty. */
+    scheduleIdByItemId: Map<String, String> = emptyMap(),
     rangeStartMs: Long,
     rangeEndMs: Long,
     nowMs: Long,
@@ -171,13 +181,32 @@ object AutoPlan {
     // Blocks must start on a whole minute, and "now" almost never is. Rounding up rather than
     // down also keeps a proposal from starting a few seconds in the past.
     val earliest = ceilToMinute(maxOf(rangeStartMs, nowMs))
-    val free =
-      WorkingCalendar.freeIntervals(schedule, rangeStartMs, rangeEndMs, fixedCommitments)
-        .mapNotNull { interval ->
-          val start = maxOf(interval.startAt, earliest)
-          if (start >= interval.endAt) null else WorkingInterval(start, interval.endAt)
-        }
-        .toMutableList()
+    val freeFor: (PlanItem) -> MutableList<WorkingInterval> =
+      if (schedules.isEmpty()) {
+        ({ _: PlanItem ->
+          WorkingCalendar.freeIntervals(schedule, rangeStartMs, rangeEndMs, fixedCommitments)
+            .mapNotNull { interval ->
+              val start = maxOf(interval.startAt, earliest)
+              if (start >= interval.endAt) null else WorkingInterval(start, interval.endAt)
+            }
+            .toMutableList()
+        })
+      } else {
+        // One free list per schedule: an item's own calendar decides which minutes exist for
+        // it, while `taken` keeps every proposal on one shared human timeline.
+        val freeBySchedule =
+          (schedules.values + schedule).distinct().associateWith { spec ->
+            WorkingCalendar.freeIntervals(spec, rangeStartMs, rangeEndMs, fixedCommitments)
+              .mapNotNull { interval ->
+                val start = maxOf(interval.startAt, earliest)
+                if (start >= interval.endAt) null else WorkingInterval(start, interval.endAt)
+              }
+              .toMutableList()
+          }
+        ({ item: PlanItem ->
+          freeBySchedule.getValue(schedules[scheduleIdByItemId[item.id]] ?: schedule)
+        })
+      }
 
     val proposals = mutableListOf<PlanProposal>()
 
@@ -223,14 +252,16 @@ object AutoPlan {
       val notAfter =
         if (deadlinePolicy == DeadlinePolicy.HARD) item.dueAt else null
       var placedAny = false
+      val itemSchedule = if (schedules.isEmpty()) schedule else schedules[scheduleIdByItemId[item.id]] ?: schedule
+      val free = freeFor(item)
 
-      while (remaining >= schedule.minimumChunkMinutes) {
+      while (remaining >= itemSchedule.minimumChunkMinutes) {
         val slot =
-          nextSlot(free, taken, notBefore, schedule.minimumChunkMinutes, notAfter)
+          nextSlot(free, taken, notBefore, itemSchedule.minimumChunkMinutes, notAfter)
             ?: break
         val available = ((slot.endAt - slot.startAt) / 60_000L).toInt()
-        val minutes = minOf(remaining, schedule.maximumChunkMinutes, available)
-        if (minutes < schedule.minimumChunkMinutes) break
+        val minutes = minOf(remaining, itemSchedule.maximumChunkMinutes, available)
+        if (minutes < itemSchedule.minimumChunkMinutes) break
         val end = slot.startAt + minutes * 60_000L
         proposals +=
           PlanProposal(
@@ -267,10 +298,10 @@ object AutoPlan {
             if (notAfter != null && earliest >= notAfter) {
               "Its due date has already passed, so nothing can be planned for it."
             } else {
-              "No working slot of at least ${schedule.minimumChunkMinutes} minutes is free in this range."
+              "No working slot of at least ${itemSchedule.minimumChunkMinutes} minutes is free in this range."
             },
           )
-      } else if (remaining >= schedule.minimumChunkMinutes) {
+      } else if (remaining >= itemSchedule.minimumChunkMinutes) {
         unplaced +=
           UnplacedTask(
             item.id,

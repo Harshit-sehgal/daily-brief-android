@@ -195,8 +195,11 @@ Only once the loop is used. In `01-product-teardown.md` priority order:
    answers *"can I take another client next week?"* with available/planned/spare minutes and a
    verdict sentence — yes, no, or the minimal set of deferrable tasks that would have to move
    (`CapacityAnswer` in `commonMain`, golden-pinned in the contract, a journey step, and a strip
-   on the web Planner). **Shipped 2026-08-18.** What remains here: per-project schedules on the
-   wire's `scheduleIdByTaskId` once Stage 4.2 lands, and the Capacity surface in the mobile app.
+   on the web Planner). **Shipped 2026-08-18.** Per-project schedules on the wire's
+   `scheduleIdByTaskId` and the Capacity surface in the mobile app shipped 2026-08-19: the
+   engine plans and assesses health per assigned schedule (default-filled unassigned tasks,
+   single-spec path untouched until a request assigns), and both web and mobile send the
+   assignments through the same frozen v1 request.
 2. **Projects → Tasks / Board / Timeline** — progressive disclosure; Timeline last. **Board
    shipped 2026-08-18** (contract + migration + routes + journey step + web surface); the
    Timeline is the portfolio Gantt, which folds in with the portfolio at 4.

@@ -30,6 +30,7 @@ import com.example.data.model.PlanItem
 object Mapping {
   fun toEngine(request: PlanningRequest, nowMs: Long): EngineInput {
     val itemsById = request.items.associateBy { it.id }
+    val schedulesById = request.schedules.associate { it.id to it.toEngineSpec() }
     return EngineInput(
       items = request.items.map { wire -> wire.toEngine(nowMs) },
       blocks = request.blocks.map { it.toEngine(nowMs) },
@@ -40,6 +41,11 @@ object Mapping {
           dep.toEngine(boardId, nowMs)
         },
       schedule = request.schedules.toEngineSpec(itemsById),
+      schedules = schedulesById,
+      scheduleIdByItemId = request.scheduleIdByTaskId,
+      defaultScheduleId =
+        (request.schedules.firstOrNull { it.archivedAt == null && it.isDefault } ?: request.schedules.firstOrNull())
+          ?.id,
     )
   }
 
@@ -51,6 +57,8 @@ object Mapping {
         fixedCommitments = input.fixedCommitments,
         dependencies = input.dependencies,
         schedule = input.schedule,
+        schedules = input.schedules,
+        scheduleIdByItemId = input.scheduleIdByItemId,
         rangeStartMs = request.rangeStartMs,
         rangeEndMs = request.rangeEndMs,
         nowMs = request.nowMs,
@@ -61,17 +69,42 @@ object Mapping {
             else -> DeadlinePolicy.HARD
           },
       )
+    // Per-project schedules switch the health assessment to the same multi-schedule evaluation
+    // the capacity path uses: demand flows into the schedules that can take it, and one shared
+    // human timeline is never counted twice. Only a request that *assigns* tasks to schedules
+    // opts in; a request that merely lists several schedules keeps the original single-spec
+    // evaluation untouched, so nothing changes until a client asks for per-project calendars.
+    val multiSchedule = input.schedules.isNotEmpty() && input.scheduleIdByItemId.isNotEmpty()
     val health =
-      PlanHealth.evaluate(
-        spec = input.schedule,
-        rangeStart = request.rangeStartMs,
-        rangeEnd = request.rangeEndMs,
-        now = request.nowMs,
-        items = input.items,
-        blocks = input.blocks,
-        fixedCommitments = input.fixedCommitments,
-        dependencies = input.dependencies,
-      )
+      if (multiSchedule) {
+        // MultiSchedulePlanHealth requires every active task to resolve; unassigned tasks fall
+        // back to the default schedule, the same one toEngineSpec chose for the single path.
+        val defaultId = requireNotNull(input.defaultScheduleId)
+        val assignments =
+          input.items.associate { item -> item.id to (input.scheduleIdByItemId[item.id] ?: defaultId) }
+        MultiSchedulePlanHealth.evaluate(
+          schedules = input.schedules,
+          scheduleIdByItemId = assignments,
+          rangeStart = request.rangeStartMs,
+          rangeEnd = request.rangeEndMs,
+          now = request.nowMs,
+          items = input.items,
+          blocks = input.blocks,
+          fixedCommitments = input.fixedCommitments,
+          dependencies = input.dependencies,
+        )
+      } else {
+        PlanHealth.evaluate(
+          spec = input.schedule,
+          rangeStart = request.rangeStartMs,
+          rangeEnd = request.rangeEndMs,
+          now = request.nowMs,
+          items = input.items,
+          blocks = input.blocks,
+          fixedCommitments = input.fixedCommitments,
+          dependencies = input.dependencies,
+        )
+      }
     return PlanningResult(
       proposals = result.proposals.map { PlanProposalWire(it.itemId, it.startAt, it.endAt, it.reason) },
       unplaced = result.unplaced.map { UnplacedTaskWire(it.itemId, it.reason) },
@@ -276,5 +309,11 @@ object Mapping {
     val fixedCommitments: List<WorkingInterval>,
     val dependencies: List<PlanDependency>,
     val schedule: WorkingCalendarSpec,
+    /** All wire schedules by id; empty means the single-schedule path. */
+    val schedules: Map<String, WorkingCalendarSpec> = emptyMap(),
+    /** The wire's raw scheduleIdByTaskId; empty unless the client assigned tasks. */
+    val scheduleIdByItemId: Map<String, String> = emptyMap(),
+    /** The id toEngineSpec picked as the default; null when the request has no schedules. */
+    val defaultScheduleId: String? = null,
   )
 }
