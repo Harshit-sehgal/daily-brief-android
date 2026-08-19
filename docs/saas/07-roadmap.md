@@ -17,16 +17,17 @@ portable, purity compiler-enforced via `linuxX64`, 422 JVM tests green), **Stage
 complete** (multi-tenant schema, frozen v1 contract, and the vertical slice with its
 automated `journey.sh` acceptance in the gate), **Stage 4 is complete** (Capacity,
 Projects/Board, dependencies and critical path, scenarios/baselines/portfolio, and
-billing with the tier boundary enforced server-side), and **the Stage 5 mobile MVP has
-shipped** (WP-M1…WP-M4: an Expo app with Login/Today/Planner/Settings wired to the Ktor
-server, plus the `planner-engine` local-preview module running `packages/planning-core`'s engine
-on-device). All engine defects are closed (WP-9, `4aac835`, `df1ef68`).
-What is left is the depth trail behind each shipped surface: token refresh and
-sync-worker hardening (WP-14), the Expo-side push-token wiring, the Capacity and
-Timeline/Gantt surfaces in the mobile app, and the iOS build's first Mac-side
-verification.
+billing with the tier boundary enforced server-side), and **the Stage 5 mobile MVP and its
+depth trail have shipped** (WP-M1…WP-M4 plus, 2026-08-19: the Expo push-token wiring,
+the Capacity check, the Today wall-clock timeline, the per-project week Gantt, and the
+server-side WP-14 hardening — token refresh and the `sync_runs` ledger). The engine now
+honours per-project schedules on the wire (`scheduleIdByTaskId`, `64b8cf9`). All engine
+defects are closed (WP-9, `4aac835`, `df1ef68`).
+What is left is the tail of the depth trail: offline-first for the mobile app beyond the
+shipped preview fallback, and the iOS build's first Mac-side verification (`xcodebuild`
+and a Swift compile need a Mac).
 
-**Next: the Stage 4/5 depth leftovers and WP-14 hardening** — see the per-stage sections below.
+**Next: the mobile depth tail and the iOS Mac verification** — see the per-stage sections below.
 Execution detail in `08-work-packages.md`.
 
 ---
@@ -253,12 +254,18 @@ What shipped (WP-M1…WP-M4):
   runs, every screen's view hierarchy lays out, and the full signup→plan→apply→undo journey
   is green against the fixture server at the wire level.
 
-Remaining in this stage: the Expo-side push-token wiring (`expo-notifications`, installed
-in the prebuild this machine cannot render — the server half shipped), the Capacity
-surface, the Timeline/Gantt depth, offline-first beyond the shipped preview fallback, and
-the iOS side (XCFramework build written and Linux-reviewed, unverified — `xcodebuild`
-and a Swift compile need a Mac). Projects/Board, the offline preview fallback, the daily
-brief with per-tenant quota, and the "This week" portfolio strip all shipped 2026-08-18.
+Shipped 2026-08-19: the Expo-side push-token wiring (`expo-notifications` mints the
+install token, registers it at app start once a session exists, deregisters at
+sign-out), the Capacity check (hours/week input, verdict sentence, numbers and the moves
+list), the Today wall-clock day timeline, and the per-project week Gantt beside the
+portfolio strip.
+
+Remaining in this stage: offline-first beyond the shipped preview fallback (a payload
+cache for Today/board/portfolio reads and an offline posture — Apply stays
+server-authoritative), and the iOS side (XCFramework build written and Linux-reviewed,
+unverified — `xcodebuild` and a Swift compile need a Mac). Projects/Board, the offline
+preview fallback, the daily brief with per-tenant quota, and the "This week" portfolio
+strip all shipped 2026-08-18.
 
 The iOS build script got its Linux-side review 2026-08-18: the two framework tasks match
 the KMP targets, `baseName = "PlannerCore"` matches the Swift `import PlannerCore`, the
@@ -293,9 +300,9 @@ applied" to the workspace's tokens, fire-and-forget — the delivery is wrapped 
 outage can never fail an apply that already committed. The journey's step 11 registers
 two tokens on the main workspace and one on the trial workspace, deregisters one, applies
 a fresh plan, and asserts exactly one delivery (the right token, the applied entry's id
-in `data`, never the deleted or the foreign token). What remains is the Expo-side
-wiring — `expo-notifications` is not installed, and installing it means a prebuild this
-machine cannot verify — so that client hook-up is documented as the device-side step.
+in `data`, never the deleted or the foreign token). The Expo-side wiring shipped
+2026-08-19 (`b71460a`): `expo-notifications` mints the install token, `POST /v1/devices`
+registers it at app start once a session exists, and sign-out deregisters.
 
 Shipped 2026-08-18 (mobile week strip): the Planner gains a "This week" portfolio strip —
 one row per project, bars placed across the week by `GET /v1/portfolio` (the same rows,

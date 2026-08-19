@@ -191,12 +191,14 @@ Stage 2 (WP-10..WP-12) starts once WP-1..WP-7 are done.
 
 ### Remaining after this pass (see work log)
 
-- Mobile: Expo push-token wiring (`expo-notifications` in the prebuild), Capacity
-  surface, Timeline/Gantt depth, offline-first beyond the preview fallback.
+- Mobile: offline-first beyond the preview fallback (payload cache + offline posture —
+  Apply stays server-authoritative).
 - iOS: first `xcodebuild -create-xcframework` + Swift compile — needs a Mac.
-- Android product backlog: Saved View depth, Gantt depth (pinch/minimap/dependency
-  paths), change digest + weekly review, change log/restore points/audit UI, image/CSV
-  export + print layouts, shortcuts, notification actions, focus timer, typography QA.
+- Android product backlog: canvas dependency creation on the Gantt (the dialog path
+  exists), change digest, print layouts, typography QA. Saved View depth, PNG export,
+  shortcuts, notification actions and the focus timer shipped 2026-08-19 (`9ad0d04`);
+  pinch zoom, the minimap/overview strip with Today jump, and the weekly review dialog
+  already exist.
 - Evaluation (manual): TalkBack/Switch/Voice, T1–T11, boundary matrix, API 24 / 16 KB,
   physical providers, RTL, 200% text, process death, v3/v4 migration fixtures,
   landscape/tablet/foldable renders.
@@ -407,3 +409,22 @@ Phase 7 slice, manual/HCI evidence, Kotlin/Native (human-only or deferred).
   way. View-options journeys scroll to the commands my Search/Density sections pushed
   below the fold. **Evidence:** `scripts/verify.sh --device` green — 130 instrumented
   tests, both lints, both APKs, R8; `scripts/verify.sh --journey` green.
+
+### 2026-08-19 (mobile depth, server hardening, per-project schedules)
+
+- **`c8313f6`** — WP-14 hardening lands: the calendar provider refreshes once on
+  401/403 and persists the refreshed pair through the envelope (keeping the old refresh
+  token when the issuer does not rotate it); ReconcileWorker gains three fetch attempts
+  with 200ms<<attempt backoff and a V7 `sync_runs` ledger row per run; the journey
+  asserts it at `/v1/fixture/sync-runs`.
+- **`b71460a`** — the Expo push-token wiring (`expo-notifications` mints the token,
+  registers at app start once a session exists, deregisters at sign-out), the Planner
+  Capacity section (`/v1/capacity`), a per-project week Gantt over `GET /v1/portfolio`,
+  and Today's wall-clock day timeline.
+- **`64b8cf9`** — the engine honours per-project schedules on the wire:
+  `AutoPlan.propose`/`Mapping.propose` take schedules plus `scheduleIdByItemId`;
+  assigned tasks are proposed inside their schedule's working time (per-schedule free
+  intervals over one shared taken timeline) and health switches to the
+  `MultiSchedulePlanHealth` evaluation; unassigned tasks fall back to the default
+  schedule; single-spec requests keep the byte-for-byte path and the golden files never
+  move. `PerProjectSchedulePlanTest` + `PerProjectScheduleWireTest` pin it.
