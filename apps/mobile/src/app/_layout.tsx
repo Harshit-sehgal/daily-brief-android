@@ -1,5 +1,4 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router";
-import { Stack } from "expo-router";
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { useColorScheme } from "react-native";
@@ -12,6 +11,9 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   useEffect(() => {
+    // The native splash is held until the root navigator exists. Release builds do not
+    // auto-hide it after preventAutoHideAsync(), so always release it from the mounted root.
+    SplashScreen.hideAsync().catch(() => undefined);
     installNotificationHandler();
     // Register the install's push token once a session exists; failures are silent — a
     // push registry problem must never block the app's ordinary start.

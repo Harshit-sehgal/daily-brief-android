@@ -4,8 +4,14 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Palette, Space } from "@/constants/palette";
+import { ui } from "@/constants/ui";
 import { makeRedirectUri } from "@/app/auth-callback";
 import { API_BASE, client, savedSession, saveSession } from "@/lib/api";
+
+// The fixture endpoint exists only for local acceptance runs. Production builds must not
+// advertise a demo path that the production server deliberately does not expose.
+const FIXTURE = process.env.EXPO_PUBLIC_FIXTURE === "1";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -53,11 +59,16 @@ export default function LoginScreen() {
         return;
       }
       const code = new URL(result.url).searchParams.get("code");
+      const state = new URL(result.url).searchParams.get("state");
       if (!code) {
         setError("No authorization code returned");
         return;
       }
-      const session = await client.authCallback(code, redirectUri);
+      if (!state) {
+        setError("No OAuth state returned");
+        return;
+      }
+      const session = await client.authCallback(code, redirectUri, state);
       await saveSession(session);
       router.replace("/today");
     } catch (e) {
@@ -69,8 +80,8 @@ export default function LoginScreen() {
 
   if (checking) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
+      <View style={ui.centre}>
+        <ActivityIndicator color={Palette.accent} />
       </View>
     );
   }
@@ -79,24 +90,30 @@ export default function LoginScreen() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.body}>
         <Text style={styles.title}>Daily Brief</Text>
-        <Text style={styles.subtitle}>Plan your week around your calendar.</Text>
+        <Text style={styles.subtitle}>
+          Your calendar and your own work in one schedule, so you can see what actually fits.
+        </Text>
         <View style={styles.actions}>
+          {FIXTURE ? (
+            <Pressable
+              style={({ pressed }) => [ui.btnPrimary, pressed && styles.pressed]}
+              onPress={signUpFixture}
+              disabled={busy}
+              accessibilityRole="button"
+            >
+              {busy ? <ActivityIndicator color={Palette.onAccent} /> : <Text style={ui.btnPrimaryText}>Try the demo</Text>}
+            </Pressable>
+          ) : null}
           <Pressable
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            onPress={signUpFixture}
-            disabled={busy}
-          >
-            {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.buttonText}>Try the demo</Text>}
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.secondary, pressed && styles.buttonPressed]}
+            style={({ pressed }) => [ui.btn, pressed && styles.pressed]}
             onPress={signInGoogle}
             disabled={busy}
+            accessibilityRole="button"
           >
-            <Text style={styles.secondaryText}>Sign in with Google</Text>
+            <Text style={ui.btnText}>Sign in with Google</Text>
           </Pressable>
         </View>
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text style={ui.error}>{error}</Text> : null}
         <Text style={styles.footnote}>Server: {API_BASE}</Text>
       </View>
     </SafeAreaView>
@@ -104,32 +121,12 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  safeArea: { flex: 1 },
-  body: { flex: 1, padding: 24, justifyContent: "center", gap: 12 },
-  title: { fontSize: 32, fontWeight: "700" },
-  subtitle: { fontSize: 16, opacity: 0.7 },
-  actions: { marginTop: 24, gap: 12 },
-  button: {
-    backgroundColor: "#3c87f7",
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    alignItems: "center",
-    minHeight: 48,
-  },
-  buttonPressed: { opacity: 0.8 },
-  buttonText: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
-  secondary: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#c8c8d0",
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    alignItems: "center",
-    minHeight: 48,
-  },
-  secondaryText: { fontSize: 16, fontWeight: "600" },
-  error: { color: "#d93a3a", fontSize: 14 },
-  footnote: { fontSize: 12, opacity: 0.5, marginTop: 24 },
+  safeArea: { flex: 1, backgroundColor: Palette.base },
+  body: { flex: 1, padding: Space.xl, justifyContent: "center", gap: Space.md },
+  // The one place the app speaks at full size; every other screen tops out at 28.
+  title: { fontSize: 32, lineHeight: 38, fontWeight: "600", letterSpacing: -0.8, color: Palette.on },
+  subtitle: { fontSize: 15, lineHeight: 22, color: Palette.onMuted, maxWidth: 420 },
+  actions: { marginTop: Space.xl, gap: Space.md },
+  pressed: { opacity: 0.8 },
+  footnote: { fontSize: 12, lineHeight: 17, color: Palette.onFaint, marginTop: Space.xl },
 });

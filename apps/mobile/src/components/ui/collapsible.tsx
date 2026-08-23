@@ -5,7 +5,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export function Collapsible({ children, title }: PropsWithChildren & { title: string }) {
@@ -52,13 +52,13 @@ const styles = StyleSheet.create({
   button: {
     width: Spacing.four,
     height: Spacing.four,
-    borderRadius: 12,
+    borderRadius: Radius.control,
     justifyContent: 'center',
     alignItems: 'center',
   },
   content: {
     marginTop: Spacing.three,
-    borderRadius: Spacing.three,
+    borderRadius: Radius.block,
     marginLeft: Spacing.four,
     padding: Spacing.four,
   },

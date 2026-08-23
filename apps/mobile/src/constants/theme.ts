@@ -1,26 +1,39 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * The design system, mirrored from the app.
+ *
+ * SOURCE OF TRUTH: apps/android/src/main/java/com/example/ui/theme/Color.kt,
+ * Theme.kt (Radius) and Layout.kt (Space). Do not invent values here — change
+ * Color.kt and mirror. `src/constants/palette.test.ts` parses the Kotlin and
+ * fails when these drift.
+ *
+ * The neutrals are not grey: each carries a low-chroma warm bias around 30-40
+ * degrees, so light reads as unbleached paper rather than a lab coat, and dark
+ * as warm charcoal rather than blue-black. The status colours come from the
+ * same family — brick, honey, sage — so they never clash with the accent.
  */
 
 import '@/global.css';
 
 import { Platform } from 'react-native';
 
+import { Palette, PaletteDark } from './palette';
+
+export { Palette, PaletteDark, Accents, Radius, Space, MinimumTouchTarget } from './palette';
+
 export const Colors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    text: Palette.on,
+    background: Palette.base,
+    backgroundElement: Palette.surfaceHigh,
+    backgroundSelected: Palette.surfaceHighest,
+    textSecondary: Palette.onMuted,
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    text: PaletteDark.on,
+    background: PaletteDark.base,
+    backgroundElement: PaletteDark.surfaceHigh,
+    backgroundSelected: PaletteDark.surfaceHighest,
+    textSecondary: PaletteDark.onMuted,
   },
 } as const;
 

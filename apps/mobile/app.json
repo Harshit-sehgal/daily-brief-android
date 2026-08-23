@@ -34,6 +34,7 @@
         }
       ],
       "expo-secure-store",
+      "./plugins/with-local-emulator-cleartext",
       [
         "expo-notifications",
         {

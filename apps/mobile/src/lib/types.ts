@@ -28,9 +28,12 @@ export interface Interval {
 
 export interface WorkWindow {
   id: string;
-  dayOfWeek: number;
+  kind?: "weekly" | "date_override" | string;
+  dayOfWeek?: number | null;
+  localDate?: string | null;
   startMinute: number;
   endMinute: number;
+  isClosed?: boolean;
   rank: number;
 }
 
@@ -43,6 +46,7 @@ export interface WorkSchedule {
   maximumChunkMinutes: number;
   bufferMinutes: number;
   rank: number;
+  archivedAt?: number | null;
   windows: WorkWindow[];
 }
 
@@ -53,7 +57,7 @@ export interface PlanningRequest {
   rangeEndMs: number;
   nowMs: number;
   items: Task[];
-  blocks: unknown[];
+  blocks: ScheduledBlock[];
   fixedCommitments: Interval[];
   dependencies: unknown[];
   scheduleIdByTaskId: Record<string, string>;
@@ -81,14 +85,14 @@ export interface Health {
   overloadMinutes: number;
   missingEstimateCount: number;
   unscheduledDemandMinutes: number;
-  demands: Array<{
+  demands: {
     itemId: string;
     remainingEffortMinutes?: number | null;
     scheduledMinutes: number;
     unscheduledMinutes?: number | null;
-  }>;
-  risks: Array<{ kind: string; itemId?: string | null; explanation: string }>;
-  repairs: Array<{ action: string; explanation: string; itemId?: string | null }>;
+  }[];
+  risks: { kind: string; itemId?: string | null; explanation: string }[];
+  repairs: { action: string; explanation: string; itemId?: string | null }[];
   warnings: string[];
   explanation: string;
 }
@@ -137,11 +141,35 @@ export interface ScheduledBlock {
   linkedEventId?: string | null;
 }
 
+/** A persisted scheduled block returned by the workspace-scoped operational read. */
+export interface PlanBlock {
+  id: string;
+  projectId: string;
+  taskId: string;
+  startAt: number;
+  endAt: number;
+  position: number;
+  locked: boolean;
+  linkedEventId?: string | null;
+}
+
+export interface TodayBlock {
+  id: string;
+  planItemId: string;
+  title: string;
+  projectName?: string | null;
+  startAt: number;
+  endAt: number;
+  position?: number;
+  locked?: boolean;
+  linkedEventId?: string | null;
+}
+
 export interface TodayResponse {
   date: string;
   events: ExternalEvent[];
-  blocks: ScheduledBlock[];
-  conflicts: Array<{ first: ExternalEvent; second: ExternalEvent; overlapMs: number }>;
+  blocks: TodayBlock[];
+  conflicts: { first: ExternalEvent; second: ExternalEvent; overlapMs: number }[];
   busyMinutes: number;
   freeMinutes: number;
 }

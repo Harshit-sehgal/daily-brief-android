@@ -2,8 +2,10 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { Palette, Radius, Space } from "@/constants/palette";
+import { hm, ui } from "@/constants/ui";
 import { client, savedSession } from "@/lib/api";
-import type { ScheduledBlock, SummaryResponse, TodayResponse } from "@/lib/types";
+import type { ExternalEvent, SummaryResponse, TodayBlock, TodayResponse } from "@/lib/types";
 
 function formatTime(epochMs: number): string {
   const d = new Date(epochMs);
@@ -18,10 +20,11 @@ function dayStartUtc(date: string): number {
   return Date.UTC(y, m - 1, d);
 }
 
-/** The time spine as a vertical timeline: the day's hours on an axis, events outlined and
- *  plan blocks filled, both positioned by their wall-clock minutes. A view only — nothing
- *  here writes. */
-function DayTimeline({ date, events, blocks }: { date: string; events: TodayResponse["events"]; blocks: ScheduledBlock[] }) {
+/** The time spine as a vertical timeline: the day's hours on an axis, carrying
+ *  the same ownership marks as the rest of the app — a commitment is outlined
+ *  in honey because the planner may not move it, a block is filled with the
+ *  accent because it is yours. A view only; nothing here writes. */
+function DayTimeline({ date, events, blocks }: { date: string; events: ExternalEvent[]; blocks: TodayBlock[] }) {
   const dayStart = dayStartUtc(date);
   const dayEnd = dayStart + DAY_MS;
   const height = 24 * HOUR_DP;
@@ -52,7 +55,7 @@ function DayTimeline({ date, events, blocks }: { date: string; events: TodayResp
         return (
           <View key={b.id} style={[styles.tlBar, styles.tlBlock, { top, height: h }]}>
             <Text numberOfLines={1} style={styles.tlBlockTitle}>
-              {formatTime(b.startAt)} {b.planItemId}
+              {formatTime(b.startAt)} {b.title}
             </Text>
           </View>
         );
@@ -61,12 +64,26 @@ function DayTimeline({ date, events, blocks }: { date: string; events: TodayResp
   );
 }
 
+/** Every row on the day in one list, in the order it happens. Two lists headed
+ *  "Calendar" and "Plan blocks" made the reader interleave them by hand to
+ *  answer the only question the screen exists for: what is next. */
+type DayRow = {
+  key: string;
+  start: number;
+  end: number;
+  title: string;
+  meta: string;
+  owned: boolean;
+  isDeadline: boolean;
+};
+
 export default function TodayScreen() {
   const router = useRouter();
   const [today, setToday] = useState<TodayResponse | null>(null);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stale, setStale] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -75,7 +92,9 @@ export default function TodayScreen() {
         return;
       }
       setError(null);
-      setToday(await client.today());
+      const cached = await client.todayCached();
+      setToday(cached.data);
+      setStale(cached.stale);
       setSummary(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "load failed");
@@ -115,9 +134,9 @@ export default function TodayScreen() {
 
   if (!today) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+      <View style={ui.centre}>
+        <ActivityIndicator color={Palette.accent} />
+        {error ? <Text style={ui.error}>{error}</Text> : null}
       </View>
     );
   }
@@ -125,132 +144,182 @@ export default function TodayScreen() {
   const events = [...today.events].sort((a, b) => a.startTime - b.startTime);
   const blocks = [...today.blocks].sort((a, b) => a.startAt - b.startAt);
 
+  const rows: DayRow[] = [
+    ...events.map((e) => ({
+      key: `event-${e.id}`,
+      start: e.startTime,
+      end: e.endTime,
+      title: e.title,
+      meta: e.source,
+      owned: false,
+      isDeadline: Boolean(e.isDeadline),
+    })),
+    ...blocks.map((b) => ({
+      key: `block-${b.id}`,
+      start: b.startAt,
+      end: b.endAt,
+      title: b.title,
+      meta: b.projectName ?? "your work",
+      owned: true,
+      isDeadline: false,
+    })),
+  ].sort((a, b) => a.start - b.start);
+
+  const total = Math.max(1, today.busyMinutes + today.freeMinutes);
+  const quotaSpent = summary !== null && summary.used >= summary.limit;
+
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-      <View style={styles.row}>
-        <Text style={styles.date}>{today.date}</Text>
-        <Pressable style={styles.syncButton} onPress={syncCalendar} disabled={busy}>
-          <Text style={styles.syncText}>{busy ? "Syncing…" : "Sync calendar"}</Text>
+    <ScrollView style={ui.screen} contentContainerStyle={ui.content}>
+      <View style={styles.head}>
+        <View style={styles.headText}>
+          <Text style={ui.eyebrow}>{today.date}</Text>
+          <Text style={ui.h1}>Today</Text>
+        </View>
+        <Pressable style={ui.btnQuiet} onPress={syncCalendar} disabled={busy} accessibilityRole="button">
+          <Text style={ui.btnQuietText}>{busy ? "Syncing…" : "Sync"}</Text>
         </Pressable>
       </View>
-      <Text style={styles.stats}>
-        {today.busyMinutes} busy · {today.freeMinutes} free
-      </Text>
 
-      {summary ? (
-        <View style={styles.brief}>
-          <Text style={styles.briefText}>{summary.text}</Text>
-          <Text style={styles.briefQuota}>
-            Daily brief · {summary.used} of {summary.limit} used this month
-            {summary.used >= summary.limit ? " · the monthly quota is spent" : ""}
-          </Text>
+      {stale ? (
+        <Text style={styles.stale}>
+          Offline — showing the last synced day. Sync and writes need the server.
+        </Text>
+      ) : null}
+
+      <View style={ui.card}>
+        <Text style={ui.eyebrow}>How the day divides</Text>
+        <View
+          style={ui.meter}
+          accessibilityRole="image"
+          accessibilityLabel={`${today.busyMinutes} minutes busy, ${today.freeMinutes} minutes free.`}
+        >
+          <View style={[ui.meterFixed, { flex: Math.max(0.0001, today.busyMinutes / total) }]} />
+          <View style={[ui.meterFree, { flex: Math.max(0.0001, today.freeMinutes / total) }]} />
         </View>
-      ) : null}
-      {!summary || (summary.used ?? 0) < (summary.limit ?? 3) ? (
-        <Pressable style={styles.primary} onPress={writeBrief} disabled={busy}>
-          <Text style={styles.primaryText}>{busy ? "Writing…" : "Write today's brief"}</Text>
-        </Pressable>
-      ) : null}
+        <View style={ui.legend}>
+          <Text style={ui.legendItem}>Busy {hm(today.busyMinutes)}</Text>
+          <Text style={ui.legendItem}>Free {hm(today.freeMinutes)}</Text>
+        </View>
+      </View>
 
       {today.conflicts.length > 0 ? (
-        <View style={styles.conflicts}>
-          <Text style={styles.sectionTitle}>Clashes</Text>
+        <View style={ui.clash}>
+          <Text style={ui.clashHead}>
+            {today.conflicts.length} clash{today.conflicts.length === 1 ? "" : "es"} today
+          </Text>
           {today.conflicts.map((c, i) => (
-            <Text key={i} style={styles.conflictText}>
-              {c.first.title} overlaps {c.second.title}
+            <Text key={i} style={ui.clashBody}>
+              {c.first.title} runs into {c.second.title} for {Math.round(c.overlapMs / 60_000)} min.
             </Text>
           ))}
         </View>
       ) : null}
 
-      <Text style={styles.sectionTitle}>Timeline</Text>
+      <View style={ui.sectionRule}>
+        <Text style={ui.eyebrow}>Schedule</Text>
+        <View style={ui.rule} />
+      </View>
+
+      {rows.length === 0 ? (
+        <Text style={ui.empty}>Nothing on the calendar and nothing planned.</Text>
+      ) : (
+        rows.map((r) => (
+          <View key={r.key} style={ui.row}>
+            <Text style={ui.rowTime}>
+              {formatTime(r.start)}–{formatTime(r.end)}
+            </Text>
+            <View style={r.owned ? ui.ownPlan : ui.ownFixed} />
+            <View style={ui.rowBody}>
+              <Text numberOfLines={1} style={r.owned ? ui.rowTitleOwned : ui.rowTitle}>
+                {r.title}
+              </Text>
+              <Text style={r.owned ? ui.rowMeta : ui.rowMetaFixed}>
+                {r.meta}
+                {r.isDeadline ? " · deadline" : ""}
+              </Text>
+            </View>
+            <Text style={ui.rowTrail}>{hm((r.end - r.start) / 60_000)}</Text>
+          </View>
+        ))
+      )}
+
+      <View style={ui.sectionRule}>
+        <Text style={ui.eyebrow}>The day at true proportion</Text>
+        <View style={ui.rule} />
+      </View>
       <ScrollView style={styles.timelineScroll} nestedScrollEnabled>
         <DayTimeline date={today.date} events={events} blocks={blocks} />
       </ScrollView>
 
-      <Text style={styles.sectionTitle}>Calendar</Text>
-      {events.length === 0 ? <Text style={styles.empty}>No events today</Text> : null}
-      {events.map((e) => (
-        <View key={e.id} style={styles.card}>
-          <Text style={styles.cardTime}>
-            {formatTime(e.startTime)}–{formatTime(e.endTime)}
+      <View style={ui.sectionRule}>
+        <Text style={ui.eyebrow}>Daily brief</Text>
+        <View style={ui.rule} />
+      </View>
+      {summary ? (
+        <View style={ui.card}>
+          <Text style={ui.body}>{summary.text}</Text>
+          <Text style={ui.floorNote}>
+            {summary.used} of {summary.limit} used this month
+            {quotaSpent ? " · the monthly quota is spent" : ""}
           </Text>
-          <Text style={styles.cardTitle}>{e.title}</Text>
-          {e.isDeadline ? <Text style={styles.deadline}>deadline</Text> : null}
         </View>
-      ))}
+      ) : (
+        <Text style={ui.muted}>A written summary of the day, on request.</Text>
+      )}
+      {!quotaSpent ? (
+        <Pressable style={[ui.btn, styles.spaced]} onPress={writeBrief} disabled={busy} accessibilityRole="button">
+          <Text style={ui.btnText}>{busy ? "Writing…" : "Write today's brief"}</Text>
+        </Pressable>
+      ) : null}
 
-      <Text style={styles.sectionTitle}>Plan blocks</Text>
-      {blocks.length === 0 ? <Text style={styles.empty}>Nothing planned yet</Text> : null}
-      {blocks.map((b) => (
-        <View key={b.id} style={styles.card}>
-          <Text style={styles.cardTime}>
-            {formatTime(b.startAt)}–{formatTime(b.endAt)}
-          </Text>
-          <Text style={styles.cardTitle}>{b.planItemId}</Text>
-        </View>
-      ))}
-
-      <Pressable style={styles.primary} onPress={() => router.push("/planner")}>
-        <Text style={styles.primaryText}>Open planner</Text>
+      <Pressable
+        style={[ui.btnPrimary, styles.spacedWide]}
+        onPress={() => router.push("/planner")}
+        accessibilityRole="button"
+      >
+        <Text style={ui.btnPrimaryText}>Open planner</Text>
       </Pressable>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {error ? <Text style={ui.error}>{error}</Text> : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24 },
-  scroll: { flex: 1 },
-  content: { padding: 20, gap: 8, paddingBottom: 48 },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  date: { fontSize: 24, fontWeight: "700" },
-  syncButton: { minHeight: 36, justifyContent: "center", paddingHorizontal: 12 },
-  syncText: { color: "#3c87f7", fontSize: 14, fontWeight: "600" },
-  stats: { fontSize: 14, opacity: 0.6, marginBottom: 8 },
-  brief: {
+  head: { flexDirection: "row", alignItems: "flex-start", gap: Space.md, marginBottom: Space.xs },
+  headText: { flex: 1, minWidth: 0 },
+  stale: { fontSize: 13, lineHeight: 18, color: Palette.urgent },
+  spaced: { marginTop: Space.sm },
+  spacedWide: { marginTop: Space.xl },
+  timelineScroll: {
+    height: 400,
+    borderRadius: Radius.block,
     borderWidth: 1,
-    borderColor: "#c8c8d0",
-    borderRadius: 12,
-    padding: 12,
-    gap: 6,
-    marginBottom: 8,
+    borderColor: Palette.outlineSoft,
+    backgroundColor: Palette.pure,
   },
-  briefText: { fontSize: 15, lineHeight: 21 },
-  briefQuota: { fontSize: 13, opacity: 0.6 },
-  sectionTitle: { fontSize: 16, fontWeight: "700", marginTop: 16, marginBottom: 4 },
-  card: { flexDirection: "row", gap: 12, paddingVertical: 10, alignItems: "baseline" },
-  cardTime: { fontSize: 13, opacity: 0.6, minWidth: 92 },
-  cardTitle: { fontSize: 15, fontWeight: "500", flex: 1 },
-  deadline: { fontSize: 12, color: "#d93a3a", fontWeight: "700" },
-  empty: { fontSize: 14, opacity: 0.5, paddingVertical: 6 },
-  conflicts: { backgroundColor: "#fdf0f0", borderRadius: 8, padding: 12, marginTop: 8 },
-  conflictText: { fontSize: 13, color: "#a03030", marginTop: 2 },
-  timelineScroll: { height: 400, borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e6" },
   timeline: { height: 24 * HOUR_DP, position: "relative" },
-  hourLine: { position: "absolute", left: 0, right: 0, borderTopWidth: 1, borderTopColor: "#ececf0" },
-  hourLabel: { position: "absolute", top: 2, right: 8, fontSize: 11, opacity: 0.5 },
+  hourLine: { position: "absolute", left: 0, right: 0, borderTopWidth: 1, borderTopColor: Palette.outlineSoft },
+  hourLabel: { position: "absolute", top: 2, right: 8, fontSize: 11, color: Palette.onFaint },
   tlBar: {
     position: "absolute",
     left: 48,
     right: 8,
-    borderRadius: 4,
+    borderRadius: Radius.mark,
     paddingHorizontal: 8,
     justifyContent: "center",
     overflow: "hidden",
   },
-  tlEvent: { borderWidth: 1, borderColor: "#3c87f7", backgroundColor: "#eaf2fe" },
-  tlEventTitle: { fontSize: 12, fontWeight: "600", color: "#1c4f9c" },
-  tlBlock: { backgroundColor: "#3c87f7" },
-  tlBlockTitle: { fontSize: 12, fontWeight: "600", color: "#ffffff" },
-  primary: {
-    marginTop: 24,
-    backgroundColor: "#3c87f7",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    minHeight: 48,
+  /* A commitment: outlined in honey, because the planner may not move it. */
+  tlEvent: {
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: Palette.urgent,
+    borderLeftWidth: 3,
+    backgroundColor: "transparent",
   },
-  primaryText: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
-  error: { color: "#d93a3a", fontSize: 14, marginTop: 12 },
+  tlEventTitle: { fontSize: 12, fontWeight: "500", color: Palette.urgent },
+  /* A block: filled with the accent, because it is yours and can be moved. */
+  tlBlock: { backgroundColor: Palette.accentWash, borderLeftWidth: 3, borderLeftColor: Palette.accent },
+  tlBlockTitle: { fontSize: 12, fontWeight: "600", color: Palette.accent },
 });
