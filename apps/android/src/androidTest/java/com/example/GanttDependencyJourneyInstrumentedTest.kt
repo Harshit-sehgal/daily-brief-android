@@ -2,6 +2,7 @@ package com.example
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -199,6 +200,42 @@ class GanttDependencyJourneyInstrumentedTest {
       .onNode(hasText("Cancel") and hasAnyAncestor(isDialog()))
       .performClick()
     composeRule.onNodeWithTag("dependency_editor").assertDoesNotExist()
+  }
+
+  @Test
+  fun canvasLinkModeSeedsTheEditorAndCreatesTheSelectedRelationship() {
+    seedIsolatedPlan()
+    val viewModel = ViewModelProvider(composeRule.activity)[BriefingViewModel::class.java]
+    composeRule.waitUntil(timeoutMillis = 15_000) {
+      viewModel.activePlanBoardId.value == boardId &&
+        viewModel.planItems.value.map { it.id }.containsAll(
+          listOf(requireNotNull(predecessorId), requireNotNull(successorId))
+        )
+    }
+
+    openGantt()
+    composeRule.openMapOption("gantt_link_tasks")
+    waitUntilDisplayed("gantt_dependency_link_mode")
+
+    composeRule.onNodeWithTag("gantt_dependency_task_${requireNotNull(predecessorId)}").performClick()
+    composeRule
+      .onNodeWithTag("gantt_dependency_link_source")
+      .assertTextContains(predecessorTitle, substring = true)
+    composeRule.onNodeWithTag("gantt_dependency_task_${requireNotNull(successorId)}").performClick()
+    waitUntilDisplayed("dependency_editor")
+
+    composeRule
+      .onNodeWithTag("dependency_predecessor")
+      .assertTextContains(predecessorTitle, substring = true)
+    composeRule
+      .onNodeWithTag("dependency_successor")
+      .assertTextContains(successorTitle, substring = true)
+    composeRule.onNodeWithTag("dependency_editor_confirm").performClick()
+
+    val dependency = waitForSingleDependency(lagMinutes = 0)
+    assertEquals(requireNotNull(predecessorId), dependency.predecessorId)
+    assertEquals(requireNotNull(successorId), dependency.successorId)
+    assertEquals(PlanDependencyType.FINISH_TO_START, dependency.type)
   }
 
   private fun seedIsolatedPlan() {

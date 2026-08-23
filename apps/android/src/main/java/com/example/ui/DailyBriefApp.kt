@@ -523,25 +523,31 @@ fun DailyBriefApp(
     },
     floatingActionButton = {
       if (destination.hasCreateAction) {
-        FloatingActionButton(
+        val isPlan = destination == Destination.Plan
+        androidx.compose.material3.ExtendedFloatingActionButton(
           onClick = {
-            if (destination == Destination.Plan) openTaskEditor(viewModel.newPlanItemDraft())
+            if (isPlan) openTaskEditor(viewModel.newPlanItemDraft())
             else openEditor(newDraftForCurrentRoot())
           },
-          // The default container is primaryContainer, which in this palette is a very
-          // pale tint — too weak for the one primary action on the screen.
           containerColor = MaterialTheme.colorScheme.primary,
           contentColor = MaterialTheme.colorScheme.onPrimary,
+          icon = {
+            Icon(
+              Icons.Default.Add,
+              contentDescription = null,
+            )
+          },
+          text = {
+            androidx.compose.animation.AnimatedContent(
+              targetState = if (isPlan) "New task" else "New event",
+              label = "fab_label",
+            ) { label -> Text(label) }
+          },
+          expanded = true,
           modifier =
             Modifier.padding(end = fabEndPadding)
-              .testTag(if (destination == Destination.Plan) "add_task" else "add_event"),
-        ) {
-          Icon(
-            Icons.Default.Add,
-            contentDescription =
-              if (destination == Destination.Plan) "New task" else "New event",
-          )
-        }
+              .testTag(if (isPlan) "add_task" else "add_event"),
+        )
       }
     },
   ) { innerPadding ->
@@ -550,10 +556,13 @@ fun DailyBriefApp(
     val screenPadding =
       PaddingValues(
         top = innerPadding.calculateTopPadding() + Space.sm,
-        // Only leave room for a floating button on the screens that show one.
+        // Extended FAB is wider but not taller; 80 dp leaves the same 16 dp gap above the
+        // bottom bar as the old 88 dp did for the square FAB, without the dead band that
+        // made the area near the plus feel like a layout breakpoint. Keep inset handling
+        // explicit so immersive ScheduleMap (no bar) takes its own padding.
         bottom =
           innerPadding.calculateBottomPadding() +
-            (if (destination.hasCreateAction) 88.dp else Space.lg),
+            (if (destination.hasCreateAction) 80.dp else Space.lg),
       )
 
     Row(

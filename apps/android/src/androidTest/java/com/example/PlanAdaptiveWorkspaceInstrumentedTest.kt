@@ -217,6 +217,9 @@ class PlanAdaptiveWorkspaceInstrumentedTest {
         "plan_portfolio_open",
         "plan_export_csv",
         "plan_export_ics",
+        "plan_export_pdf",
+        "plan_export_png",
+        "plan_print",
       )
 
     composeRule.setContent {
@@ -339,6 +342,9 @@ class PlanAdaptiveWorkspaceInstrumentedTest {
         "plan_menu_history",
         "plan_export_csv",
         "plan_export_ics",
+        "plan_export_pdf",
+        "plan_export_png",
+        "plan_print",
       )
       .forEach { composeRule.onNodeWithTag(it).assertIsDisplayed() }
   }

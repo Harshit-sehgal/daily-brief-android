@@ -72,6 +72,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.core.ScheduleAnalysis
 import com.example.core.TimeFormatter
 import com.example.core.WorkingCalendarSpec
+import com.example.data.backup.BackupPreview
 import com.example.data.prefs.SettingKeys
 import com.example.data.repository.PersistedWorkingCalendar
 import com.example.ui.components.AppTimeDialog
@@ -1523,6 +1524,7 @@ private fun DataSection(viewModel: BriefingViewModel, formatter: TimeFormatter, 
 private fun BackupDisclosure(viewModel: BriefingViewModel, gutter: Dp) {
   val context = LocalContext.current
   var pendingRestore by remember { mutableStateOf<ByteArray?>(null) }
+  var pendingRestorePreview by remember { mutableStateOf<BackupPreview?>(null) }
   var expanded by rememberSaveable { mutableStateOf(false) }
   val exportLauncher =
     rememberLauncherForActivityResult(
@@ -1540,7 +1542,14 @@ private fun BackupDisclosure(viewModel: BriefingViewModel, gutter: Dp) {
     ) { uri ->
       if (uri != null) {
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-        if (bytes != null) pendingRestore = bytes
+        if (bytes != null) {
+          viewModel.previewBackup(bytes) { preview ->
+            if (preview != null) {
+              pendingRestore = bytes
+              pendingRestorePreview = preview
+            }
+          }
+        }
       }
     }
 
@@ -1574,27 +1583,71 @@ private fun BackupDisclosure(viewModel: BriefingViewModel, gutter: Dp) {
   }
 
   pendingRestore?.let { bytes ->
+    val preview = pendingRestorePreview
     AlertDialog(
-      onDismissRequest = { pendingRestore = null },
-      title = { Text("Restore this backup?") },
+      onDismissRequest = {
+        pendingRestore = null
+        pendingRestorePreview = null
+      },
+      title = { Text("Review this restore") },
       text = {
-        Text(
-          "Your current schedules, boards and tasks will be replaced by the file's, " +
-            "and undo history is cleared. Device events are not in backups and return on sync."
-        )
+        Column(
+          verticalArrangement = Arrangement.spacedBy(Space.sm),
+          modifier = Modifier.testTag("backup_restore_preview"),
+        ) {
+          Text(
+            "This encrypted file will replace the current workspace. Nothing has been changed yet.",
+          )
+          if (preview != null) {
+            Text("${preview.totalRows} rows will be restored.", fontWeight = FontWeight.SemiBold)
+            BackupPreviewRow("Work schedules", preview.count("work_schedules"))
+            BackupPreviewRow("Schedule windows", preview.count("work_schedule_windows"))
+            BackupPreviewRow("Boards", preview.count("plan_boards"))
+            BackupPreviewRow("Tasks", preview.count("plan_items"))
+            BackupPreviewRow("Schedule blocks", preview.count("plan_blocks"))
+            BackupPreviewRow("Dependencies", preview.count("plan_dependencies"))
+            BackupPreviewRow("Saved views", preview.count("saved_views"))
+            BackupPreviewRow("Baselines", preview.count("plan_baselines"))
+            Text(
+              "Device events are not in backups and return on the next sync. Undo history will be cleared.",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+        }
       },
       confirmButton = {
         TextButton(
           onClick = {
             pendingRestore = null
+            pendingRestorePreview = null
             viewModel.restoreBackup(bytes) {}
-          }
+          },
+          modifier = Modifier.testTag("backup_restore_confirm"),
         ) { Text("Restore") }
       },
       dismissButton = {
-        TextButton(onClick = { pendingRestore = null }) { Text("Cancel") }
+        TextButton(
+          onClick = {
+            pendingRestore = null
+            pendingRestorePreview = null
+          },
+          modifier = Modifier.testTag("backup_restore_cancel"),
+        ) { Text("Cancel") }
       },
+      modifier = Modifier.testTag("backup_restore_preview_dialog"),
     )
+  }
+}
+
+@Composable
+private fun BackupPreviewRow(label: String, count: Int) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+  ) {
+    Text(label)
+    Text(count.toString(), fontWeight = FontWeight.SemiBold)
   }
 }
 

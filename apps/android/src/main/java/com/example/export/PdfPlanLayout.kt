@@ -9,7 +9,11 @@ package com.example.export
  */
 data class PdfRow(val title: String, val detail: String)
 
-data class PdfPage(val heading: String, val rows: List<PdfRow>)
+data class PdfPage(
+  val heading: String,
+  val rows: List<PdfRow>,
+  val generatedAt: String,
+)
 
 object PdfPlanLayout {
   /** A4 portrait at 10pt rows minus margins, generous enough for a week's plan. */
@@ -20,11 +24,12 @@ object PdfPlanLayout {
     generatedAt: String,
     rows: List<PdfRow>,
   ): List<PdfPage> {
-    if (rows.isEmpty()) return listOf(PdfPage(title, emptyList()))
+    if (rows.isEmpty()) return listOf(PdfPage(title, emptyList(), generatedAt))
     return rows.chunked(ROWS_PER_PAGE).mapIndexed { index, slice ->
       PdfPage(
         heading = if (index == 0) title else "$title — continued",
         rows = slice,
+        generatedAt = generatedAt,
       )
     }
   }

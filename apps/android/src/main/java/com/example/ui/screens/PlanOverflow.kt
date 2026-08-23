@@ -57,6 +57,7 @@ internal fun PlanOverflowMenu(
   onExport: (Boolean) -> Unit,
   onExportPdf: () -> Unit,
   onExportPng: () -> Unit,
+  onPrint: () -> Unit = {},
 ) {
   var open by remember { mutableStateOf(false) }
   Box {
@@ -131,6 +132,14 @@ internal fun PlanOverflowMenu(
           onExportPng()
         },
         modifier = Modifier.testTag("plan_export_png"),
+      )
+      DropdownMenuItem(
+        text = { Text("Print plan") },
+        onClick = {
+          open = false
+          onPrint()
+        },
+        modifier = Modifier.testTag("plan_print"),
       )
     }
   }

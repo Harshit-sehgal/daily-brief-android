@@ -11,6 +11,7 @@ import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -37,6 +38,7 @@ class AppJourneyInstrumentedTest {
   @Test
   fun primaryNavigationIsMinimalAndSettingsRemainsEasyToReach() {
     composeRule.onNodeWithTag("tab_Home").performClick()
+    composeRule.onNodeWithTag("home_title").assertTextEquals("Today")
 
     listOf("Home", "Calendar", "Plan").forEach { destination ->
       composeRule.onNodeWithTag("tab_$destination").assertIsDisplayed()

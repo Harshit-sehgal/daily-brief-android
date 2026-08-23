@@ -10,6 +10,15 @@ import com.example.data.database.AppDatabase
 import com.example.data.security.SecretStore
 import java.nio.charset.StandardCharsets
 
+data class BackupPreview(
+  val tableCounts: Map<String, Int>,
+) {
+  val totalRows: Int
+    get() = tableCounts.values.sum()
+
+  fun count(table: String): Int = tableCounts[table] ?: 0
+}
+
 /**
  * The whole app-owned workspace in one encrypted file: work schedules, plan boards with their
  * columns, items, blocks, dependencies, item schedules, saved views, baselines and non-secret
@@ -44,15 +53,7 @@ class BackupManager(context: Context) {
 
   /** Restores the file's rows, wiping what is there now. Returns the number of rows written. */
   fun restoreBackup(bytes: ByteArray): Int {
-    val text = String(bytes, StandardCharsets.UTF_8)
-    require(text.startsWith(ENCRYPTED_MAGIC)) { "Not a Daily Brief backup" }
-    val encrypted = text.substringAfter('\n')
-    val plaintext =
-      secretStore.decryptBackup(encrypted) ?: throw IllegalArgumentException("Backup could not be decrypted")
-    val rows = RowBackupCodec.decode(plaintext)
-    rows.keys.forEach { table ->
-      require(table in ALL_TABLES) { "Unknown table '$table' in backup" }
-    }
+    val rows = decodeRows(bytes)
 
     val db = database.openHelper.writableDatabase
     db.execSQL("PRAGMA foreign_keys=OFF")
@@ -84,6 +85,23 @@ class BackupManager(context: Context) {
       db.endTransaction()
       db.execSQL("PRAGMA foreign_keys=ON")
     }
+  }
+
+  /** Decrypts and validates without touching the database, so the user can inspect a restore first. */
+  fun previewBackup(bytes: ByteArray): BackupPreview =
+    BackupPreview(decodeRows(bytes).mapValues { (_, tableRows) -> tableRows.size })
+
+  private fun decodeRows(bytes: ByteArray): Map<String, List<Map<String, BackupValue>>> {
+    val text = String(bytes, StandardCharsets.UTF_8)
+    require(text.startsWith(ENCRYPTED_MAGIC)) { "Not a Daily Brief backup" }
+    val encrypted = text.substringAfter('\n')
+    val plaintext =
+      secretStore.decryptBackup(encrypted) ?: throw IllegalArgumentException("Backup could not be decrypted")
+    val rows = RowBackupCodec.decode(plaintext)
+    rows.keys.forEach { table ->
+      require(table in ALL_TABLES) { "Unknown table '$table' in backup" }
+    }
+    return rows
   }
 
   private fun bind(

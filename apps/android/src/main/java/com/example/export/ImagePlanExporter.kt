@@ -68,7 +68,7 @@ object ImagePlanExporter {
     }
     if (heading.isNotBlank()) {
       canvas.drawText(
-        "Daily Brief plan export",
+        "Daily Brief plan export · ${pages.firstOrNull()?.generatedAt.orEmpty()}",
         MARGIN_PX,
         y + FOOTER_PX - 8f,
         detailPaint,

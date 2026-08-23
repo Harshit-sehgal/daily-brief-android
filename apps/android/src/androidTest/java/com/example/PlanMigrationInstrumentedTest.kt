@@ -30,6 +30,175 @@ class PlanMigrationInstrumentedTest {
   }
 
   @Test
+  fun migrationFrom3AddsNewColumnsAndPreservesLegacyValues() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null).use { database ->
+      createLegacyTables(database, includeSignature = false, includeUserEdited = false, includeAllDay = false)
+      database.execSQL(
+        "INSERT INTO briefing_events " +
+          "(id,title,startTime,endTime,source,description,isDeadline,isUrgent,location," +
+          "kanbanStatus,kanbanBoard) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        arrayOf<Any?>(
+          "legacy-v3",
+          "v3 event",
+          0L,
+          86_400_000L,
+          "Device Calendar",
+          "v3 description",
+          1,
+          0,
+          "Room 3",
+          "Todo",
+          "Legacy",
+        ),
+      )
+      database.execSQL(
+        "INSERT INTO daily_briefings (dateString,briefText,createdAt) VALUES (?,?,?)",
+        arrayOf<Any?>("1970-01-01", "v3 brief", 123L),
+      )
+      database.version = 3
+    }
+
+    val room = openMigratedRoom(context)
+    val migrated = room.openHelper.writableDatabase
+    assertMigrationReachedVersion10(migrated)
+    migrated.query("SELECT * FROM briefing_events WHERE id = 'legacy-v3'").use { cursor ->
+      assertTrue(cursor.moveToFirst())
+      assertEquals("v3 event", cursor.getString(cursor.getColumnIndexOrThrow("title")))
+      assertEquals(1, cursor.getInt(cursor.getColumnIndexOrThrow("isDeadline")))
+      assertEquals(1, cursor.getInt(cursor.getColumnIndexOrThrow("isAllDay")))
+      assertEquals(0, cursor.getInt(cursor.getColumnIndexOrThrow("userEdited")))
+    }
+    migrated.query("SELECT * FROM daily_briefings WHERE dateString = '1970-01-01'").use { cursor ->
+      assertTrue(cursor.moveToFirst())
+      assertEquals("v3 brief", cursor.getString(cursor.getColumnIndexOrThrow("briefText")))
+      assertEquals("", cursor.getString(cursor.getColumnIndexOrThrow("signature")))
+    }
+    room.close()
+  }
+
+  @Test
+  fun migrationFrom4InfersProviderAllDayButNotManualTwentyFourHourEvents() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null).use { database ->
+      createLegacyTables(database, includeSignature = true, includeUserEdited = true, includeAllDay = false)
+      insertLegacyEvent(
+        database = database,
+        id = "legacy-provider-v4",
+        source = "Device Calendar",
+        userEdited = 1,
+      )
+      insertLegacyEvent(
+        database = database,
+        id = "legacy-manual-v4",
+        source = "Manual",
+        userEdited = 0,
+      )
+      database.execSQL(
+        "INSERT INTO daily_briefings (dateString,briefText,createdAt,signature) VALUES (?,?,?,?)",
+        arrayOf<Any?>("1970-01-01", "v4 brief", 456L, "v4 signature"),
+      )
+      database.version = 4
+    }
+
+    val room = openMigratedRoom(context)
+    val migrated = room.openHelper.writableDatabase
+    assertMigrationReachedVersion10(migrated)
+    migrated.query(
+        "SELECT id,isAllDay,userEdited FROM briefing_events ORDER BY id",
+      )
+      .use { cursor ->
+        assertTrue(cursor.moveToFirst())
+        assertEquals("legacy-manual-v4", cursor.getString(0))
+        assertEquals(0, cursor.getInt(1))
+        assertEquals(0, cursor.getInt(2))
+        assertTrue(cursor.moveToNext())
+        assertEquals("legacy-provider-v4", cursor.getString(0))
+        assertEquals(1, cursor.getInt(1))
+        assertEquals(1, cursor.getInt(2))
+      }
+    migrated.query("SELECT signature FROM daily_briefings WHERE dateString = '1970-01-01'").use { cursor ->
+      assertTrue(cursor.moveToFirst())
+      assertEquals("v4 signature", cursor.getString(0))
+    }
+    room.close()
+  }
+
+  private fun openMigratedRoom(context: Context): AppDatabase =
+    Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+      .addMigrations(
+        AppDatabase.MIGRATION_3_4,
+        AppDatabase.MIGRATION_4_5,
+        PlanMigrations.MIGRATION_5_6,
+        PlanMigrations.MIGRATION_6_7,
+        PlanMigrations.MIGRATION_7_8,
+        PlanMigrations.MIGRATION_8_9,
+        PlanMigrations.MIGRATION_9_10,
+      )
+      .build()
+
+  private fun assertMigrationReachedVersion10(database: SupportSQLiteDatabase) {
+    database.query("PRAGMA user_version").use { cursor ->
+      assertTrue(cursor.moveToFirst())
+      assertEquals(10, cursor.getInt(0))
+    }
+  }
+
+  private fun createLegacyTables(
+    database: SQLiteDatabase,
+    includeSignature: Boolean,
+    includeUserEdited: Boolean,
+    includeAllDay: Boolean,
+  ) {
+    val allDayColumn = if (includeAllDay) "isAllDay INTEGER NOT NULL," else ""
+    val userEditedColumn = if (includeUserEdited) "userEdited INTEGER NOT NULL," else ""
+    val signatureColumn = if (includeSignature) "signature TEXT NOT NULL," else ""
+    database.execSQL(
+      "CREATE TABLE briefing_events (" +
+        "id TEXT NOT NULL, title TEXT NOT NULL, startTime INTEGER NOT NULL, " +
+        "endTime INTEGER NOT NULL, source TEXT NOT NULL, description TEXT, " +
+        "isDeadline INTEGER NOT NULL, isUrgent INTEGER NOT NULL, $allDayColumn " +
+        "location TEXT, kanbanStatus TEXT NOT NULL, kanbanBoard TEXT NOT NULL, " +
+        "$userEditedColumn PRIMARY KEY(id))",
+    )
+    database.execSQL(
+      "CREATE TABLE daily_briefings (" +
+        "dateString TEXT NOT NULL, briefText TEXT NOT NULL, createdAt INTEGER NOT NULL, " +
+        "$signatureColumn PRIMARY KEY(dateString))",
+    )
+    database.execSQL(
+      "CREATE TABLE system_settings (`key` TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(`key`))",
+    )
+  }
+
+  private fun insertLegacyEvent(
+    database: SQLiteDatabase,
+    id: String,
+    source: String,
+    userEdited: Int,
+  ) {
+    database.execSQL(
+      "INSERT INTO briefing_events " +
+        "(id,title,startTime,endTime,source,description,isDeadline,isUrgent,location," +
+        "kanbanStatus,kanbanBoard,userEdited) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+      arrayOf<Any?>(
+        id,
+        id,
+        0L,
+        86_400_000L,
+        source,
+        null,
+        0,
+        0,
+        null,
+        "Todo",
+        "Legacy",
+        userEdited,
+      ),
+    )
+  }
+
+  @Test
   fun migrationFrom5PreservesExistingRowsImportsStableCatalogAndSeedsWorkSchedule() {
     val customBoard = "Research, 深度"
     val encodedBoards = SettingKeys.encodeList(listOf(SettingKeys.DEFAULT_BOARD, customBoard))

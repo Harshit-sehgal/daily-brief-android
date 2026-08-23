@@ -34,10 +34,15 @@ import com.example.core.BaselineVariance
 import com.example.core.BaselineComparison
 import android.content.Intent
 import com.example.data.backup.BackupManager
+import com.example.data.backup.BackupPreview
+import com.example.data.plan.ChangeDigest
+import com.example.data.plan.ChangeDigestResult
 import com.example.export.ImagePlanExporter
 import com.example.export.PdfPlanLayout
 import com.example.export.PdfPlanExporter
 import com.example.export.PdfRow
+import com.example.export.PdfPage
+import com.example.export.PrintPlan
 import com.example.widget.TodayWidgetProvider
 import com.example.core.WorkingCalendarSpec
 import com.example.data.api.WriteBack
@@ -93,6 +98,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -1139,6 +1145,21 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
     }
   }
 
+  /** Validates and decrypts a backup without writing it, for the restore confirmation preview. */
+  fun previewBackup(bytes: ByteArray, onReady: (BackupPreview?) -> Unit) {
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        val preview = BackupManager(appContext).previewBackup(bytes)
+        withContext(Dispatchers.Main.immediate) { onReady(preview) }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That file could not be previewed")
+        withContext(Dispatchers.Main.immediate) { onReady(null) }
+      }
+    }
+  }
+
   /**
    * Starts a focus session anchored to one plan block: a single doze-friendly alarm at the
    * session's end, which the receiver turns into a notification with Done and Defer actions.
@@ -1197,25 +1218,7 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
     }
     viewModelScope.launch {
       try {
-        val relations = planGanttItems.value
-        val items =
-          relations.map { it.item }.filter { it.archivedAt == null }.sortedBy { it.rank }
-        val blocks = relations.flatMap { it.blocks }
-        val blocksByItem = blocks.groupBy(PlanBlock::planItemId)
-        val rows =
-          items.map { item ->
-            val itemBlocks = blocksByItem[item.id].orEmpty().sortedBy(PlanBlock::startAt)
-            val detail =
-              listOfNotNull(
-                item.effortMinutes?.let { "$it min" },
-                "${item.progress}%",
-                item.dueAt?.let { "due ${IsoDates.isoUtc(it)}" },
-                itemBlocks.size.let { n -> "$n block${if (n == 1) "" else "s"}" },
-              ).joinToString(" · ")
-            PdfRow(item.title, detail)
-          }
-        val generatedAt = IsoDates.isoUtc(System.currentTimeMillis())
-        val pages = PdfPlanLayout.pages("${board.name} — plan ($generatedAt)", generatedAt, rows)
+        val pages = currentPlanPages(board)
         onReady(PdfPlanExporter.render(pages))
       } catch (e: CancellationException) {
         throw e
@@ -1237,25 +1240,7 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
     }
     viewModelScope.launch {
       try {
-        val relations = planGanttItems.value
-        val items =
-          relations.map { it.item }.filter { it.archivedAt == null }.sortedBy { it.rank }
-        val blocks = relations.flatMap { it.blocks }
-        val blocksByItem = blocks.groupBy(PlanBlock::planItemId)
-        val rows =
-          items.map { item ->
-            val itemBlocks = blocksByItem[item.id].orEmpty().sortedBy(PlanBlock::startAt)
-            val detail =
-              listOfNotNull(
-                item.effortMinutes?.let { "$it min" },
-                "${item.progress}%",
-                item.dueAt?.let { "due ${IsoDates.isoUtc(it)}" },
-                itemBlocks.size.let { n -> "$n block${if (n == 1) "" else "s"}" },
-              ).joinToString(" · ")
-            PdfRow(item.title, detail)
-          }
-        val generatedAt = IsoDates.isoUtc(System.currentTimeMillis())
-        val pages = PdfPlanLayout.pages("${board.name} — plan ($generatedAt)", generatedAt, rows)
+        val pages = currentPlanPages(board)
         onReady(ImagePlanExporter.render(pages))
       } catch (e: CancellationException) {
         throw e
@@ -1263,6 +1248,47 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
         message(e.message ?: "That plan could not be exported as an image")
       }
     }
+  }
+
+  /** Opens Android's print preview with the same timestamped pages as PDF and PNG export. */
+  fun printActivePlan() {
+    val board = activePlanBoard.value
+    if (board == null) {
+      message("Choose a plan board before printing it")
+      return
+    }
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        val pages = currentPlanPages(board)
+        withContext(Dispatchers.Main.immediate) {
+          PrintPlan.print(appContext, "${board.name} — plan", pages)
+        }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        message(e.message ?: "That plan could not be printed")
+      }
+    }
+  }
+
+  private fun currentPlanPages(board: PlanBoard): List<PdfPage> {
+    val relations = planGanttItems.value
+    val items = relations.map { it.item }.filter { it.archivedAt == null }.sortedBy { it.rank }
+    val blocksByItem = relations.flatMap { it.blocks }.groupBy(PlanBlock::planItemId)
+    val rows =
+      items.map { item ->
+        val itemBlocks = blocksByItem[item.id].orEmpty().sortedBy(PlanBlock::startAt)
+        val detail =
+          listOfNotNull(
+            item.effortMinutes?.let { "$it min" },
+            "${item.progress}%",
+            item.dueAt?.let { "due ${IsoDates.isoUtc(it)}" },
+            itemBlocks.size.let { n -> "$n block${if (n == 1) "" else "s"}" },
+          ).joinToString(" · ")
+        PdfRow(item.title, detail)
+      }
+    val generatedAt = IsoDates.isoUtc(System.currentTimeMillis())
+    return PdfPlanLayout.pages("${board.name} — plan ($generatedAt)", generatedAt, rows)
   }
 
   /**
@@ -1292,6 +1318,38 @@ class BriefingViewModel(application: Application, private val savedStateHandle: 
         }
       }
       .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), null)
+
+  /** Journal changes since the person last acknowledged the active board's digest. */
+  val changeDigest: StateFlow<ChangeDigestResult?> =
+    activePlanBoardId
+      .flatMapLatest { boardId ->
+        if (boardId == null) {
+          flowOf(null)
+        } else {
+          combine(
+              planRepository.observeMutationHistory(boardId, 200),
+              repository.settingFlow(SettingKeys.planChangeDigestReviewedAt(boardId)),
+            ) { history, marker ->
+              ChangeDigest.summarise(
+                history = history,
+                sinceMs = marker?.value?.toLongOrNull(),
+                throughMs = System.currentTimeMillis(),
+              )
+            }
+        }
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), null)
+
+  fun markChangeDigestReviewed() {
+    val boardId = activePlanBoardId.value ?: return
+    viewModelScope.launch {
+      repository.writeSetting(
+        SettingKeys.planChangeDigestReviewedAt(boardId),
+        System.currentTimeMillis().toString(),
+      )
+      message("Plan changes marked reviewed")
+    }
+  }
 
   /** How long a change stays undoable; see [UndoWindowPolicy]. */
   val undoWindowSeconds: StateFlow<Int> =

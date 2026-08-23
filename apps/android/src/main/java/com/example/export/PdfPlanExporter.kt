@@ -71,7 +71,7 @@ object PdfPlanExporter {
         )
       }
       canvas.drawText(
-        "${index + 1} / ${pages.size}",
+        "${page.generatedAt} · ${index + 1} / ${pages.size}",
         MARGIN_PT,
         PAGE_HEIGHT_PT - FOOTER_ROW_PT,
         detailPaint,

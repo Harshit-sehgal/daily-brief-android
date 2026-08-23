@@ -163,15 +163,16 @@ fun HomeScreen(
         ) {
           Column(modifier = Modifier.weight(1f).padding(end = Space.sm)) {
             Text(
-              text = greeting(nowMs, name),
+              text = formatter.relativeDay(today, nowMs),
               fontSize = rootTitleSize(),
               fontWeight = FontWeight.SemiBold,
               color = scheme.onSurface,
               maxLines = 1,
               overflow = TextOverflow.Ellipsis,
+              modifier = Modifier.testTag("home_title"),
             )
             Text(
-              text = "${formatter.fullDay(today)} · At a glance",
+              text = "${greeting(nowMs, name)} · ${formatter.mediumDay(today)}",
               fontSize = d.secondary,
               color = scheme.onSurfaceVariant,
               maxLines = 1,

@@ -70,6 +70,7 @@ import com.example.data.model.BriefingEvent
 import com.example.data.model.PlanItem
 import com.example.data.model.PlanMutation
 import com.example.data.model.PlanMutationStatus
+import com.example.data.plan.ChangeDigestResult
 import com.example.ui.components.WorkspaceRootHeader
 import com.example.ui.theme.LocalWindowWidth
 import com.example.ui.theme.MinimumTouchTarget
@@ -109,6 +110,7 @@ fun PlanScreen(
   val storedView by viewModel.planView.collectAsStateWithLifecycle()
   val savedViews by viewModel.savedPlanViews.collectAsStateWithLifecycle()
   val weeklyReview by viewModel.weeklyReview.collectAsStateWithLifecycle()
+  val changeDigest by viewModel.changeDigest.collectAsStateWithLifecycle()
   val autoPlan by viewModel.autoPlan.collectAsStateWithLifecycle()
   val planItems by viewModel.planItems.collectAsStateWithLifecycle()
   val focusRelations by viewModel.planGanttItems.collectAsStateWithLifecycle()
@@ -219,6 +221,7 @@ fun PlanScreen(
           onExport = ::exportPlan,
           onExportPdf = ::exportPlanPdf,
           onExportPng = ::exportPlanPng,
+          onPrint = viewModel::printActivePlan,
         )
       },
       modifier = Modifier.padding(horizontal = gutter),
@@ -273,6 +276,9 @@ fun PlanScreen(
               context.startActivity(Intent.createChooser(send, "Export plan"))
             }
           },
+          onExportPdf = ::exportPlanPdf,
+          onExportPng = ::exportPlanPng,
+          onPrint = viewModel::printActivePlan,
           onUndo = viewModel::undoPlanMutation,
           contentBottomPadding = contentPadding.calculateBottomPadding(),
         )
@@ -439,7 +445,9 @@ fun PlanScreen(
   WeeklyReviewDialog(
     visible = showWeeklyReview,
     review = weeklyReview,
+    digest = changeDigest,
     formatter = formatter,
+    onMarkDigestReviewed = viewModel::markChangeDigestReviewed,
     onDismiss = { showWeeklyReview = false },
   )
   RenamePlanViewDialog(
@@ -673,6 +681,9 @@ private fun PlanViewMenu(
   onReset: () -> Unit,
   onWeeklyReview: () -> Unit,
   onExport: (Boolean) -> Unit,
+  onExportPdf: () -> Unit = {},
+  onExportPng: () -> Unit = {},
+  onPrint: () -> Unit = {},
   onProposePlan: () -> Unit,
   onCompareScenarios: () -> Unit,
   onBaselines: () -> Unit,
@@ -787,6 +798,9 @@ private fun PlanViewMenu(
         onBaselines = onBaselines,
         onPortfolio = onPortfolio,
         onExport = onExport,
+        onExportPdf = onExportPdf,
+        onExportPng = onExportPng,
+        onPrint = onPrint,
       )
     }
   }
@@ -816,6 +830,9 @@ internal fun PlanLedgerRail(
   onReset: () -> Unit,
   onWeeklyReview: () -> Unit,
   onExport: (Boolean) -> Unit,
+  onExportPdf: () -> Unit = {},
+  onExportPng: () -> Unit = {},
+  onPrint: () -> Unit = {},
   onProposePlan: () -> Unit,
   onCompareScenarios: () -> Unit,
   onBaselines: () -> Unit,
@@ -880,6 +897,9 @@ internal fun PlanLedgerRail(
       onReset = onReset,
       onWeeklyReview = onWeeklyReview,
       onExport = onExport,
+      onExportPdf = onExportPdf,
+      onExportPng = onExportPng,
+      onPrint = onPrint,
       onProposePlan = onProposePlan,
       onCompareScenarios = onCompareScenarios,
       onBaselines = onBaselines,
@@ -1263,6 +1283,9 @@ private fun PlanViewActionsMenu(
   onReset: () -> Unit,
   onWeeklyReview: () -> Unit,
   onExport: (Boolean) -> Unit,
+  onExportPdf: () -> Unit,
+  onExportPng: () -> Unit,
+  onPrint: () -> Unit,
   onProposePlan: () -> Unit,
   onCompareScenarios: () -> Unit,
   onBaselines: () -> Unit,
@@ -1340,6 +1363,9 @@ private fun PlanViewActionsMenu(
         onBaselines = onBaselines,
         onPortfolio = onPortfolio,
         onExport = onExport,
+        onExportPdf = onExportPdf,
+        onExportPng = onExportPng,
+        onPrint = onPrint,
       )
     }
   }
@@ -1361,6 +1387,9 @@ private fun PlanToolsMenuItems(
   onBaselines: () -> Unit,
   onPortfolio: () -> Unit,
   onExport: (Boolean) -> Unit,
+  onExportPdf: () -> Unit,
+  onExportPng: () -> Unit,
+  onPrint: () -> Unit,
 ) {
   PlanMenuSectionLabel("Plan tools")
   DropdownMenuItem(
@@ -1419,6 +1448,30 @@ private fun PlanToolsMenuItems(
       onExport(true)
     },
     modifier = Modifier.testTag("plan_export_ics"),
+  )
+  DropdownMenuItem(
+    text = { Text("Plan (PDF)") },
+    onClick = {
+      onClose()
+      onExportPdf()
+    },
+    modifier = Modifier.testTag("plan_export_pdf"),
+  )
+  DropdownMenuItem(
+    text = { Text("Plan (image)") },
+    onClick = {
+      onClose()
+      onExportPng()
+    },
+    modifier = Modifier.testTag("plan_export_png"),
+  )
+  DropdownMenuItem(
+    text = { Text("Print plan") },
+    onClick = {
+      onClose()
+      onPrint()
+    },
+    modifier = Modifier.testTag("plan_print"),
   )
 }
 
@@ -1488,7 +1541,9 @@ private fun RenamePlanViewDialog(
 private fun WeeklyReviewDialog(
   visible: Boolean,
   review: com.example.core.WeeklyReviewResult?,
+  digest: ChangeDigestResult?,
   formatter: TimeFormatter,
+  onMarkDigestReviewed: () -> Unit,
   onDismiss: () -> Unit,
 ) {
   if (!visible) return
@@ -1505,27 +1560,32 @@ private fun WeeklyReviewDialog(
             review?.unavailableReason ?: "Choose a plan board to review its week.",
             style = MaterialTheme.typography.bodyMedium,
           )
-          return@Column
-        }
-        Text(
-          "${formatter.mediumDay(review.rangeStartMs)} – ${formatter.mediumDay(review.rangeEndMs - 1)}",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        review.findings.forEach { finding ->
-          Column {
-            Text(
-              "${finding.label}: ${finding.value}",
-              style = MaterialTheme.typography.bodyMedium,
-              fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-              finding.detail,
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        } else {
+          Text(
+            "${formatter.mediumDay(review.rangeStartMs)} – ${formatter.mediumDay(review.rangeEndMs - 1)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+          review.findings.forEach { finding ->
+            Column {
+              Text(
+                "${finding.label}: ${finding.value}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+              )
+              Text(
+                finding.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
           }
         }
+        ChangeDigestSection(
+          digest = digest,
+          formatter = formatter,
+          onMarkReviewed = onMarkDigestReviewed,
+        )
       }
     },
     confirmButton = {
@@ -1539,6 +1599,70 @@ private fun WeeklyReviewDialog(
     modifier = Modifier.testTag("weekly_review_dialog"),
   )
 }
+
+@Composable
+private fun ChangeDigestSection(
+  digest: ChangeDigestResult?,
+  formatter: TimeFormatter,
+  onMarkReviewed: () -> Unit,
+) {
+  if (digest == null) return
+  HorizontalDivider()
+  Column(
+    verticalArrangement = Arrangement.spacedBy(Space.xs),
+    modifier = Modifier.testTag("change_digest"),
+  ) {
+    Text(
+      "Changes since last review",
+      style = MaterialTheme.typography.titleSmall,
+      fontWeight = FontWeight.SemiBold,
+    )
+    Text(
+      digest.sinceMs?.let { "Since ${formatter.mediumDay(it)}" } ?: "All recorded Plan changes",
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (digest.isEmpty) {
+      Text("No new Plan changes are waiting for review.", style = MaterialTheme.typography.bodyMedium)
+    } else {
+      val counts =
+        buildList {
+          if (digest.createdCount > 0) add("${digest.createdCount} added")
+          if (digest.updatedCount > 0) add("${digest.updatedCount} updated")
+          if (digest.movedCount > 0) add("${digest.movedCount} moved")
+          if (digest.removedCount > 0) add("${digest.removedCount} removed")
+          if (digest.undoneCount > 0) add("${digest.undoneCount} undone")
+        }
+      Text(counts.joinToString(" · "), style = MaterialTheme.typography.bodyMedium)
+      digest.changes.take(ChangeDigestPreviewLimit).forEach { mutation ->
+        Column(modifier = Modifier.testTag("change_digest_entry_${mutation.id}")) {
+          Text(mutation.summary, style = MaterialTheme.typography.bodySmall)
+          Text(
+            "${formatter.mediumDay(mutation.createdAt)}${if (mutation.status == PlanMutationStatus.UNDONE) " · undone" else ""}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      }
+      if (digest.totalCount > ChangeDigestPreviewLimit) {
+        Text(
+          "${digest.totalCount - ChangeDigestPreviewLimit} more changes are in History.",
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+    }
+    TextButton(
+      onClick = onMarkReviewed,
+      enabled = !digest.isEmpty,
+      modifier = Modifier.heightIn(min = MinimumTouchTarget).testTag("change_digest_mark_reviewed"),
+    ) {
+      Text("Mark changes reviewed")
+    }
+  }
+}
+
+private const val ChangeDigestPreviewLimit = 6
 
 
 /**

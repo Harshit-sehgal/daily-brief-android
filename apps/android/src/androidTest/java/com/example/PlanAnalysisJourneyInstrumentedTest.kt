@@ -20,6 +20,9 @@ import com.example.PlanMenu.openViewOptions
 import com.example.PlanMenu.startSavingView
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.core.ScheduleAnalysis
+import com.example.core.WorkingCalendar
+import com.example.core.WorkingCalendarSpec
+import com.example.core.WorkingWeekWindow
 import com.example.data.database.AppDatabase
 import com.example.data.model.PlanBoard
 import com.example.data.model.PlanColumn
@@ -32,6 +35,7 @@ import com.example.ui.screens.OutlineGrouping
 import com.example.ui.screens.OutlineSort
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.datetime.TimeZone
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -64,6 +68,7 @@ class PlanAnalysisJourneyInstrumentedTest {
   private val boardId = "analysis_board_$token"
   private val taskTitle = "Baselined work $token"
   private var settingsSnapshot: Map<String, String?> = emptyMap()
+  private var workingCalendarSnapshot: WorkingCalendarSpec? = null
 
   @After
   fun cleanUp() {
@@ -72,6 +77,7 @@ class PlanAnalysisJourneyInstrumentedTest {
         if (value == null) briefingRepository.deleteSetting(key)
         else briefingRepository.writeSetting(key, value)
       }
+      workingCalendarSnapshot?.let { planRepository.saveDefaultWorkingCalendar(it) }
       database.planDao().getBaselines(boardId).forEach { database.planDao().deleteBaseline(it) }
       database.planDao().getSavedViews(boardId).forEach { database.planDao().deleteSavedView(it) }
       database.planDao().getColumns(boardId).forEach { database.planDao().deleteColumn(it) }
@@ -284,6 +290,18 @@ class PlanAnalysisJourneyInstrumentedTest {
     var start = 0L
     runBlocking {
       planRepository.ensureCatalog()
+      val originalCalendar = requireNotNull(planRepository.observeDefaultWorkingCalendar().first())
+      workingCalendarSnapshot = originalCalendar.spec
+      val testSpec =
+        originalCalendar.spec.copy(
+          weeklyWindows =
+            (2..6).map { day -> WorkingWeekWindow(day, startMinute = 9 * 60, endMinute = 17 * 60) },
+          overrides = emptyList(),
+          minimumChunkMinutes = 30,
+          maximumChunkMinutes = 120,
+          bufferMinutes = 0,
+        )
+      planRepository.saveDefaultWorkingCalendar(testSpec)
       settingsSnapshot =
         listOf(
             SettingKeys.ACTIVE_PLAN_BOARD_ID,
@@ -323,7 +341,13 @@ class PlanAnalysisJourneyInstrumentedTest {
         planRepository.saveItem(
           PlanItemInput(boardId = boardId, title = taskTitle, effortMinutes = 60)
         )
-      start = ScheduleAnalysis.startOfDayOffset(ScheduleAnalysis.startOfDay(now), 2) + 10 * 3_600_000L
+      val zone = TimeZone.of(testSpec.zoneId)
+      val rangeStart = ScheduleAnalysis.startOfDay(now, zone)
+      val rangeEnd = ScheduleAnalysis.startOfDayOffset(rangeStart, 14, zone)
+      val interval =
+        WorkingCalendar.workingIntervals(testSpec, rangeStart, rangeEnd)
+          .first { it.durationMinutes >= 60 && it.startAt >= now }
+      start = interval.startAt
       planRepository.saveBlock(
         PlanBlockInput(planItemId = task.id, startAt = start, endAt = start + 3_600_000L)
       )

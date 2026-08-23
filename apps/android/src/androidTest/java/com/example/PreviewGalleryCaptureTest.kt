@@ -1,6 +1,9 @@
 package com.example
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.os.Build
+import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasContentDescription
@@ -8,8 +11,10 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -32,6 +37,8 @@ import com.example.data.repository.PlanBlockInput
 import com.example.data.repository.PlanItemInput
 import com.example.data.repository.PlanRepository
 import com.example.ui.viewmodel.BriefingViewModel
+import com.example.ui.viewmodel.HomeCard
+import com.example.ui.viewmodel.TodaySection
 import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -78,6 +85,34 @@ class PreviewGalleryCaptureTest {
     settle()
     capture("agenda")
 
+    composeRule.onNodeWithTag("tab_Home").performClick()
+    composeRule.waitUntil(timeoutMillis = 10_000) {
+      composeRule.onAllNodesWithText("Review").fetchSemanticsNodes().isNotEmpty()
+    }
+    capture("home_conflicts")
+    composeRule.onNodeWithText("Review").performClick()
+    settle()
+    capture("agenda_conflicts")
+    composeRule.onNodeWithText("Ship release notes").performClick()
+    composeRule.waitUntil(timeoutMillis = 10_000) {
+      composeRule.onAllNodesWithTag("event_ownership").fetchSemanticsNodes().isNotEmpty()
+    }
+    settle()
+    captureScreen("agenda_provider_readonly")
+    composeRule.onNodeWithText("Cancel").performScrollTo().performClick()
+    settle()
+
+    clearPreviewEvents()
+    settle()
+    capture("agenda_empty")
+
+    setCalendarPermissionState(false)
+    composeRule.onNodeWithTag("tab_Calendar").performClick()
+    composeRule.onNodeWithText("Agenda").performClick()
+    settle()
+    capture("agenda_permission")
+    setCalendarPermissionState(true)
+
     composeRule.onNodeWithText("Timeline").performClick()
     settle()
     capture("timeline")
@@ -104,6 +139,7 @@ class PreviewGalleryCaptureTest {
     composeRule.onNodeWithTag("gantt_move_cancel").performClick()
     settle()
 
+    captureEmptyPlanPlates(viewModel)
     captureAnalysisPlates(viewModel)
 
     composeRule.onNodeWithTag("open_settings").performClick()
@@ -197,6 +233,30 @@ class PreviewGalleryCaptureTest {
     settle()
   }
 
+  private fun captureEmptyPlanPlates(viewModel: BriefingViewModel) {
+    val boardId = viewModel.activePlanBoardId.value ?: return
+    runBlocking {
+      database.planDao().getBlocksForBoard(boardId).forEach { database.planDao().deleteBlock(it) }
+      database.planDao().getAllItems(boardId).forEach { database.planDao().deleteItem(it) }
+    }
+    settle()
+
+    composeRule.onNodeWithTag("tab_Plan").performClick()
+    composeRule.onNodeWithText("Outline").performClick()
+    settle()
+    capture("outline_empty")
+    composeRule.onNodeWithText("Board").performClick()
+    settle()
+    capture("board_empty")
+    composeRule.onNodeWithText("Gantt").performClick()
+    settle()
+    capture("gantt_empty")
+
+    // Restore the legible seeded plan for the remaining plates in this harness.
+    seed()
+    settle()
+  }
+
   private fun enterGanttMoveMode() {
     val bar = hasTestTag("plan_gantt_item") and hasContentDescription(PLAN_BLOCK_TASK, substring = true)
     composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -215,6 +275,20 @@ class PreviewGalleryCaptureTest {
     Thread.sleep(400)
   }
 
+  private fun clearPreviewEvents() {
+    runBlocking {
+      database.eventDao().clearEventsBySources(
+        listOf(EventSource.DEVICE, EventSource.MANUAL, EventSource.NOTION, EventSource.SAMPLE)
+      )
+    }
+  }
+
+  private fun setCalendarPermissionState(granted: Boolean) {
+    val viewModel = ViewModelProvider(composeRule.activity)[BriefingViewModel::class.java]
+    composeRule.runOnIdle { viewModel.onCalendarPermissionChecked(granted) }
+    settle()
+  }
+
   private fun settle() {
     composeRule.waitForIdle()
     Thread.sleep(600)
@@ -222,7 +296,16 @@ class PreviewGalleryCaptureTest {
   }
 
   private fun capture(name: String) {
-    write(name, composeRule.onRoot().captureToImage().asAndroidBitmap())
+    // Compose's PixelCopy helper calls the Window + Rect overload introduced in API 26.
+    // API 24 is still part of the rendered-coverage matrix, so use the instrumentation
+    // screenshot path there rather than letting a framework NoSuchMethodError abort the run.
+    val bitmap =
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        captureLegacyWindow()
+      } else {
+        composeRule.onRoot().captureToImage().asAndroidBitmap()
+      }
+    write(name, bitmap)
   }
 
   /**
@@ -233,7 +316,27 @@ class PreviewGalleryCaptureTest {
    * showing.
    */
   private fun captureScreen(name: String) {
-    write(name, InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+    write(name, deviceScreenshot())
+  }
+
+  private fun deviceScreenshot(): Bitmap {
+    repeat(20) {
+      InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()?.let { return it }
+      runCatching {
+        val descriptor =
+          InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(
+            "screencap -p"
+          )
+        ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { BitmapFactory.decodeStream(it) }
+      }.getOrNull()?.let { return it }
+      Thread.sleep(250)
+    }
+    error("device screenshot was unavailable after retries")
+  }
+
+  /** API 24 has no PixelCopy Window overload; use its shell screencap stream instead. */
+  private fun captureLegacyWindow(): Bitmap {
+    return deviceScreenshot()
   }
 
   private fun write(name: String, bitmap: Bitmap) {
@@ -244,6 +347,21 @@ class PreviewGalleryCaptureTest {
 
   private fun seed() =
     runBlocking {
+      // Capture runs after the device suite and must not inherit its user-owned view settings.
+      // Reset only the rows and preferences this capture owns; the harness still leaves the
+      // device clean with `pm clear` after the plates are pulled.
+      database.eventDao().clearEventsBySources(
+        listOf(EventSource.DEVICE, EventSource.MANUAL, EventSource.NOTION, EventSource.SAMPLE)
+      )
+      briefingRepository.writeSetting(
+        SettingKeys.HOME_CARDS,
+        SettingKeys.encodeList(HomeCard.Defaults.map { it.key }),
+      )
+      briefingRepository.writeSetting(
+        SettingKeys.TODAY_SECTIONS,
+        SettingKeys.encodeList(TodaySection.Defaults.map { it.key }),
+      )
+      briefingRepository.writeSetting(SettingKeys.COLLAPSED_SECTIONS, SettingKeys.encodeList(emptyList()))
       planRepository.ensureCatalog()
       val dayStart = ScheduleAnalysis.startOfDay(System.currentTimeMillis())
       fun at(hour: Int, minute: Int = 0) = dayStart + (hour * 60L + minute) * 60_000L

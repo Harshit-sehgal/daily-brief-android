@@ -188,7 +188,7 @@ abstract class AppDatabase : RoomDatabase() {
      * A real migration rather than a wipe, so saved integrations, API keys and
      * boards survive the upgrade.
      */
-    private val MIGRATION_3_4 =
+    internal val MIGRATION_3_4 =
       object : Migration(3, 4) {
         override fun migrate(db: SupportSQLiteDatabase) {
           db.execSQL("ALTER TABLE daily_briefings ADD COLUMN signature TEXT NOT NULL DEFAULT ''")
@@ -199,7 +199,7 @@ abstract class AppDatabase : RoomDatabase() {
       }
 
     /** Adds real all-day state instead of continuing to infer it at runtime. */
-    private val MIGRATION_4_5 =
+    internal val MIGRATION_4_5 =
       object : Migration(4, 5) {
         override fun migrate(db: SupportSQLiteDatabase) {
           db.execSQL(

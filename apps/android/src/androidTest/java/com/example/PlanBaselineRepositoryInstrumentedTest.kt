@@ -145,6 +145,24 @@ class PlanBaselineRepositoryInstrumentedTest {
   }
 
   @Test
+  fun restoreJournalUsesTheBaselineNameInItsSummary() = runBlocking {
+    repository.ensureCatalog()
+    val boardId = newBoard("Restore summary")
+    val task = repository.saveItem(PlanItemInput(boardId = boardId, title = "Work $token"))
+    val block = scheduleFixture(task.id, days = 4)
+    val baselineName = "Release plan $token"
+    val baseline = repository.captureBaseline(boardId, baselineName)
+
+    database.planDao().updateBlock(
+      block.copy(startAt = block.startAt + 60 * 60_000L, endAt = block.endAt + 60 * 60_000L)
+    )
+    val result = repository.restoreBaselineWithUndo(baseline.id, boardId)
+    val mutation = requireNotNull(database.planDao().getPlanMutation(requireNotNull(result.mutationId)))
+
+    assertEquals("Restored the schedule from \"$baselineName\"", mutation.summary)
+  }
+
+  @Test
   fun aBaselineIgnoresArchivedWorkAndSurvivesTheTasksItDescribesBeingArchived() = runBlocking {
     repository.ensureCatalog()
     val boardId = newBoard("Archived work")

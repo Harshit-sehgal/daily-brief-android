@@ -6,6 +6,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.example.core.GanttZoom
 import androidx.compose.foundation.gestures.detectTransformGestures
+import com.example.ui.theme.InlineIconSize
 import com.example.ui.theme.Radius
 import androidx.compose.ui.geometry.Offset
 import com.example.data.model.PlanDependency
@@ -54,6 +55,9 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -133,6 +137,8 @@ import com.example.data.model.BriefingEvent
 import com.example.data.model.PlanBlock
 import com.example.data.model.PlanItem
 import com.example.data.model.PlanPriority
+import com.example.data.model.PlanDependencyType
+import com.example.ui.components.DependencyDraft
 import com.example.data.repository.PlanItemScheduleResolver
 import com.example.data.repository.PlanItemScheduleResolution
 import com.example.ui.components.AppTimeDialog
@@ -244,6 +250,10 @@ fun GanttScreen(
   var dragOrigin by remember { mutableStateOf<GanttBlockDraft?>(null) }
   var dragPixels by remember { mutableFloatStateOf(0f) }
   var showDependencies by rememberSaveable { mutableStateOf(false) }
+  var dependencyLinkMode by rememberSaveable { mutableStateOf(false) }
+  var dependencyLinkPredecessorId by rememberSaveable { mutableStateOf<String?>(null) }
+  var dependencyAddRequest by rememberSaveable { mutableIntStateOf(0) }
+  var pendingDependencyDraft by remember { mutableStateOf<DependencyDraft?>(null) }
   var showLegend by rememberSaveable { mutableStateOf(false) }
   var mapMenu by remember { mutableStateOf(false) }
   val range =
@@ -448,6 +458,38 @@ fun GanttScreen(
 
   val moving = moveDraft != null
 
+  val dependencyLinkSource =
+    dependencyLinkPredecessorId?.let { sourceId -> planItems.firstOrNull { it.id == sourceId } }
+
+  fun clearDependencyLinkMode() {
+    dependencyLinkMode = false
+    dependencyLinkPredecessorId = null
+    pendingDependencyDraft = null
+  }
+
+  fun selectDependencyTask(item: PlanItem) {
+    val result =
+      GanttDependencyLinkPolicy.select(
+        state = GanttDependencyLinkState(dependencyLinkPredecessorId),
+        itemId = item.id,
+      )
+    dependencyLinkPredecessorId = result.state.predecessorId
+    val predecessorId = result.predecessorId
+    val successorId = result.successorId
+    if (predecessorId != null && successorId != null) {
+      pendingDependencyDraft =
+        DependencyDraft(
+          predecessorId = predecessorId,
+          successorId = successorId,
+          type = PlanDependencyType.FINISH_TO_START,
+          lagMinutes = 0,
+        )
+      dependencyLinkMode = false
+      dependencyAddRequest += 1
+      showDependencies = true
+    }
+  }
+
   // Back is the gesture people reach for to leave a mode. Without this it leaves the Plan root
   // instead and takes the unsaved preview with it, which is the one thing move mode promises
   // never to happen. Cancelling here writes nothing, exactly like the Cancel button.
@@ -477,6 +519,10 @@ fun GanttScreen(
 
   // Back leaves the page rather than the app, the same rule every transient mode here follows.
   BackHandler(enabled = focused && !moving) { onExitFocus?.invoke() }
+
+  BackHandler(enabled = dependencyLinkMode && !moving) {
+    clearDependencyLinkMode()
+  }
 
   Column(
     modifier =
@@ -533,10 +579,16 @@ fun GanttScreen(
           GanttMapMenu(
             expanded = mapMenu,
             dependencyCount = dependencies.size,
+            taskCount = planItems.size,
             boardReady = activeBoard != null,
             legendShown = showLegend,
             onDismiss = { mapMenu = false },
             onDependencies = { showDependencies = true },
+            onLinkTasks = {
+              dependencyLinkMode = true
+              dependencyLinkPredecessorId = null
+              pendingDependencyDraft = null
+            },
             onToggleLegend = { showLegend = !showLegend },
           )
         }
@@ -579,39 +631,49 @@ fun GanttScreen(
     }
 
     Row(
-      modifier =
-        Modifier.fillMaxWidth()
-          .horizontalScroll(rememberScrollState())
-          .padding(horizontal = gutter),
-      horizontalArrangement = Arrangement.spacedBy(Space.sm),
+      modifier = Modifier.fillMaxWidth().padding(horizontal = gutter),
       verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-      listOf(7, 30, 90).forEach { days ->
-        FilterChip(
-          selected = rangeDays == days,
-          onClick = { viewModel.setGanttRangeDays(days) },
-          label = { Text("${days}d") },
-          modifier = Modifier.testTag("gantt_range_$days"),
-        )
+      Row(
+        modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(Space.sm),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        listOf(7, 30, 90).forEach { days ->
+          FilterChip(
+            selected = rangeDays == days,
+            onClick = { viewModel.setGanttRangeDays(days) },
+            label = { Text("${days}d") },
+            modifier = Modifier.testTag("gantt_range_$days"),
+          )
+        }
+        if (focused) {
+          GanttRangeNav(rangeDays, selectedDay, viewModel)
+        }
       }
-      // The zoom chips are navigation and stay on the canvas. Dependencies and the legend are
-      // references — read once, then never again — so they moved behind the one menu this screen
-      // already has rather than holding a place above the map forever.
-      Spacer(modifier = Modifier.weight(1f))
-      if (focused) {
-        GanttRangeNav(rangeDays, selectedDay, viewModel)
-      }
-      if (!focused && onEnterFocus != null) {
-        // The way into the full page, next to the zoom it belongs with. A chart you cannot see is
-        // not a chart, and inside a tab this one gets a few rows on a phone.
-        RowIconButton(
-          icon = Icons.AutoMirrored.Filled.ArrowForward,
-          contentDescription = "Open the schedule map full screen",
-          onClick = onEnterFocus,
-          modifier = Modifier.testTag("gantt_open_focus"),
-        )
-      }
-      if (!focused) {
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        if (!focused && onEnterFocus != null) {
+          // Full map gets a visible, labeled entry — the ArrowForward-icon-only inside the
+          // scrollable row scrolled off-screen on 360 dp, so the page that gives the canvas
+          // 3/4 of the window was undiscoverable. Labeled and pinned next to the menu, it
+          // stays visible and says what it does before it is tapped.
+          TextButton(
+            onClick = onEnterFocus,
+            modifier = Modifier.testTag("gantt_open_focus"),
+          ) {
+            Text("Full map")
+            Spacer(Modifier.width(4.dp))
+            Icon(
+              Icons.AutoMirrored.Filled.ArrowForward,
+              contentDescription = null,
+              modifier = Modifier.size(InlineIconSize),
+            )
+          }
+        }
         Box {
           RowIconButton(
             icon = Icons.Default.MoreVert,
@@ -622,10 +684,16 @@ fun GanttScreen(
           GanttMapMenu(
             expanded = mapMenu,
             dependencyCount = dependencies.size,
+            taskCount = planItems.size,
             boardReady = activeBoard != null,
             legendShown = showLegend,
             onDismiss = { mapMenu = false },
             onDependencies = { showDependencies = true },
+            onLinkTasks = {
+              dependencyLinkMode = true
+              dependencyLinkPredecessorId = null
+              pendingDependencyDraft = null
+            },
             onToggleLegend = { showLegend = !showLegend },
           )
         }
@@ -697,10 +765,10 @@ fun GanttScreen(
             visibleEndMs = range.endExclusiveMs,
           )
         }
-      // A map of the map, which is worth its 48 dp only while the map itself has room. On a short
-      // screen it was the difference between a canvas showing work and one showing its axis and a
-      // sliver, so here the canvas wins and the strip stands down.
-      overview?.takeIf { !isShortWindow() }?.let { strip ->
+      // The strip is a 28 dp rail that answers "where am I in the plan?" — worth keeping even on a
+      // short window where chrome is tight. It never hid the work before; it was the status line
+      // above it that cost the row. Keep the strip, spend the savings elsewhere.
+      overview?.let { strip ->
         GanttOverviewStrip(
           overview = strip,
           formatter = formatter,
@@ -714,6 +782,14 @@ fun GanttScreen(
           modifier = Modifier.padding(horizontal = gutter, vertical = Space.xs),
         )
       }
+    }
+
+    if (dependencyLinkMode) {
+      GanttDependencyLinkPanel(
+        predecessor = dependencyLinkSource,
+        gutter = gutter,
+        onCancel = ::clearDependencyLinkMode,
+      )
     }
 
     HorizontalDivider(color = colors.outlineVariant)
@@ -829,7 +905,7 @@ fun GanttScreen(
             dragOrigin = null
             dragPixels = 0f
           },
-          onMoveAdjust = { target, minutes ->
+           onMoveAdjust = { target, minutes ->
             val current = moveDraft
             val adjusted =
               current?.let {
@@ -848,9 +924,12 @@ fun GanttScreen(
               false
             }
           },
-          criticalTaskIds = criticalTaskIds,
-          dependencies = dependencies,
-          slackMinutesByItemId = slackMinutesByItemId,
+           criticalTaskIds = criticalTaskIds,
+           dependencies = dependencies,
+           dependencyLinkMode = dependencyLinkMode,
+           dependencyLinkSourceId = dependencyLinkPredecessorId,
+           onSelectDependencyTask = ::selectDependencyTask,
+           slackMinutesByItemId = slackMinutesByItemId,
           rangeMinutes = (range.endExclusiveMs - range.startInclusiveMs) / 60_000L,
           onConnectorsPlanned = { connectorPlan = it },
           onZoom = { days, focus ->
@@ -931,7 +1010,11 @@ fun GanttScreen(
   val dependencyBoard = activeBoard
   if (showDependencies && dependencyBoard != null) {
     AlertDialog(
-      onDismissRequest = { showDependencies = false },
+      onDismissRequest = {
+        showDependencies = false
+        pendingDependencyDraft = null
+        dependencyAddRequest = 0
+      },
       title = { Text("Plan dependencies") },
       text = {
         PlanDependencyManager(
@@ -940,6 +1023,8 @@ fun GanttScreen(
           dependencies = dependencies,
           errors = dependencyErrors,
           onAdd = { draft ->
+            pendingDependencyDraft = null
+            dependencyAddRequest = 0
             viewModel.addPlanDependency(
               predecessorId = draft.predecessorId,
               successorId = draft.successorId,
@@ -955,13 +1040,19 @@ fun GanttScreen(
             )
           },
           onDelete = { dependency -> viewModel.deletePlanDependency(dependency) },
+          initialAddDraft = pendingDependencyDraft,
+          addRequest = dependencyAddRequest,
           modifier =
             Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
         )
       },
       confirmButton = {
         TextButton(
-          onClick = { showDependencies = false },
+          onClick = {
+            showDependencies = false
+            pendingDependencyDraft = null
+            dependencyAddRequest = 0
+          },
           modifier = Modifier.heightIn(min = MinimumTouchTarget),
         ) {
           Text("Close")
@@ -1079,6 +1170,9 @@ private fun GanttTable(
   onMoveAdjust: (GanttDragTarget, Int) -> Boolean,
   criticalTaskIds: Set<String>,
   dependencies: List<PlanDependency>,
+  dependencyLinkMode: Boolean,
+  dependencyLinkSourceId: String?,
+  onSelectDependencyTask: (PlanItem) -> Unit,
   slackMinutesByItemId: Map<String, Long>,
   rangeMinutes: Long,
   onConnectorsPlanned: (GanttConnectorPlan) -> Unit,
@@ -1195,10 +1289,13 @@ private fun GanttTable(
           },
           onMoveDragCancel = onMoveDragCancel,
           onMoveDragEnd = onMoveDragEnd,
-          onMoveAdjust = onMoveAdjust,
-          criticalTaskIds = criticalTaskIds,
-          dependencies = dependencies,
-          slackMinutesByItemId = slackMinutesByItemId,
+           onMoveAdjust = onMoveAdjust,
+           criticalTaskIds = criticalTaskIds,
+           dependencies = dependencies,
+           dependencyLinkMode = dependencyLinkMode,
+           dependencyLinkSourceId = dependencyLinkSourceId,
+           onSelectDependencyTask = onSelectDependencyTask,
+           slackMinutesByItemId = slackMinutesByItemId,
           rangeMinutes = rangeMinutes,
           onConnectorsPlanned = onConnectorsPlanned,
           defaultNonWorkingBands = defaultNonWorkingBands,
@@ -1466,6 +1563,9 @@ private fun GanttCanvas(
   onMoveAdjust: (GanttDragTarget, Int) -> Boolean,
   criticalTaskIds: Set<String>,
   dependencies: List<PlanDependency>,
+  dependencyLinkMode: Boolean,
+  dependencyLinkSourceId: String?,
+  onSelectDependencyTask: (PlanItem) -> Unit,
   slackMinutesByItemId: Map<String, Long>,
   rangeMinutes: Long,
   onConnectorsPlanned: (GanttConnectorPlan) -> Unit,
@@ -1552,9 +1652,12 @@ private fun GanttCanvas(
             onMoveDrag = onMoveDrag,
             onMoveDragCancel = onMoveDragCancel,
             onMoveDragEnd = onMoveDragEnd,
-            onMoveAdjust = onMoveAdjust,
-            isCritical = row.layout.item.id in criticalTaskIds,
-            nonWorkingBands =
+             onMoveAdjust = onMoveAdjust,
+             isCritical = row.layout.item.id in criticalTaskIds,
+             dependencyLinkMode = dependencyLinkMode,
+             dependencyLinkSourceId = dependencyLinkSourceId,
+             onSelectDependencyTask = onSelectDependencyTask,
+             nonWorkingBands =
               taskNonWorkingBands[row.layout.item.id] ?: defaultNonWorkingBands,
             focused = focused,
           )
@@ -1565,18 +1668,78 @@ private fun GanttCanvas(
   }
 }
 
+@Composable
+private fun GanttDependencyLinkPanel(
+  predecessor: PlanItem?,
+  gutter: Dp,
+  onCancel: () -> Unit,
+) {
+  val colors = MaterialTheme.colorScheme
+  Surface(
+    color = colors.secondaryContainer,
+    contentColor = colors.onSecondaryContainer,
+    shape = RoundedCornerShape(Radius.container),
+    modifier =
+      Modifier.fillMaxWidth()
+        .padding(horizontal = gutter, vertical = Space.xs)
+        .testTag("gantt_dependency_link_mode"),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = Space.md, vertical = Space.xs),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = if (predecessor == null) "Link tasks on the canvas" else "Choose the successor task",
+          style = MaterialTheme.typography.labelLarge,
+          fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+          text =
+            if (predecessor == null) {
+              "Tap the task that must come first."
+            } else {
+              "Predecessor: ${predecessor.title}. Tap the task that follows."
+            },
+          style = MaterialTheme.typography.bodySmall,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.testTag("gantt_dependency_link_source"),
+        )
+      }
+      TextButton(
+        onClick = onCancel,
+        modifier = Modifier.heightIn(min = MinimumTouchTarget).testTag("gantt_dependency_link_cancel"),
+      ) {
+        Text("Cancel")
+      }
+    }
+  }
+}
+
 /** The map's references, in one definition so the page and the tab cannot drift apart. */
 @Composable
 private fun GanttMapMenu(
   expanded: Boolean,
   dependencyCount: Int,
+  taskCount: Int,
   boardReady: Boolean,
   legendShown: Boolean,
   onDismiss: () -> Unit,
   onDependencies: () -> Unit,
+  onLinkTasks: () -> Unit,
   onToggleLegend: () -> Unit,
 ) {
   DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+    DropdownMenuItem(
+      text = { Text("Link tasks on canvas") },
+      enabled = boardReady && taskCount >= 2,
+      onClick = {
+        onDismiss()
+        onLinkTasks()
+      },
+      modifier = Modifier.testTag("gantt_link_tasks"),
+    )
     DropdownMenuItem(
       text = { Text("Dependencies ($dependencyCount)") },
       enabled = boardReady,
@@ -1637,6 +1800,9 @@ private fun PlanTaskCanvasRow(
   onMoveDragEnd: () -> Unit,
   onMoveAdjust: (GanttDragTarget, Int) -> Boolean,
   isCritical: Boolean,
+  dependencyLinkMode: Boolean,
+  dependencyLinkSourceId: String?,
+  onSelectDependencyTask: (PlanItem) -> Unit,
   nonWorkingBands: List<NonWorkingBand>,
   /** Direct dragging is offered on the full page, where there is room to aim. */
   focused: Boolean,
@@ -1656,7 +1822,29 @@ private fun PlanTaskCanvasRow(
       Modifier.fillMaxWidth()
         .height(displayRowHeight(row))
         .ganttNonWorkingBands(nonWorkingBands, colors.onSurface)
-        .ganttGrid(ticks, today, colors.outlineVariant, colors.primary),
+        .ganttGrid(ticks, today, colors.outlineVariant, colors.primary)
+        .then(
+          if (dependencyLinkMode) {
+            Modifier.clickable(
+              role = Role.Button,
+              onClickLabel = "Choose ${item.title} as a dependency task",
+              onClick = { onSelectDependencyTask(item) },
+            )
+          } else {
+            Modifier
+          }
+        )
+        .semantics {
+          if (dependencyLinkMode) {
+            contentDescription =
+              if (dependencyLinkSourceId == item.id) {
+                "${item.title}, selected as the dependency predecessor"
+              } else {
+                "${item.title}, choose as the dependency predecessor or successor"
+              }
+          }
+        }
+        .testTag("gantt_dependency_task_${item.id}"),
   ) {
     row.layout.milestonePosition?.let { position ->
       val touchStart =
@@ -1668,10 +1856,23 @@ private fun PlanTaskCanvasRow(
             .size(MinimumTouchTarget)
             .semantics {
               contentDescription =
-                "${item.title}, Plan milestone on ${formatter.mediumDay(requireNotNull(item.dueAt))}"
+                if (dependencyLinkMode) {
+                  if (dependencyLinkSourceId == item.id) {
+                    "${item.title}, selected as the dependency predecessor"
+                  } else {
+                    "${item.title}, choose as a dependency task"
+                  }
+                } else {
+                  "${item.title}, Plan milestone on ${formatter.mediumDay(requireNotNull(item.dueAt))}"
+                }
             }
-            .clickable(role = Role.Button, onClickLabel = "Edit Plan milestone") {
-              onEditTask(item)
+            .clickable(
+              role = Role.Button,
+              onClickLabel =
+                if (dependencyLinkMode) "Choose ${item.title} as a dependency task"
+                else "Edit Plan milestone",
+            ) {
+              if (dependencyLinkMode) onSelectDependencyTask(item) else onEditTask(item)
             }
             .testTag("plan_gantt_item"),
         contentAlignment = Alignment.Center,
@@ -1694,6 +1895,7 @@ private fun PlanTaskCanvasRow(
         val end = normalizedOffset(segment.endPosition, canvasWidth)
         val barWidth = (end - start).coerceAtLeast(MinimumLegibleBarWidth)
         val selected = segment.block.id == selectedMoveBlockId
+        val dependencySelected = dependencyLinkSourceId == item.id
         // In move mode the bar shares the canvas with two 48 dp handles drawn above it, so the
         // three regions are laid out as neighbours; otherwise the bar keeps its own tap target.
         val manipulation =
@@ -1748,13 +1950,26 @@ private fun PlanTaskCanvasRow(
           modifier =
             Modifier.offset(x = touchStart, y = 8.dp + PlanLanePitch * segment.lane)
               .width(touchWidth)
-              .height(MinimumTouchTarget)
-              .semantics {
-                contentDescription = planSegmentDescription(row, segment, formatter, isCritical)
-                stateDescription =
-                  when {
-                    selected ->
-                      "Direct move preview. Drag the bar, then use Apply; pointer release does not save."
+               .height(MinimumTouchTarget)
+               .semantics {
+                 contentDescription =
+                   if (dependencyLinkMode) {
+                     if (dependencySelected) {
+                       "${item.title}, selected as the dependency predecessor"
+                     } else {
+                       "${item.title}, choose as a dependency task"
+                     }
+                   } else {
+                     planSegmentDescription(row, segment, formatter, isCritical)
+                   }
+                 stateDescription =
+                   when {
+                     dependencyLinkMode && dependencySelected ->
+                       "Selected as the dependency predecessor. Choose another task to complete the link."
+                     dependencyLinkMode ->
+                       "Choose this task as the dependency predecessor or successor."
+                     selected ->
+                       "Direct move preview. Drag the bar, then use Apply; pointer release does not save."
                     segment.block.locked || item.locked ->
                       "Locked. Open the block and explicitly unlock it before movement."
                     focused ->
@@ -1769,7 +1984,13 @@ private fun PlanTaskCanvasRow(
                 // so there is no long press to discover first. Nothing is written by dragging —
                 // release leaves the preview open and Apply is still the only thing that commits,
                 // which is the rule every other move path here follows.
-                if (selected || (focused && canMove)) {
+                 if (dependencyLinkMode) {
+                   Modifier.clickable(
+                     role = Role.Button,
+                     onClickLabel = "Choose ${item.title} as a dependency task",
+                     onClick = { onSelectDependencyTask(item) },
+                   )
+                 } else if (selected || (focused && canMove)) {
                   // Deliberately not keyed on `selected`: picking the block up changes that flag,
                   // and re-keying would restart this pointer input and cancel the very gesture that
                   // did the picking up. The first drag would then only select, and the person would
@@ -1814,9 +2035,10 @@ private fun PlanTaskCanvasRow(
             color = tone,
             contentColor = readableBarContentColor(tone),
             border =
-              when {
-                selected -> BorderStroke(3.dp, colors.onSurface)
-                isCritical -> BorderStroke(2.dp, colors.onSurface)
+               when {
+                 selected -> BorderStroke(3.dp, colors.onSurface)
+                 dependencySelected -> BorderStroke(3.dp, colors.secondary)
+                 isCritical -> BorderStroke(2.dp, colors.onSurface)
                 else -> null
               },
             shape = RoundedCornerShape(Radius.control),

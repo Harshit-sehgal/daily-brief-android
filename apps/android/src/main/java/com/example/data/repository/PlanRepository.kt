@@ -456,7 +456,7 @@ class PlanRepository internal constructor(private val database: AppDatabase) {
               },
             targetType =
               if (union.size == 1) PlanMutationTarget.BLOCK else PlanMutationTarget.BLOCK_GROUP,
-            summary = "Restored the schedule from \"${'$'}{baseline.name}\"",
+            summary = "Restored the schedule from \"${baseline.name}\"",
             before = before,
             after = after,
             now = now,

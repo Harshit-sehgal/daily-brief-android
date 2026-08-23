@@ -46,6 +46,9 @@ object SettingKeys {
   const val AGENDA_GROUPING = "agenda_grouping"
   const val WEEK_SPAN_DAYS = "week_span_days"
 
+  /** Last timestamp acknowledged by the change digest for a specific Plan board. */
+  fun planChangeDigestReviewedAt(boardId: String) = "plan_change_digest_reviewed_at_$boardId"
+
   /** How long a change stays undoable; see [UndoWindowPolicy]. */
   const val UNDO_WINDOW_SECONDS = "undo_window_seconds"
 

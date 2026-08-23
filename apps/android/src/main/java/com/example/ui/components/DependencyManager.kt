@@ -66,6 +66,8 @@ fun PlanDependencyManager(
   modifier: Modifier = Modifier,
   errors: List<String> = emptyList(),
   isBusy: Boolean = false,
+  initialAddDraft: DependencyDraft? = null,
+  addRequest: Int = 0,
 ) {
   val options = remember(boardId, items) { DependencyUiProjector.taskOptions(boardId, items) }
   val rows =
@@ -87,6 +89,11 @@ fun PlanDependencyManager(
   }
   LaunchedEffect(deleteTargetId, deleteTarget) {
     if (deleteTargetId != null && deleteTarget == null) deleteTargetId = null
+  }
+  LaunchedEffect(addRequest, options.size) {
+    if (addRequest > 0 && options.size >= 2 && editorTarget == null) {
+      editorTarget = AddEditorTarget
+    }
   }
 
   Column(
@@ -157,12 +164,13 @@ fun PlanDependencyManager(
     key(targetKey) {
       val initialDraft =
         editingDependency?.toDraft()
+          ?: initialAddDraft
           ?: DependencyDraft(
-            predecessorId = options.firstOrNull()?.item?.id.orEmpty(),
-            successorId = options.drop(1).firstOrNull()?.item?.id.orEmpty(),
-            type = PlanDependencyType.FINISH_TO_START,
-            lagMinutes = 0,
-          )
+              predecessorId = options.firstOrNull()?.item?.id.orEmpty(),
+              successorId = options.drop(1).firstOrNull()?.item?.id.orEmpty(),
+              type = PlanDependencyType.FINISH_TO_START,
+              lagMinutes = 0,
+            )
       DependencyEditorDialog(
         initialDraft = initialDraft,
         editingDependency = editingDependency,
