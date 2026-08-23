@@ -7,6 +7,8 @@ import com.example.server.db.Db.execute
 import com.example.server.db.Db.newId
 import com.example.server.db.Db.query
 import com.example.server.google.CalendarProvider
+import com.example.server.google.CalendarProviderFailure
+import java.io.IOException
 import java.sql.Connection
 
 /**
@@ -27,16 +29,18 @@ object ReconcileWorker {
 
   fun reconcile(workspaceId: String, projectId: String, provider: CalendarProvider) {
     val startedAt = System.currentTimeMillis()
-    // Fetch outside the lock, with bounded backoff. A fetch is retried only for transient
-    // failures — the provider's own error() on a definitive HTTP status is not retried,
-    // because a 401 is not going to become a 200 by asking again.
-    val incoming =
-      retry(FETCH_ATTEMPTS, BACKOFF_MS) {
-        val rangeStart = 0L
-        val rangeEnd = startedAt + 30L * 24 * 60 * 60 * 1000
-        provider.fetchEvents(rangeStart, rangeEnd)
-      }
+    var eventsSeen = 0
     try {
+      // Fetch outside the lock, with bounded backoff. Only transient provider failures are
+      // retried — a 401/403, malformed payload, or validation error is not made better by
+      // immediately asking again.
+      val incoming =
+        retry(FETCH_ATTEMPTS, BACKOFF_MS) {
+          val rangeStart = 0L
+          val rangeEnd = startedAt + 30L * 24 * 60 * 60 * 1000
+          provider.fetchEvents(rangeStart, rangeEnd)
+        }
+      eventsSeen = incoming.size
       Db.inTransaction { conn ->
         // The tenant's write gate: a crashed transaction cannot leak it. The call returns a
         // row, so consume it via query rather than execute.
@@ -56,24 +60,17 @@ object ReconcileWorker {
       }
       record(workspaceId, startedAt, incoming.size, "ok")
     } catch (t: Throwable) {
-      // The merge failed and rolled back; the ledger must still say so.
-      record(workspaceId, startedAt, incoming.size, "failed")
+      // Fetch and merge failures both belong in the ledger. If the database itself is down,
+      // preserve the original provider/merge exception rather than masking it with a ledger
+      // write failure.
+      runCatching { record(workspaceId, startedAt, eventsSeen, "failed") }
       throw t
     }
   }
 
   /** Bounded retry with backoff: 3 attempts, 200 ms then 400 ms. Failures are rethrown. */
   private fun <T> retry(attempts: Int, backoffMs: Long, block: () -> T): T {
-    var last: Throwable? = null
-    repeat(attempts) { attempt ->
-      try {
-        return block()
-      } catch (t: Throwable) {
-        last = t
-        if (attempt < attempts - 1) Thread.sleep(backoffMs shl attempt)
-      }
-    }
-    throw last!!
+    return ReconcileRetry.run(attempts, backoffMs, block)
   }
 
   private fun record(workspaceId: String, startedAt: Long, eventsSeen: Int, status: String) {
@@ -131,4 +128,29 @@ object ReconcileWorker {
       ),
     )
   }
+}
+
+internal object ReconcileRetry {
+  fun <T> run(attempts: Int, backoffMs: Long, block: () -> T): T {
+    require(attempts > 0) { "attempts must be positive" }
+    require(backoffMs >= 0) { "backoffMs must not be negative" }
+    var last: Throwable? = null
+    repeat(attempts) { attempt ->
+      try {
+        return block()
+      } catch (t: Throwable) {
+        last = t
+        if (attempt == attempts - 1 || !isTransient(t)) throw t
+        Thread.sleep(backoffMs shl attempt)
+      }
+    }
+    throw last ?: IllegalStateException("retry did not execute")
+  }
+
+  internal fun isTransient(t: Throwable): Boolean =
+    when (t) {
+      is CalendarProviderFailure -> t.statusCode == 408 || t.statusCode == 429 || t.statusCode >= 500
+      is IOException -> true
+      else -> false
+    }
 }

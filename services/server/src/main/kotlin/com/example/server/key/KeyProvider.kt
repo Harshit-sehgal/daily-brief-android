@@ -131,16 +131,22 @@ class AwsKmsKeyProvider(
  * is the fallback, and its absence is an explicit boot error rather than a silent default.
  */
 object KeyProviders {
-  fun from(config: com.example.server.Config): KeyProvider =
-    if (config.kmsKeyId != null && config.kmsRegion != null && config.kmsAccessKeyId != null && config.kmsSecretAccessKey != null) {
-      AwsKmsKeyProvider(
-        keyId = config.kmsKeyId,
-        region = config.kmsRegion,
-        accessKeyId = config.kmsAccessKeyId,
-        secretAccessKey = config.kmsSecretAccessKey,
+  fun from(config: com.example.server.Config): KeyProvider {
+    val kmsValues =
+      listOf(config.kmsKeyId, config.kmsRegion, config.kmsAccessKeyId, config.kmsSecretAccessKey)
+    if (kmsValues.any { it != null }) {
+      require(kmsValues.all { !it.isNullOrBlank() }) {
+        "KMS configuration is incomplete; refusing to fall back to ENVELOPE_KEY_HEX"
+      }
+      return AwsKmsKeyProvider(
+        keyId = requireNotNull(config.kmsKeyId),
+        region = requireNotNull(config.kmsRegion),
+        accessKeyId = requireNotNull(config.kmsAccessKeyId),
+        secretAccessKey = requireNotNull(config.kmsSecretAccessKey),
         sessionToken = config.kmsSessionToken,
       )
     } else {
-      LocalKeyProvider(requireNotNull(config.envelopeKeyHex) { "ENVELOPE_KEY_HEX is required when KMS is not configured" })
+      return LocalKeyProvider(requireNotNull(config.envelopeKeyHex) { "ENVELOPE_KEY_HEX is required when KMS is not configured" })
     }
+  }
 }

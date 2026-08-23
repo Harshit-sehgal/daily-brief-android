@@ -21,6 +21,7 @@ class GoogleProviderRefreshTest {
   private lateinit var server: HttpServer
   private lateinit var baseUrl: String
   private val requests = mutableListOf<String>() // Authorization headers, in call order
+  private val paths = mutableListOf<String>()
 
   private val config =
     Config(
@@ -36,11 +37,13 @@ class GoogleProviderRefreshTest {
   @Before
   fun bootServer() {
     requests.clear()
+    paths.clear()
     responder = { 200 to "{\"items\":[]}" }
     server = HttpServer.create(InetSocketAddress(0), 0)
     server.createContext("/calendar/") { exchange ->
       val auth = exchange.requestHeaders.getFirst("Authorization").orEmpty()
       requests.add(auth)
+      paths.add(exchange.requestURI.toString())
       val (code, body) = responder(auth)
       val bytes = body.toByteArray()
       exchange.sendResponseHeaders(code, bytes.size.toLong())
@@ -145,5 +148,40 @@ class GoogleProviderRefreshTest {
     assertEquals(0, provider.fetchEvents(0L, 1000L).size)
     assertEquals(0, refreshed.get())
     assertEquals(listOf("Bearer token"), requests)
+  }
+
+  @Test
+  fun `all day dates become a half open UTC day and pages are followed`() {
+    responder = { _ ->
+      if (paths.size == 1) {
+        200 to """
+          {"items":[{"id":"holiday","summary":"Holiday","start":{"date":"2026-08-19"},"end":{"date":"2026-08-21"}}],"nextPageToken":"page-2"}
+        """.trimIndent()
+      } else {
+        200 to """{"items":[{"id":"meeting","summary":"Meeting","start":{"dateTime":"2026-08-22T10:00:00Z"},"end":{"dateTime":"2026-08-22T11:00:00Z"}}]}"""
+      }
+    }
+    val provider = GoogleCalendarProvider(config, connectionId = "conn-1", accessToken = "token", baseUrl = baseUrl)
+
+    val events = provider.fetchEvents(0L, Long.MAX_VALUE)
+
+    assertEquals(listOf("holiday", "meeting"), events.map { it.id.removePrefix("google_") })
+    assertTrue(events[0].isAllDay)
+    assertEquals(java.time.Instant.parse("2026-08-19T00:00:00Z").toEpochMilli(), events[0].startTime)
+    assertEquals(java.time.Instant.parse("2026-08-21T00:00:00Z").toEpochMilli(), events[0].endTime)
+    assertTrue(paths[1].contains("pageToken=page-2"))
+  }
+
+  @Test
+  fun `a non success response is not mistaken for an empty calendar`() {
+    responder = { _ -> 500 to """{"error":{"message":"temporarily unavailable"}}""" }
+    val provider = GoogleCalendarProvider(config, connectionId = "conn-1", accessToken = "token", baseUrl = baseUrl)
+
+    try {
+      provider.fetchEvents(0L, 1000L)
+      fail("expected the 500 to throw")
+    } catch (expected: IllegalStateException) {
+      assertTrue(expected.message!!.contains("500"))
+    }
   }
 }

@@ -1,6 +1,7 @@
 package com.example.server.plan
 
 import com.example.contract.PlanProposalWire
+import com.example.contract.ScheduledBlockWire
 import com.example.server.db.Db
 import com.example.server.db.Db.execute
 import com.example.server.db.Db.newId
@@ -41,6 +42,13 @@ object Journal {
     val position: Int,
     val locked: Boolean,
     val linkedEventId: String?,
+    // Nullable keeps schema-version 1 audit JSON readable.
+    val projectId: String? = null,
+  )
+
+  data class ProjectProposal(
+    val projectId: String,
+    val proposal: PlanProposalWire,
   )
 
   fun applyProposal(
@@ -49,25 +57,34 @@ object Journal {
     proposals: List<PlanProposalWire>,
     nowMs: Long,
   ): Pair<List<BlockRow>, String> =
+    applyProposals(workspaceId, proposals.map { ProjectProposal(projectId, it) }, nowMs)
+
+  /** Applies a workspace-wide proposal atomically while preserving each task's project. */
+  fun applyProposals(
+    workspaceId: String,
+    proposals: List<ProjectProposal>,
+    nowMs: Long,
+  ): Pair<List<BlockRow>, String> =
     Db.inTransaction { conn ->
       val blocks =
         proposals.map {
           BlockRow(
             id = newId(),
-            taskId = it.itemId,
-            startAt = it.startAt,
-            endAt = it.endAt,
+            taskId = it.proposal.itemId,
+            startAt = it.proposal.startAt,
+            endAt = it.proposal.endAt,
             position = 0,
             locked = false,
             linkedEventId = null,
+            projectId = it.projectId,
           )
         }
-      insertBlocks(conn, workspaceId, projectId, blocks)
+      insertBlocks(conn, workspaceId, blocks)
       val entryId = newId()
       insertEntry(
         conn,
         workspaceId,
-        projectId,
+        blocks.mapNotNull { it.projectId }.distinct().singleOrNull(),
         EntryRecord(
           id = entryId,
           origin = "apply_proposal",
@@ -79,6 +96,76 @@ object Journal {
         ),
       )
       blocks to entryId
+    }
+
+  /** Replaces the exact unlocked blocks named by a replan, with compare-and-set safety. */
+  fun replaceProposals(
+    workspaceId: String,
+    expected: List<ScheduledBlockWire>,
+    proposals: List<ProjectProposal>,
+    nowMs: Long,
+  ): Pair<List<BlockRow>, String>? =
+    Db.inTransaction { conn ->
+      val expectedIds = expected.map { it.id }
+      if (expectedIds.distinct().size != expectedIds.size) return@inTransaction null
+      val current =
+        if (expectedIds.isEmpty()) {
+          emptyList()
+        } else {
+          conn.query(
+            "SELECT id, project_id, task_id, start_at, end_at, position, locked, linked_event_id " +
+              "FROM scheduled_blocks WHERE workspace_id = ? AND id = ANY (?) ORDER BY id FOR UPDATE",
+            listOf(workspaceId, expectedIds.sorted()),
+          ) { rs -> rs.toBlockRow() }
+        }
+      val expectedRows = expected.map { block ->
+        BlockRow(
+          id = block.id,
+          taskId = block.planItemId,
+          startAt = block.startAt,
+          endAt = block.endAt,
+          position = block.position,
+          locked = block.locked,
+          linkedEventId = block.linkedEventId,
+          projectId = null,
+        )
+      }.sortedBy { it.id }
+      if (current.size != expectedRows.size || current.sortedBy { it.id }.map { it.copy(projectId = null) } != expectedRows) {
+        return@inTransaction null
+      }
+
+      current.groupBy { it.projectId ?: error("replan block has no project") }.forEach { (projectId, rows) ->
+        deleteBlocks(conn, workspaceId, projectId, rows.map { it.id }.sorted())
+      }
+      val replacement = proposals.map {
+        BlockRow(
+          id = newId(),
+          taskId = it.proposal.itemId,
+          startAt = it.proposal.startAt,
+          endAt = it.proposal.endAt,
+          position = 0,
+          locked = false,
+          linkedEventId = null,
+          projectId = it.projectId,
+        )
+      }
+      insertBlocks(conn, workspaceId, replacement)
+      val entryId = newId()
+      insertEntry(
+        conn,
+        workspaceId,
+        (current + replacement).mapNotNull { it.projectId }.distinct().singleOrNull(),
+        EntryRecord(
+          id = entryId,
+          origin = "replan_proposal",
+          summary = "Replanned ${replacement.size} block${if (replacement.size == 1) "" else "s"}",
+          before = current,
+          after = replacement,
+          undoneAt = null,
+          expiresAt = nowMs + UNDO_WINDOW_SECONDS * 1000L,
+        ),
+      )
+      replacement to entryId
     }
 
   /** Refuses (returns null) when the entry is already undone, expired, or stale. */
@@ -100,29 +187,50 @@ object Journal {
 
       val targetIds = (claim.before + claim.after).map { it.id }.distinct().sorted()
       val locked =
-        conn.query(
-          "SELECT id, task_id, start_at, end_at, position, locked, linked_event_id " +
-            "FROM scheduled_blocks WHERE workspace_id = ? AND project_id = ? AND id = ANY (?) ORDER BY id " +
-            "FOR UPDATE",
-          listOf(workspaceId, claim.projectId, targetIds),
-        ) { rs -> rs.toBlockRow() }
+        if (claim.projectId != null) {
+          conn.query(
+            "SELECT id, project_id, task_id, start_at, end_at, position, locked, linked_event_id " +
+              "FROM scheduled_blocks WHERE workspace_id = ? AND project_id = ? AND id = ANY (?) ORDER BY id " +
+              "FOR UPDATE",
+            listOf(workspaceId, claim.projectId, targetIds),
+          ) { rs -> rs.toBlockRow() }
+        } else {
+          conn.query(
+            "SELECT id, project_id, task_id, start_at, end_at, position, locked, linked_event_id " +
+              "FROM scheduled_blocks WHERE workspace_id = ? AND id = ANY (?) ORDER BY id " +
+              "FOR UPDATE",
+            listOf(workspaceId, targetIds),
+          ) { rs -> rs.toBlockRow() }
+        }
+      // Legacy entries omitted projectId from their JSON; their owning audit row provides it.
+      val comparableLocked =
+        if (claim.after.all { it.projectId == null } && claim.projectId != null) {
+          locked.map { it.copy(projectId = null) }
+        } else {
+          locked
+        }
       // CAS against the mutation's committed result: the current rows must equal what the
       // entry recorded it left behind (`after`). A block edited since apply differs → stale.
       // `before` is the inverse's content, not a state to find in the world — an insert
       // mutation's before is empty, and its rows now exist.
-      if (locked != claim.after.sortedBy { it.id }) {
+      if (comparableLocked != claim.after.sortedBy { it.id }) {
         // Stale: the world moved. Un-claim and refuse — never overwrite.
         conn.execute("UPDATE audit_entries SET undone_at = NULL, updated_at = ? WHERE id = ?", listOf(nowMs, entryId))
         return@inTransaction null
       }
 
       val removed = locked.size
-      deleteBlocks(conn, workspaceId, claim.projectId, targetIds)
-      insertBlocks(conn, workspaceId, claim.projectId, claim.before)
+      locked.groupBy { it.projectId ?: claim.projectId ?: error("journal block has no project") }.forEach { (projectId, rows) ->
+        deleteBlocks(conn, workspaceId, projectId, rows.map { it.id }.sorted())
+      }
+      claim.before.groupBy { it.projectId ?: claim.projectId ?: error("journal block has no project") }.forEach { (projectId, rows) ->
+        insertBlocks(conn, workspaceId, rows.map { it.copy(projectId = projectId) })
+      }
+      val entryProjectId = (claim.before + claim.after).mapNotNull { it.projectId ?: claim.projectId }.distinct().singleOrNull()
       insertEntry(
         conn,
         workspaceId,
-        claim.projectId,
+        entryProjectId,
         EntryRecord(
           id = newId(),
           origin = "undo",
@@ -139,7 +247,7 @@ object Journal {
   fun blocksFor(workspaceId: String, projectId: String): List<BlockRow> =
     Db.dataSource.connection.use { conn ->
       conn.query(
-        "SELECT id, task_id, start_at, end_at, position, locked, linked_event_id " +
+        "SELECT id, project_id, task_id, start_at, end_at, position, locked, linked_event_id " +
           "FROM scheduled_blocks WHERE workspace_id = ? AND project_id = ? ORDER BY start_at",
         listOf(workspaceId, projectId),
       ) { rs -> rs.toBlockRow() }
@@ -157,14 +265,15 @@ object Journal {
 
   private data class ClaimedEntry(
     val id: String,
-    val projectId: String,
+    val projectId: String?,
     val before: List<BlockRow>,
     val after: List<BlockRow>,
     val expiresAt: Long,
   )
 
-  private fun insertBlocks(conn: Connection, workspaceId: String, projectId: String, blocks: List<BlockRow>) {
+  private fun insertBlocks(conn: Connection, workspaceId: String, blocks: List<BlockRow>) {
     blocks.forEach { b ->
+      val projectId = b.projectId ?: error("journal block has no project")
       conn.execute(
         "INSERT INTO scheduled_blocks (id, project_id, task_id, workspace_id, start_at, end_at, position, locked, linked_event_id, created_at, updated_at) " +
           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -195,7 +304,7 @@ object Journal {
   private fun insertEntry(
     conn: Connection,
     workspaceId: String,
-    projectId: String,
+    projectId: String?,
     entry: EntryRecord,
   ) {
     val now = System.currentTimeMillis()
@@ -233,5 +342,6 @@ object Journal {
       position = getInt("position"),
       locked = getBoolean("locked"),
       linkedEventId = getString("linked_event_id"),
+      projectId = getString("project_id"),
     )
 }

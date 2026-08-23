@@ -85,6 +85,8 @@ class StripeBillingProvider(
     try {
       connection.requestMethod = "POST"
       connection.doOutput = true
+      connection.connectTimeout = 10_000
+      connection.readTimeout = 30_000
       connection.setRequestProperty("Authorization", "Basic ${java.util.Base64.getEncoder().encodeToString("$secretKey:".toByteArray())}")
       connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
       connection.outputStream.use { it.write(body.toByteArray()) }
@@ -97,18 +99,23 @@ class StripeBillingProvider(
   }
 
   private fun verifySignature(payload: String, signature: String): Boolean {
-    val parts = signature.split(",").associate {
-      val (k, v) = it.split("=", limit = 2)
-      k to v
-    }
-    val timestamp = parts["t"] ?: return false
-    val expected = parts["v1"] ?: return false
+    val parts =
+      signature.split(",").mapNotNull { part ->
+        val pieces = part.split("=", limit = 2)
+        if (pieces.size == 2 && pieces[0].isNotBlank() && pieces[1].isNotBlank()) pieces[0] to pieces[1] else null
+      }
+    val timestamp = parts.firstOrNull { it.first == "t" }?.second?.toLongOrNull() ?: return false
+    val expected = parts.filter { it.first == "v1" }.map { it.second }
+    if (expected.isEmpty()) return false
+    val now = System.currentTimeMillis() / 1_000L
+    if (kotlin.math.abs(now - timestamp) > MAX_SIGNATURE_AGE_SECONDS) return false
     val mac = javax.crypto.Mac.getInstance("HmacSHA256")
     mac.init(javax.crypto.spec.SecretKeySpec(webhookSecret.toByteArray(), "HmacSHA256"))
     val digest = mac.doFinal("$timestamp.$payload".toByteArray())
-    val computed = java.util.HexFormat.of().formatHex(digest)
-    // Constant-time-ish comparison: length-equal string equality on the hex digest.
-    return computed == expected
+    val computed = java.util.HexFormat.of().formatHex(digest).toByteArray(Charsets.US_ASCII)
+    return expected.any { candidate ->
+      java.security.MessageDigest.isEqual(computed, candidate.toByteArray(Charsets.US_ASCII))
+    }
   }
 
   private fun extractUrl(response: String): String? {
@@ -121,6 +128,7 @@ class StripeBillingProvider(
   }
 
   companion object {
+    private const val MAX_SIGNATURE_AGE_SECONDS = 300L
     private const val SUCCESS_URL = "https://dailybrief.dev/billing/success"
     private const val CANCEL_URL = "https://dailybrief.dev/billing/cancel"
   }

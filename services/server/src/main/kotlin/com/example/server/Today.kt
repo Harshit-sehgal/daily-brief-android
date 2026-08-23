@@ -14,14 +14,40 @@ import kotlinx.serialization.Serializable
  */
 object Today {
   @Serializable
+  data class TodayBlockResponse(
+    val id: String,
+    val planItemId: String,
+    val title: String,
+    val projectName: String? = null,
+    val startAt: Long,
+    val endAt: Long,
+    val position: Int = 0,
+    val locked: Boolean = false,
+    val linkedEventId: String? = null,
+  )
+
+  @Serializable
   data class TodayResponse(
     val date: String,
     val events: List<com.example.contract.ExternalEventWire>,
-    val blocks: List<com.example.contract.ScheduledBlockWire>,
+    val blocks: List<TodayBlockResponse>,
     val conflicts: List<com.example.contract.PlanConflictWire>,
     val busyMinutes: Int,
     val freeMinutes: Int,
   )
+
+  /** Includes planned work in the same overlap sweep as provider events. */
+  internal fun conflictWires(
+    events: List<BriefingEvent>,
+    plannedBlocks: List<BriefingEvent>,
+  ): List<com.example.contract.PlanConflictWire> =
+    ScheduleAnalysis.findConflicts(events + plannedBlocks).map { conflict ->
+      com.example.contract.PlanConflictWire(
+        first = conflict.first.toWire(),
+        second = conflict.second.toWire(),
+        overlapMs = conflict.overlapMs,
+      )
+    }
 
   fun forWorkspace(workspaceId: String, nowMs: Long): TodayResponse {
     val dayStart = java.time.Instant.ofEpochMilli(nowMs).truncatedTo(java.time.temporal.ChronoUnit.DAYS).toEpochMilli()
@@ -55,13 +81,18 @@ object Today {
     val blocks =
       Db.dataSource.connection.use { conn ->
         conn.query(
-          "SELECT id, task_id, start_at, end_at, position, locked, linked_event_id FROM scheduled_blocks " +
-            "WHERE workspace_id = ? AND start_at < ? AND end_at > ?",
+          "SELECT b.id, b.task_id, t.title, p.name AS project_name, b.start_at, b.end_at, b.position, b.locked, b.linked_event_id " +
+            "FROM scheduled_blocks b " +
+            "LEFT JOIN tasks t ON t.project_id = b.project_id AND t.id = b.task_id " +
+            "LEFT JOIN projects p ON p.id = b.project_id " +
+            "WHERE b.workspace_id = ? AND b.start_at < ? AND b.end_at > ?",
           listOf(workspaceId, dayEnd, dayStart),
         ) { rs ->
-          com.example.contract.ScheduledBlockWire(
+          TodayBlockResponse(
             id = rs.getString("id"),
             planItemId = rs.getString("task_id"),
+            title = rs.getString("title") ?: rs.getString("task_id"),
+            projectName = rs.getString("project_name"),
             startAt = rs.getLong("start_at"),
             endAt = rs.getLong("end_at"),
             position = rs.getInt("position"),
@@ -71,33 +102,28 @@ object Today {
         }
       }
 
-    val conflicts =
-      ScheduleAnalysis.findConflicts(events).map { conflict ->
-        com.example.contract.PlanConflictWire(
-          first = conflict.first.toWire(),
-          second = conflict.second.toWire(),
-          overlapMs = conflict.overlapMs,
-        )
-      }
+    val blockEvents = blocks.map { block ->
+      BriefingEvent(
+        id = "plan:${block.id}",
+        title = block.title,
+        startTime = block.startAt,
+        endTime = block.endAt,
+        source = "plan",
+        description = null,
+        isDeadline = false,
+        isUrgent = false,
+        isAllDay = false,
+        location = null,
+        kanbanStatus = "",
+        kanbanBoard = block.projectName.orEmpty(),
+        userEdited = false,
+      )
+    }
+
+    val conflicts = conflictWires(events, blockEvents)
 
     val busy =
-      (events.filterNot { it.isAllDay } + blocks.map {
-        BriefingEvent(
-          id = it.id,
-          title = "",
-          startTime = it.startAt,
-          endTime = it.endAt,
-          source = "plan",
-          description = null,
-          isDeadline = false,
-          isUrgent = false,
-          isAllDay = false,
-          location = null,
-          kanbanStatus = "",
-          kanbanBoard = "",
-          userEdited = false,
-        )
-      })
+      (events.filterNot { it.isAllDay } + blockEvents)
         .mapNotNull { e ->
           val s = maxOf(e.startTime, dayStart)
           val t = minOf(e.endTime, dayEnd)

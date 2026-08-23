@@ -66,6 +66,7 @@ import com.example.core.PlanScenarios
 import com.example.core.PortfolioRollup
 import com.example.core.UnplacedTask
 import com.example.server.reconcile.ReconcileWorker
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
@@ -73,15 +74,17 @@ import io.ktor.server.application.call
 import io.ktor.server.auth.Principal
 import io.ktor.server.auth.principal
 import io.ktor.server.auth.Authentication
+import io.ktor.server.auth.AuthenticationContext
+import io.ktor.server.auth.AuthenticationFailedCause
 import io.ktor.server.auth.authentication
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
-import io.ktor.server.auth.bearer
 import io.ktor.server.auth.authenticate
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -94,6 +97,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
+import io.ktor.server.request.httpMethod
 
 /**
  * The slice's HTTP surface. Nothing here decides anything the engine decides: the planner
@@ -102,10 +106,48 @@ import javax.crypto.spec.SecretKeySpec
  */
 fun Application.routes(config: Config) {
   val sessions = Sessions(config.sessionSecret)
+  val csrfTokens = CsrfTokens(config.sessionSecret)
+  val oauthState = OAuthState(config.sessionSecret)
   val cache = PlanCache()
 
+  fun AuthenticationContext.rejectSession() {
+    challenge("session", AuthenticationFailedCause.InvalidCredentials) { challenge, call ->
+      challenge.complete()
+      call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "unauthenticated"))
+    }
+  }
+
   authentication {
-    bearer("session") { authenticate { credentials -> sessions.verify(credentials.token) } }
+    provider("session") {
+      authenticate { context ->
+        val bearerToken = context.call.request.headers[HttpHeaders.Authorization]
+          ?.takeIf { it.startsWith("Bearer ") }
+          ?.removePrefix("Bearer ")
+        if (bearerToken != null) {
+          val session = sessions.verify(bearerToken)
+          if (session != null) context.principal(session) else context.rejectSession()
+        } else {
+          val cookieSession = context.call.request.cookies[BROWSER_SESSION_COOKIE]
+          val session = sessions.verify(cookieSession ?: "")
+          val safeMethod = context.call.request.httpMethod.value in setOf("GET", "HEAD", "OPTIONS")
+          val csrfValid = safeMethod || csrfTokens.verify(context.call.request.headers[CSRF_HEADER])
+          if (session != null && csrfValid) context.principal(session) else context.rejectSession()
+        }
+      }
+    }
+  }
+
+  fun ApplicationCall.setBrowserSession(token: String): String {
+    val secure = parseWebOrigin(config.webOrigin).scheme == "https"
+    val csrfToken = csrfTokens.issue()
+    response.headers.append(HttpHeaders.SetCookie, browserSessionCookie(token, secure))
+    response.headers.append(CSRF_HEADER, csrfToken)
+    return csrfToken
+  }
+
+  fun ApplicationCall.clearBrowserSession() {
+    val secure = parseWebOrigin(config.webOrigin).scheme == "https"
+    response.headers.append(HttpHeaders.SetCookie, clearBrowserSessionCookie(secure))
   }
 
   routing {
@@ -114,6 +156,11 @@ fun Application.routes(config: Config) {
         post("/fixture/signup") {
           val workspaceId = FixtureWorld.ensure(call)
           call.respond(SessionResponse(workspaceId, sessions.issue(workspaceId)))
+        }
+        post("/fixture/browser-signup") {
+          val workspaceId = FixtureWorld.ensure(call)
+          val csrfToken = call.setBrowserSession(sessions.issue(workspaceId))
+          call.respond(BrowserSessionResponse(workspaceId, csrfToken))
         }
         // Stage 4.5's boundary leg: a fresh workspace on the free trial, untouched by the loop.
         post("/fixture/trial-workspace") {
@@ -124,22 +171,56 @@ fun Application.routes(config: Config) {
         // The real-account leg: the web client redirects to Google, then trades the code for
         // a server-side token (envelope-encrypted in calendar_connections) and a session.
         get("/auth/start") {
-          val redirectUri = call.request.queryParameters["redirect_uri"] ?: config.webOrigin
+          if (config.googleClientId.isNullOrBlank() || config.googleClientSecret.isNullOrBlank()) {
+            call.respond(HttpStatusCode.NotImplemented, mapOf("error" to "Google OAuth is not configured on this deployment"))
+            return@get
+          }
+          val redirectUri =
+            runCatching {
+              OAuthRedirects.validate(
+                config,
+                call.request.queryParameters["redirect_uri"] ?: OAuthRedirects.webCallback(config),
+              )
+            }.getOrElse {
+              call.respond(HttpStatusCode.BadRequest, mapOf("error" to it.message.orEmpty()))
+              return@get
+            }
+          val state = oauthState.issue(redirectUri)
+          val codeChallenge = requireNotNull(oauthState.codeVerifier(state)) { "could not derive OAuth PKCE verifier" }
           call.respond(
             mapOf(
-              "url" to GoogleOAuth.authorizeUrl(config, redirectUri),
+              "url" to GoogleOAuth.authorizeUrl(config, redirectUri, state, oauthState.codeChallenge(codeChallenge)),
               "redirectUri" to redirectUri,
             ),
           )
         }
 
         post("/auth/callback") {
+          if (config.googleClientId.isNullOrBlank() || config.googleClientSecret.isNullOrBlank()) {
+            call.respond(HttpStatusCode.NotImplemented, mapOf("error" to "Google OAuth is not configured on this deployment"))
+            return@post
+          }
           val body = call.receive<AuthCallback>()
-          val tokens = GoogleOAuth.exchangeCode(config, body.code, body.redirectUri)
-          val workspaceId = FixtureWorld.ensure(call, email = "google@dailybrief.dev", name = "Google User")
+          val redirectUri = OAuthRedirects.validate(config, body.redirectUri)
+          require(oauthState.verify(body.state, redirectUri)) { "OAuth state is missing, invalid, or expired" }
+          val codeVerifier = requireNotNull(oauthState.codeVerifier(body.state)) { "OAuth PKCE verifier could not be derived" }
+          val tokens = GoogleOAuth.exchangeCode(config, body.code, redirectUri, codeVerifier)
+          val identity = GoogleOAuth.fetchIdentity(tokens.access_token)
+          val workspaceId = FixtureWorld.ensure(call, email = identity.email, name = identity.name ?: identity.email)
           GoogleOAuth.storeToken(config, workspaceId, "google", "google-account", GoogleOAuth.json.encodeToString(tokens))
-          call.respond(SessionResponse(workspaceId, sessions.issue(workspaceId)))
+          val token = sessions.issue(workspaceId)
+          if (redirectUri == OAuthRedirects.webCallback(config)) {
+            val csrfToken = call.setBrowserSession(token)
+            call.respond(BrowserSessionResponse(workspaceId, csrfToken))
+          } else {
+            call.respond(SessionResponse(workspaceId, token))
+          }
         }
+      }
+
+      post("/auth/logout") {
+        call.clearBrowserSession()
+        call.respond(mapOf("ok" to true))
       }
 
       // Stage 4.5: the billing seam. Checkout is opened against the provider; the webhook is
@@ -200,6 +281,26 @@ fun Application.routes(config: Config) {
           } ?: FixtureWorld.projectId(session.workspaceId)
         }
 
+        fun planningProjectId(session: Session, boardId: String): String? {
+          if (boardId == "b1") return FixtureWorld.projectId(session.workspaceId)
+          return Db.dataSource.connection.use { conn ->
+            conn.queryOne(
+              "SELECT id FROM projects WHERE workspace_id = ? AND id = ? AND archived_at IS NULL",
+              listOf(session.workspaceId, boardId),
+            ) { it.getString(1) }
+          }
+        }
+
+        fun planningItemError(session: Session, request: PlanningRequest): String? =
+          request.items.firstOrNull { item ->
+            Db.dataSource.connection.use { conn ->
+              conn.queryOne(
+                "SELECT 1 FROM tasks WHERE workspace_id = ? AND project_id = ? AND id = ? AND archived_at IS NULL",
+                listOf(session.workspaceId, item.boardId, item.id),
+              ) { it.getInt(1) } == null
+            }
+          }?.let { "task ${it.id} does not belong to project ${it.boardId} in this workspace" }
+
         fun countRows(workspaceId: String, table: String): Int =
           Db.dataSource.connection.use { conn ->
             conn.queryOne(
@@ -239,6 +340,21 @@ fun Application.routes(config: Config) {
                 now,
               ),
             )
+          }
+        }
+
+        get("/settings/planning") {
+          val session = sessions.require(call)
+          call.respond(WorkingScheduleStore.getOrCreateDefault(session.workspaceId))
+        }
+
+        put("/settings/planning") {
+          val session = sessions.require(call)
+          val incoming = call.receive<com.example.contract.WorkScheduleWire>()
+          try {
+            call.respond(WorkingScheduleStore.updateDefault(session.workspaceId, incoming))
+          } catch (e: IllegalArgumentException) {
+            call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to (e.message ?: "invalid working schedule")))
           }
         }
 
@@ -392,18 +508,17 @@ fun Application.routes(config: Config) {
 
         get("/tasks") {
           val session = sessions.require(call)
-          val projectId = FixtureWorld.projectId(session.workspaceId)
           val tasks =
             Db.dataSource.connection.use { conn ->
               conn.query(
-                "SELECT id, parent_id, title, notes, rank, start_constraint, due_at, effort_minutes, progress, priority, owner, scheduling_mode, locked, is_milestone, completed_at, archived_at " +
-                  "FROM tasks WHERE workspace_id = ? AND project_id = ? AND archived_at IS NULL ORDER BY rank",
-                listOf(session.workspaceId, projectId),
+                "SELECT id, project_id, stage_id, parent_id, title, notes, rank, start_constraint, due_at, effort_minutes, progress, priority, owner, scheduling_mode, locked, is_milestone, completed_at, archived_at " +
+                  "FROM tasks WHERE workspace_id = ? AND archived_at IS NULL ORDER BY rank, created_at",
+                listOf(session.workspaceId),
               ) { rs ->
                 com.example.contract.TaskWire(
                   id = rs.getString("id"),
-                  boardId = projectId,
-                  columnId = null,
+                  boardId = rs.getString("project_id"),
+                  columnId = rs.getString("stage_id"),
                   parentId = rs.getString("parent_id"),
                   title = rs.getString("title"),
                   notes = rs.getString("notes"),
@@ -444,8 +559,19 @@ fun Application.routes(config: Config) {
             call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to refusal))
             return@post
           }
-          val projectId = FixtureWorld.projectId(session.workspaceId)
-          val (runId, result) = cache.planAndStore(request, session.workspaceId, projectId)
+          val canonicalRequest =
+            request.copy(
+              items = request.items.map { item ->
+                item.copy(boardId = planningProjectId(session, item.boardId) ?: item.boardId)
+              },
+            )
+          val planningError = planningItemError(session, canonicalRequest)
+          if (planningError != null) {
+            call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to planningError))
+            return@post
+          }
+          val replaceExisting = call.request.queryParameters["replan"] == "1"
+          val (runId, result) = cache.planAndStore(canonicalRequest, session.workspaceId, replaceExisting)
           call.respond(PlanRunResponse(runId, result))
         }
 
@@ -776,6 +902,33 @@ fun Application.routes(config: Config) {
           )
         }
 
+        // The planner UI needs stable block ids when it prepares a replacement proposal. Keep
+        // this operational read separate from the frozen planning contract: it is not an engine
+        // input and is never accepted from an untrusted client without workspace scoping.
+        get("/plan-blocks") {
+          val session = sessions.require(call)
+          val blocks =
+            Db.dataSource.connection.use { conn ->
+              conn.query(
+                "SELECT id, project_id, task_id, start_at, end_at, position, locked, linked_event_id " +
+                  "FROM scheduled_blocks WHERE workspace_id = ? ORDER BY start_at, id",
+                listOf(session.workspaceId),
+              ) { rs ->
+                PlanBlockResponse(
+                  id = rs.getString("id"),
+                  projectId = rs.getString("project_id"),
+                  taskId = rs.getString("task_id"),
+                  startAt = rs.getLong("start_at"),
+                  endAt = rs.getLong("end_at"),
+                  position = rs.getInt("position"),
+                  locked = rs.getBoolean("locked"),
+                  linkedEventId = rs.getString("linked_event_id"),
+                )
+              }
+            }
+          call.respond(blocks)
+        }
+
         post("/billing/checkout") {
           val session = sessions.require(call)
           val tier =
@@ -823,14 +976,25 @@ fun Application.routes(config: Config) {
         post("/plan/{runId}/apply") {
           val session = sessions.require(call)
           val runId = call.parameters["runId"] ?: error("runId required")
-          val projectId = FixtureWorld.projectId(session.workspaceId)
           val proposals = PlanStore.proposalsFor(session.workspaceId, runId)
           if (proposals.isEmpty()) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "no proposals for this run"))
             return@post
           }
           val now = System.currentTimeMillis()
-          val (blocks, entryId) = Journal.applyProposal(session.workspaceId, projectId, proposals, now)
+          val projectProposals = proposals.map { Journal.ProjectProposal(it.projectId, it.proposal) }
+          val replacementBlocks = PlanStore.replacementBlocksFor(session.workspaceId, runId)
+          val applied =
+            if (replacementBlocks.isEmpty()) {
+              Journal.applyProposals(session.workspaceId, projectProposals, now)
+            } else {
+              Journal.replaceProposals(session.workspaceId, replacementBlocks, projectProposals, now)
+                ?: run {
+                  call.respond(HttpStatusCode.Conflict, mapOf("error" to "the schedule changed; replan before applying"))
+                  return@post
+                }
+            }
+          val (blocks, entryId) = applied
           PlanStore.markRun(session.workspaceId, runId, "accepted")
           // Fire-and-forget: a committed plan is the one moment worth a phone's attention.
           // The delivery is bounded by the provider's timeouts and wrapped so a push outage
@@ -1074,6 +1238,10 @@ private data class SyncRunRow(
 @Serializable
 data class SessionResponse(val workspaceId: String, val token: String)
 
+/** Web sign-in returns only the workspace identity; the session token stays HttpOnly. */
+@Serializable
+data class BrowserSessionResponse(val workspaceId: String, val csrfToken: String)
+
 @Serializable
 data class PlanRunResponse(val runId: String, val result: PlanningResult)
 
@@ -1110,7 +1278,19 @@ private object PlanScenarioAdapter {
 data class ApplyResponse(val blocks: Int, val entryId: String)
 
 @Serializable
-data class AuthCallback(val code: String, val redirectUri: String)
+data class PlanBlockResponse(
+  val id: String,
+  val projectId: String,
+  val taskId: String,
+  val startAt: Long,
+  val endAt: Long,
+  val position: Int = 0,
+  val locked: Boolean = false,
+  val linkedEventId: String? = null,
+)
+
+@Serializable
+data class AuthCallback(val code: String, val redirectUri: String, val state: String? = null)
 
 /**
  * Stateless sessions: HMAC(sessionSecret, workspaceId + expiry). No sessions table — the
@@ -1156,22 +1336,31 @@ object FixtureWorld {
   private const val PROJECT_NAME = "My Plan"
 
   fun ensure(call: ApplicationCall, email: String = "fixture@dailybrief.dev", name: String = "Fixture User"): String {
-    val workspaceId =
-      Db.dataSource.connection.use { conn ->
-        conn.queryOne("SELECT id FROM workspaces ORDER BY created_at LIMIT 1") { it.getString(1) }
-      } ?: Db.inTransaction { conn ->
-        val userId = newId()
-        val ws = newId()
+    val workspaceId = Db.inTransaction { conn ->
+      conn.queryOne(
+        "SELECT w.id FROM workspaces w JOIN users u ON u.id = w.owner_user_id WHERE u.email = ? ORDER BY w.created_at LIMIT 1",
+        listOf(email),
+      ) { it.getString(1) } ?: run {
+        val now = System.currentTimeMillis()
         conn.execute(
-          "INSERT INTO users (id, email, name, tier, created_at, updated_at) VALUES (?, ?, ?, 'paid', ?, ?)",
-          listOf(userId, email, name, System.currentTimeMillis(), System.currentTimeMillis()),
+          "INSERT INTO users (id, email, name, tier, created_at, updated_at) VALUES (?, ?, ?, 'paid', ?, ?) ON CONFLICT (email) DO NOTHING",
+          listOf(newId(), email, name, now, now),
         )
-        conn.execute(
-          "INSERT INTO workspaces (id, name, owner_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-          listOf(ws, "Fixture Workspace", userId, System.currentTimeMillis(), System.currentTimeMillis()),
-        )
-        ws
+        val userId = conn.queryOne("SELECT id FROM users WHERE email = ?", listOf(email)) { it.getString(1) }
+          ?: error("user creation did not return an id")
+        conn.queryOne(
+          "SELECT id FROM workspaces WHERE owner_user_id = ? ORDER BY created_at LIMIT 1",
+          listOf(userId),
+        ) { it.getString(1) } ?: run {
+          val ws = newId()
+          conn.execute(
+            "INSERT INTO workspaces (id, name, owner_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            listOf(ws, "Fixture Workspace", userId, now, now),
+          )
+          ws
+        }
       }
+    }
     // The main journey workspace is paid: the loop's capacity, baselines and second project
     // steps are paid surfaces, and the tier boundary has its own trial leg (step 9).
     Db.inTransaction { conn ->
@@ -1282,12 +1471,24 @@ fun providerFor(config: Config, workspaceId: String): com.example.server.google.
 }
 
 object PlanStore {
-  fun proposalsFor(workspaceId: String, runId: String): List<com.example.contract.PlanProposalWire> =
+  private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+
+  data class StoredProposal(
+    val projectId: String,
+    val proposal: com.example.contract.PlanProposalWire,
+  )
+
+  fun proposalsFor(workspaceId: String, runId: String): List<StoredProposal> =
     Db.dataSource.connection.use { conn ->
       conn.query(
-        "SELECT task_id, start_at, end_at, reason FROM plan_proposals WHERE workspace_id = ? AND plan_run_id = ? AND status = 'proposed' ORDER BY start_at",
+        "SELECT project_id, task_id, start_at, end_at, reason FROM plan_proposals WHERE workspace_id = ? AND plan_run_id = ? AND status = 'proposed' ORDER BY start_at",
         listOf(workspaceId, runId),
-      ) { rs -> com.example.contract.PlanProposalWire(rs.getString("task_id"), rs.getLong("start_at"), rs.getLong("end_at"), rs.getString("reason")) }
+      ) { rs ->
+        StoredProposal(
+          projectId = rs.getString("project_id"),
+          proposal = com.example.contract.PlanProposalWire(rs.getString("task_id"), rs.getLong("start_at"), rs.getLong("end_at"), rs.getString("reason")),
+        )
+      }
     }
 
   fun markRun(workspaceId: String, runId: String, status: String) {
@@ -1299,7 +1500,26 @@ object PlanStore {
       )
     }
   }
+
+  fun replacementBlocksFor(workspaceId: String, runId: String): List<ScheduledBlockWire> {
+    val raw =
+      Db.dataSource.connection.use { conn ->
+        conn.queryOne(
+          "SELECT request_json::text FROM plan_runs WHERE workspace_id = ? AND id = ?",
+          listOf(workspaceId, runId),
+        ) { it.getString(1) }
+      } ?: return emptyList()
+    return runCatching { json.decodeFromString<StoredPlanRequest>(raw).replacementBlocks }
+      .getOrElse { emptyList() }
+  }
 }
+
+/** Internal plan-run metadata; the public planner request remains the frozen v1 shape. */
+@Serializable
+private data class StoredPlanRequest(
+  val request: PlanningRequest,
+  val replacementBlocks: List<ScheduledBlockWire> = emptyList(),
+)
 
 /**
  * The determinism cache (04): same request hash against the same data_version is the same
@@ -1311,20 +1531,37 @@ class PlanCache {
   private val map = mutableMapOf<String, PlanningResult>()
   private val rng = SecureRandom()
 
-  fun planAndStore(request: PlanningRequest, workspaceId: String, projectId: String): Pair<String, PlanningResult> {
-    val requestHash = sha256(json.encodeToString(request))
+  fun planAndStore(request: PlanningRequest, workspaceId: String, replaceExisting: Boolean = false): Pair<String, PlanningResult> {
+    val itemIds = request.items.mapTo(mutableSetOf()) { it.id }
+    val replacementBlocks =
+      if (replaceExisting) request.blocks.filter { it.planItemId in itemIds && !it.locked }
+      else emptyList()
+    val replacementIds = replacementBlocks.mapTo(mutableSetOf()) { it.id }
+    val planningRequest =
+      if (replacementBlocks.isEmpty()) request
+      else request.copy(blocks = request.blocks.filterNot { it.id in replacementIds })
+    val requestHash = sha256((if (replaceExisting) "replan:" else "plan:") + json.encodeToString(planningRequest))
     val dataVersion = dataVersion(workspaceId)
     val key = "$requestHash.$dataVersion"
-    val result = map.getOrPut(key) { Mapping.propose(Mapping.toEngine(request, System.currentTimeMillis()), request) }
+    val result = map.getOrPut(key) { Mapping.propose(Mapping.toEngine(planningRequest, System.currentTimeMillis()), planningRequest) }
 
     val runId = newId()
     val now = System.currentTimeMillis()
     Db.inTransaction { conn ->
       conn.execute(
         "INSERT INTO plan_runs (id, workspace_id, request_hash, request_json, data_version, status, created_at) VALUES (?, ?, ?, ?, ?, 'accepted', ?)",
-        listOf(runId, workspaceId, requestHash, json.encodeToString(request), dataVersion, now),
+        listOf(
+          runId,
+          workspaceId,
+          requestHash,
+          json.encodeToString(StoredPlanRequest(request, replacementBlocks)),
+          dataVersion,
+          now,
+        ),
       )
+      val projectIdByTaskId = request.items.associate { it.id to it.boardId }
       result.proposals.forEach { p ->
+        val projectId = projectIdByTaskId[p.itemId] ?: error("planner proposed unknown task ${p.itemId}")
         conn.execute(
           "INSERT INTO plan_proposals (id, plan_run_id, workspace_id, project_id, task_id, start_at, end_at, reason, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?)",
           listOf(newId(), runId, workspaceId, projectId, p.itemId, p.startAt, p.endAt, p.reason, now),

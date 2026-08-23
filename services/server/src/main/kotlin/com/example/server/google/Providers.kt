@@ -12,6 +12,8 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.concurrent.TimeUnit
 
 /**
@@ -107,40 +109,59 @@ class GoogleCalendarProvider(
   override fun name(): String = "Google Calendar"
 
   override fun fetchEvents(startMs: Long, endMs: Long): List<BriefingEvent> {
-    val first = fetchWithToken(currentAccessToken, startMs, endMs)
-    if ((first.first == 401 || first.first == 403) && refresher != null) {
+    return try {
+      fetchAllPages(currentAccessToken, startMs, endMs)
+    } catch (failure: CalendarProviderFailure) {
+      if (failure.statusCode != 401 && failure.statusCode != 403) throw failure
+      if (refresher == null) {
+        throw CalendarProviderFailure(failure.statusCode, "calendar fetch failed: ${failure.statusCode}")
+      }
+
       // The stored pair expired or was revoked. Refresh exactly once, persist, retry once.
-      // A second 401 means the refresh itself was refused — propagate, never loop.
+      // A second 401/403 means the refresh itself was refused — propagate, never loop.
       val fresh = refresher()
       currentAccessToken = fresh.access_token
       onTokensRefreshed?.invoke(fresh)
-      val retried = fetchWithToken(currentAccessToken, startMs, endMs)
-      if (retried.first == 401 || retried.first == 403) {
-        error("calendar fetch failed after token refresh: ${retried.first}")
+      try {
+        fetchAllPages(currentAccessToken, startMs, endMs)
+      } catch (retried: CalendarProviderFailure) {
+        if (retried.statusCode == 401 || retried.statusCode == 403) {
+          throw CalendarProviderFailure(
+            retried.statusCode,
+            "calendar fetch failed after token refresh: ${retried.statusCode}",
+          )
+        }
+        throw retried
       }
-      return parseEvents(retried)
     }
-    if (first.first == 401 || first.first == 403) {
-      error("calendar fetch failed: ${first.first}")
-    }
-    return parseEvents(first)
   }
 
-  private fun fetchWithToken(token: String, startMs: Long, endMs: Long): Pair<Int, String?> {
+  private fun fetchAllPages(token: String, startMs: Long, endMs: Long): List<BriefingEvent> {
+    val events = mutableListOf<BriefingEvent>()
+    var pageToken: String? = null
+    do {
+      val attempt = fetchWithToken(token, startMs, endMs, pageToken)
+      if (attempt.code !in 200..299) {
+        throw CalendarProviderFailure(attempt.code, "calendar fetch failed: ${attempt.code}")
+      }
+      val body = attempt.body ?: error("calendar fetch returned an empty response")
+      val parsed = json.decodeFromString<CalendarList>(body)
+      events += parsed.items.map { it.toEvent() }
+      pageToken = parsed.nextPageToken?.takeIf { it.isNotBlank() }
+    } while (pageToken != null)
+    return events
+  }
+
+  private fun fetchWithToken(token: String, startMs: Long, endMs: Long, pageToken: String?): FetchAttempt {
     val calendarId = config.googleCalendarId ?: "primary"
     val url =
       "$baseUrl/calendar/v3/calendars/${calendarId.encodeURL()}/events" +
-        "?timeMin=${iso(startMs)}&timeMax=${iso(endMs)}&singleEvents=true&orderBy=startTime"
+        "?timeMin=${iso(startMs)}&timeMax=${iso(endMs)}&singleEvents=true&orderBy=startTime" +
+        (pageToken?.let { "&pageToken=${it.encodeURL()}" } ?: "")
     val request = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
     client.newCall(request).execute().use { response ->
-      return response.code to response.body?.string()
+      return FetchAttempt(response.code, response.body?.string())
     }
-  }
-
-  private fun parseEvents(attempt: Pair<Int, String?>): List<BriefingEvent> {
-    val body = attempt.second ?: return emptyList()
-    val parsed = json.decodeFromString<CalendarList>(body)
-    return parsed.items.map { it.toEvent() }
   }
 
   override fun providerIdOf(event: BriefingEvent): Long? = null
@@ -148,11 +169,12 @@ class GoogleCalendarProvider(
   private fun iso(ms: Long): String = java.time.Instant.ofEpochMilli(ms).toString()
 
   private fun CalendarEvent.toEvent(): BriefingEvent {
-    val startValue = start?.dateTime ?: start?.date ?: ""
+    val startValue = start?.dateTime ?: start?.date ?: error("Google event $id has no start")
     val endValue = end?.dateTime ?: end?.date ?: startValue
     val allDay = start?.date != null
-    val startMs = java.time.Instant.parse(startValue).toEpochMilli()
-    val endMs = java.time.Instant.parse(endValue).toEpochMilli()
+    val startMs = parseGoogleTime(startValue)
+    val endMs = parseGoogleTime(endValue)
+    require(endMs > startMs) { "Google event $id has an invalid time range" }
     return BriefingEvent(
       id = "google_${id}",
       title = summary ?: "(no title)",
@@ -170,8 +192,21 @@ class GoogleCalendarProvider(
     )
   }
 
+  /** Google represents all-day events as an inclusive start/exclusive end date. */
+  private fun parseGoogleTime(value: String): Long =
+    if (value.length == 10) {
+      LocalDate.parse(value).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    } else {
+      java.time.Instant.parse(value).toEpochMilli()
+    }
+
   @Serializable
-  private data class CalendarList(val items: List<CalendarEvent> = emptyList())
+  private data class CalendarList(
+    val items: List<CalendarEvent> = emptyList(),
+    val nextPageToken: String? = null,
+  )
+
+  private data class FetchAttempt(val code: Int, val body: String?)
 
   @Serializable
   private data class CalendarEvent(
@@ -187,20 +222,27 @@ class GoogleCalendarProvider(
   private data class EventTime(val dateTime: String? = null, val date: String? = null)
 }
 
+/** A provider response with a status code, so the reconciliation worker can retry only
+ * transient HTTP failures while failing closed on auth and validation responses. */
+internal class CalendarProviderFailure(val statusCode: Int, message: String) : IllegalStateException(message)
+
 private fun String.encodeURL(): String =
   java.net.URLEncoder.encode(this, Charsets.UTF_8).replace("+", "%20")
 
 object GoogleOAuth {
   val json = Json { ignoreUnknownKeys = true }
-  private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).build()
+  private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
 
-  /** The web client's consent URL: identity + calendar scopes, PKCE-less for the slice. */
-  fun authorizeUrl(config: Config, redirectUri: String): String {
+  /** The web client's consent URL: identity + calendar scopes, with a server-bound PKCE challenge. */
+  fun authorizeUrl(config: Config, redirectUri: String, state: String, codeChallenge: String): String {
     val base = "https://accounts.google.com/o/oauth2/v2/auth"
     val params =
       listOf(
         "client_id" to config.googleClientId!!,
         "redirect_uri" to redirectUri,
+        "state" to state,
+        "code_challenge" to codeChallenge,
+        "code_challenge_method" to "S256",
         "response_type" to "code",
         "scope" to "openid email https://www.googleapis.com/auth/calendar.readonly",
         "access_type" to "offline",
@@ -217,13 +259,38 @@ object GoogleOAuth {
     val refresh_token: String? = null,
   )
 
+  @Serializable
+  data class Identity(
+    val sub: String,
+    val email: String,
+    val email_verified: Boolean = false,
+    val name: String? = null,
+  )
+
+  /** Reads the verified Google identity instead of assigning every OAuth callback to one user. */
+  fun fetchIdentity(
+    accessToken: String,
+    userInfoUrl: String = "https://openidconnect.googleapis.com/v1/userinfo",
+  ): Identity {
+    val request = Request.Builder().url(userInfoUrl).header("Authorization", "Bearer $accessToken").build()
+    client.newCall(request).execute().use { response ->
+      if (!response.isSuccessful) error("Google identity lookup failed: ${response.code}")
+      val identity = json.decodeFromString<Identity>(response.body?.string() ?: error("Google identity response was empty"))
+      require(identity.sub.isNotBlank() && identity.email.isNotBlank() && identity.email_verified) {
+        "Google identity is missing a verified email"
+      }
+      return identity
+    }
+  }
+
   /** Exchanges the web client's one-time code for a server-side token pair. */
-  fun exchangeCode(config: Config, code: String, redirectUri: String): TokenResponse {
+  fun exchangeCode(config: Config, code: String, redirectUri: String, codeVerifier: String): TokenResponse {
     val body =
       "code=${code.encodeURL()}" +
         "&client_id=${config.googleClientId!!.encodeURL()}" +
         "&client_secret=${config.googleClientSecret!!.encodeURL()}" +
         "&redirect_uri=${redirectUri.encodeURL()}" +
+        "&code_verifier=${codeVerifier.encodeURL()}" +
         "&grant_type=authorization_code"
     val request =
       Request.Builder()

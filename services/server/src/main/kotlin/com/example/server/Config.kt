@@ -39,6 +39,25 @@ data class Config(
   /** Push: the Expo service's access token; absent means a deployment never rings a phone. */
   val expoAccessToken: String? = null,
 ) {
+  /** Validate relationships that must be true before the process opens a port. */
+  fun validate(): Config {
+    val googleConfigured = !googleClientId.isNullOrBlank() || !googleClientSecret.isNullOrBlank()
+    require(!googleConfigured || (!googleClientId.isNullOrBlank() && !googleClientSecret.isNullOrBlank())) {
+      "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured together"
+    }
+    require(googleCalendarId.isNullOrBlank() || googleConfigured) {
+      "GOOGLE_CALENDAR_ID requires Google OAuth credentials"
+    }
+
+    val stripeValues = listOf(stripeSecretKey, stripeWebhookSecret, stripePriceId)
+    require(stripeValues.all { it.isNullOrBlank() } || stripeValues.all { !it.isNullOrBlank() }) {
+      "STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, and STRIPE_PRICE_ID must be configured together"
+    }
+    require(geminiModel.isNotBlank()) { "GEMINI_MODEL must not be blank" }
+    require(port in 1..65535) { "PORT must be between 1 and 65535" }
+    return this
+  }
+
   companion object {
     fun fromEnv(env: Map<String, String> = System.getenv()): Config =
       Config(
@@ -46,7 +65,11 @@ data class Config(
         databaseUrl = requireEnv(env, "DATABASE_URL"),
         databaseUser = requireEnv(env, "DATABASE_USER"),
         databasePassword = requireEnv(env, "DATABASE_PASSWORD"),
-        sessionSecret = requireEnv(env, "SESSION_SECRET"),
+        sessionSecret = requireEnv(env, "SESSION_SECRET").also {
+          require(it.length >= MIN_SESSION_SECRET_LENGTH) {
+            "SESSION_SECRET must contain at least $MIN_SESSION_SECRET_LENGTH characters"
+          }
+        },
         envelopeKeyHex = env["ENVELOPE_KEY_HEX"],
         kmsKeyId = env["AWS_KMS_KEY_ID"],
         kmsRegion = env["AWS_KMS_REGION"],
@@ -57,15 +80,18 @@ data class Config(
         googleClientSecret = env["GOOGLE_CLIENT_SECRET"],
         googleCalendarId = env["GOOGLE_CALENDAR_ID"],
         fixtureProvider = env["FIXTURE_PROVIDER"] == "1",
+        webOrigin = env["WEB_ORIGIN"] ?: "http://localhost:3000",
         stripeSecretKey = env["STRIPE_SECRET_KEY"],
         stripeWebhookSecret = env["STRIPE_WEBHOOK_SECRET"],
         stripePriceId = env["STRIPE_PRICE_ID"],
         geminiApiKey = env["GEMINI_API_KEY"],
         geminiModel = env["GEMINI_MODEL"] ?: "gemini-2.0-flash",
         expoAccessToken = env["EXPO_ACCESS_TOKEN"],
-      )
+      ).validate()
 
     private fun requireEnv(env: Map<String, String>, name: String): String =
       env[name] ?: error("Missing required environment variable $name")
+
+    private const val MIN_SESSION_SECRET_LENGTH = 32
   }
 }
