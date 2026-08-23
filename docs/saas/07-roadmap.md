@@ -13,7 +13,8 @@ the product, and the Android app is the shipping proof.** Work that makes the en
 and the domain model right comes before work that makes screens.
 
 Current position (updated 2026-08-19): **Stage 1 is complete** (engine core 100%
-portable, purity compiler-enforced via `linuxX64`, 422 JVM tests green), **Stages 2–3 are
+portable, purity compiler-enforced via `linuxX64`; the named current suites are 272
+planning-core, 26 contract, 57 server, and 184 app unit tests with zero failures), **Stages 2–3 are
 complete** (multi-tenant schema, frozen v1 contract, and the vertical slice with its
 automated `journey.sh` acceptance in the gate), **Stage 4 is complete** (Capacity,
 Projects/Board, dependencies and critical path, scenarios/baselines/portfolio, and
@@ -23,29 +24,61 @@ the Capacity check, the Today wall-clock timeline, the per-project week Gantt, a
 server-side WP-14 hardening — token refresh and the `sync_runs` ledger). The engine now
 honours per-project schedules on the wire (`scheduleIdByTaskId`, `64b8cf9`). All engine
 defects are closed (WP-9, `4aac835`, `df1ef68`).
-What is left is the tail of the depth trail: offline-first for the mobile app beyond the
-shipped preview fallback, and the iOS build's first Mac-side verification (`xcodebuild`
-and a Swift compile need a Mac).
+What is left is the external verification tail: direct native-file evidence for the mobile
+offline cache, API 37.1/16 KB Android execution, the iOS build's first Mac-side verification
+(`xcodebuild` and a Swift compile need a Mac), actual CI artifact runs, and real-provider and
+human usability evidence. The API36 release slice now completes fixture signup, survives a
+force-stop/relaunch, and serves the cached Today screen after the fixture server is stopped;
+the config plugin also makes a fresh Expo prebuild reproducible, and
+`scripts/verify-mobile-release.sh` now passes the complete local production release path,
+including four-ABI packaging and merged-manifest inspection. The cache's
+platform-neutral encoding, corruption, compatibility, key-isolation, web-storage, and
+failed-write rules are now executable-tested in
+`apps/mobile/src/lib/offline-cache-core.test.ts` and `apps/mobile/src/lib/offline-cache.test.ts`.
 
-**Next: the mobile depth tail and the iOS Mac verification** — see the per-stage sections below.
+**Next: external verification and the final product-readiness evidence** — see the per-stage
+sections below.
 Execution detail in `08-work-packages.md`.
+
+Update 2026-08-23: the 2026-08-20..22 hardening tranche (server session/CSRF, replan
+with replacement, workspace-wide planning and schedule settings; web cookie client;
+mobile offline-cache parity; Android print/dependency-links/digest) is landed on the
+`pre-launch-hardening` branch. Landing it exposed that the fixture acceptance was
+weekday-sensitive — on a Sunday the Mon–Fri working week correctly moves every block
+to Monday and Today shows none — so both `scripts/journey.sh` and the rendered browser
+journey now seed five weekly windows starting today (stored Calendar numbering,
+Sunday=1) and assert apply→Today unconditionally, any day of the week.
+
+The client-facing V1 schedule gap is now closed in the repository: workspace-scoped
+`GET/PUT /v1/settings/planning` persists the working-week timezone and windows through the existing
+schedule tables; web and mobile settings editors read/write that contract; planning requests use
+the saved schedule; and server tests cover Asia/Kolkata conversion, New York spring-forward, and
+overlap rejection. The fixture journey round-trips the schedule, and the rendered browser journey
+saved a 13:00 Thursday start and produced a 13:00 proposal. This closes the implementation and
+local-evidence task, but it does not replace real-provider, device, hosted-CI, or human-usability
+evidence.
 
 ---
 
-## Stage 1 — Finish the portability project
+## Stage 1 — Finish the portability project (complete)
+
+The detailed sequence below is retained as historical execution context. The current position
+at the top of this file is authoritative; none of the old "what is left" statements below is an
+active Stage 1 blocker.
 
 **Why first:** every later stage assumes one engine runs in three places. Until the date-time
 cluster moves, "one engine" is an intention rather than a fact, and the Ktor service in Stage 3
 would be built against a `jvmShared` engine that iOS can never load.
 
-### 1.1 The date-time cluster — mostly done
+### 1.1 The date-time cluster — complete
 
 **`IsoDates` and `WorkingCalendar` are ported** (`b436b1e`, `e440cd3`). `WorkingCalendar` was
 the lever: it released `PlanHealth`, `MultiSchedulePlanHealth`, `AutoPlan`, `PlanBlockPreview`
 and `PlanScenarios` — 1,633 lines needing nothing else. The DST policy is written down in
 `AmbiguousLocalTime` and both pinned tests pass unchanged.
 
-**What is left: `ScheduleAnalysis` (374 lines), the last root blocker**, gating `GanttLayout`,
+**What was left before the final portability pass: `ScheduleAnalysis` (374 lines), the last root
+blocker**, gating `GanttLayout`,
 `TimelineLayout`, `DayPulse`, `GanttZoom`, `PlanGanttLayout` and `PortfolioGantt` — 861 lines.
 Plus `GanttInteraction`'s `java.io.Serializable` (108 lines, independent).
 
@@ -62,10 +95,10 @@ Original scope, for the record — 1,282 lines across six files:
 | `DayPulse` | 122 | `TimeZone` |
 | `IsoDates` | 79 | `SimpleDateFormat`, `Date`, `Locale` |
 
-Clearing `WorkingCalendar` alone unblocks `AutoPlan`, `PlanHealth`, `MultiSchedulePlanHealth`,
-`PlanBlockPreview`, `PlanScenarios` and `GanttInteraction`. Clearing `ScheduleAnalysis` unblocks
-`GanttZoom`, `PlanGanttLayout`, `PortfolioGantt` and the two layout files. Together they take
-the engine from 33% to roughly 90%.
+Clearing `WorkingCalendar` alone unblocked `AutoPlan`, `PlanHealth`, `MultiSchedulePlanHealth`,
+`PlanBlockPreview`, `PlanScenarios` and `GanttInteraction`. Clearing `ScheduleAnalysis` unblocked
+`GanttZoom`, `PlanGanttLayout`, `PortfolioGantt` and the two layout files. Together those passes
+took the engine from its earlier 33% snapshot to full core portability.
 
 **The decision that must be made explicitly, not inherited.** `WorkingCalendarTest` pins
 `java.util.Calendar`'s DST behaviour: a spring-forward gap normalises **forward**, and a
@@ -104,17 +137,16 @@ input→output pairs before touching anything.
 
 ### 1.4 Compiler-enforced purity
 
-Add a non-JVM target so `compileCommonMainKotlinMetadata` stops being SKIPPED and the compiler
-takes over from `CommonMainPurityTest`. On Linux the cheap option is `linuxX64`; the real one is
-`iosArm64` when iOS work starts. Roughly 1 GB of Kotlin/Native toolchain, and it removes a guard
-that currently exists only because the compiler check fails open.
+Added the non-JVM targets: `linuxX64` makes `compileCommonMainKotlinMetadata` execute and the
+compiler takes over from `CommonMainPurityTest`; `iosArm64` and `iosSimulatorArm64` configure the
+iOS path. The test remains as a faster diagnostic duplicate.
 
 **Exit criteria for Stage 1:** engine ≥90% `commonMain`; DST policy named in code and still
 pinned by the original tests; `LegacyNameKeys` fixture-tested; purity enforced by the compiler.
 
 ---
 
-## Stage 2 — The domain model and the server contract
+## Stage 2 — The domain model and the server contract (complete)
 
 **Why here:** the model is easier to get right against a portable engine, and every later stage
 writes against it. Getting it wrong is the expensive mistake — the one that forces a rewrite six
@@ -168,13 +200,15 @@ have written designs with the failure mode named.
 
 ---
 
-## Stage 3 — The vertical slice
+## Stage 3 — The vertical slice (complete)
 
 One journey, excellent, nothing else: **sign in → connect a calendar → add tasks → "Plan my
 week" → see a proposal with reasons → apply → see it on Today.**
 
 - Ktor planning service wrapping `packages/planning-core`; the API calls it, never reimplements it.
-- Next.js + TypeScript for Today and Planner only. No Projects, no Board, no Gantt.
+- Next.js + TypeScript for the original first slice: Today and Planner only. Projects, Board,
+  and depth views were added later under Stage 4; the current command-center hierarchy is in
+  `11-strategy-reconciliation.md`.
 - Google Calendar sync as a background worker: OAuth server-side, tokens encrypted at rest,
   `SyncMergePolicy`'s rules ported exactly — **times and location are source-owned; wording and
   placement are user-owned; `userEdited` is sticky.**
@@ -260,12 +294,13 @@ sign-out), the Capacity check (hours/week input, verdict sentence, numbers and t
 list), the Today wall-clock day timeline, and the per-project week Gantt beside the
 portfolio strip.
 
-Remaining in this stage: offline-first beyond the shipped preview fallback (a payload
-cache for Today/board/portfolio reads and an offline posture — Apply stays
-server-authoritative), and the iOS side (XCFramework build written and Linux-reviewed,
-unverified — `xcodebuild` and a Swift compile need a Mac). Projects/Board, the offline
-preview fallback, the daily brief with per-tenant quota, and the "This week" portfolio
-strip all shipped 2026-08-18.
+The mobile cache implementation now covers Today, the workspace task set, project lists, boards,
+and the portfolio strip;
+TypeScript, lint, Expo web export, and dependency checks pass. Runtime proof of persistence,
+corrupt-entry recovery, and workspace isolation still belongs in the device evidence matrix.
+The iOS side remains Linux-reviewed but unverified: `xcodebuild` and a Swift compile need a Mac.
+Projects/Board, the offline preview fallback, the daily brief with per-tenant quota, and the
+"This week" portfolio strip shipped 2026-08-18.
 
 The iOS build script got its Linux-side review 2026-08-18: the two framework tasks match
 the KMP targets, `baseName = "PlannerCore"` matches the Swift `import PlannerCore`, the
@@ -329,7 +364,7 @@ Defects 1, 2, 4 and 6 were fixed earlier (`b11ad72`).
 
 ## Risks worth naming
 
-- **The date-time port is the whole programme's critical path.** If DST resolution changes
+- **Historical risk — the date-time port was the programme's critical path.** If DST resolution changes
   silently, working windows move for real users and no test says so. Mitigation: the policy is
   named code and the original tests are the proof.
 - **`LegacyNameKeys` can corrupt existing installs.** Mitigation: fixture tests before the port,
@@ -340,11 +375,16 @@ Defects 1, 2, 4 and 6 were fixed earlier (`b11ad72`).
 - **Two products, one team.** The Android app keeps shipping while the web V1 is built. Every
   Android feature is a thing to port, reconcile or explicitly abandon. Say which, per feature,
   at the time.
+- **Current external proof boundary.** Real Google OAuth, production provider configuration,
+  Mac-side iOS output, physical devices, broad accessibility, and consultant usability remain
+  evidence tasks; local green gates do not prove them.
 
 ---
 
 ## What "done" means for the current programme
 
-The extraction is finished when the engine is ≥90% `commonMain`, the compiler enforces it, the
-domain model is multi-tenant, the planner contract is frozen, and the vertical slice runs a
-real calendar end to end. Everything after that is product.
+The extraction and depth programme are finished when the engine is ≥90% `commonMain`, the
+compiler enforces it, the domain model is multi-tenant, the planner contract is frozen, and the
+vertical slice runs a real calendar end to end. Those repository gates now pass. Product launch
+still requires the external evidence listed above and real-user validation of the command-center
+loop.

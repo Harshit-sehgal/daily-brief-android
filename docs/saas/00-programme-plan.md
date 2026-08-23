@@ -21,11 +21,12 @@ are still achievable.
 | Decision | Choice | Consequence |
 | --- | --- | --- |
 | **Wedge** | Hybrid | Auto-plan + Today is the free 90-second magic moment. Project depth — Gantt, dependencies, capacity, critical path, plan health, baselines, scenarios — is Pro. Neither half is deleted. |
+| **Product shell** | Command center | Today is the hero; Planner unifies calendar and planned work; Inbox captures unrouted tasks; Projects progressively disclose Board and Timeline; Insights contains capacity and other depth. See `11-strategy-reconciliation.md`. |
 | **ICP** | Independent consultants and high-end freelancers running 3–8 concurrent client projects against a meeting-heavy calendar | Capacity analytics and dependencies answer commercial questions ("can I take another client next week?"), not productivity-theatre ones. Expansion path: consultant → consultant + subcontractor → small consultancy → team capacity. |
 | **Out of scope forever** | Invoicing, CRM, expenses, proposals, contracts, time sheets | The boundary is *commitment → realistic execution plan*. Other software handles getting paid. |
 | **Engine** | Kotlin Multiplatform `packages/planning-core` | One engine shared by a JVM planning service, Android, and later iOS. No TypeScript rewrite of the scheduling maths. |
 | **Stack** | Next.js web · TypeScript SaaS API · Kotlin/Ktor planner · Postgres · Expo mobile with native Kotlin/Swift modules | Language ownership is clean: product UI in TypeScript, planning intelligence in Kotlin. |
-| **Scope of the current step** | Specification + engine extraction | No Next.js app, auth, Stripe, deployed Postgres, Ktor service, Expo, iOS, or UI implementation. |
+| **Scope of the current step** | Product hardening and evidence | The specification, server, web vertical slice, planning engine, Android client, and mobile MVP exist. Remaining work is implementation hardening plus external/manual proof, not another broad feature sweep. |
 
 ### Tier boundary (draft, to be firmed in `02-v1-product-spec.md`)
 
@@ -101,15 +102,26 @@ dependencies, critical path, deadline feasibility, capacity, plan health and aut
 **Engine defects 1, 2, 4 and 6 fixed.** `b11ad72` — see §6, and `06-scope-deviations.md` D2 for
 the process note.
 
-### Current shape (2026-08-17, `scripts/verify.sh` green)
+### Current shape (2026-08-19, `scripts/verify.sh --fast` green)
 
 | | Files | Lines | Share |
 | --- | ---: | ---: | ---: |
-| `packages/planning-core/commonMain` | 14 | 2,549 | **33%** of the module |
-| `packages/planning-core/jvmShared` | 20 | 5,157 | 67% |
-| — of which engine core (`core/` only) | — | 1,784 / 5,148 | **34.7%** portable |
-| `packages/planning-core` tests | 30 suites | — | 222 tests, 0 failures |
-| `app` tests | 40 suites | — | 179 tests, 0 failures |
+| `packages/planning-core/core` | all engine files | — | **100%** in `commonMain` |
+| `packages/planning-core` | `commonMain` + `jvmShared` | 9 JVM-actual lines remain | **99.9%** portable |
+| `:planning-core:jvmTest` | — | — | 272 tests, 0 failures |
+| `:planning-contract:jvmTest` | — | — | 26 tests, 0 failures |
+| `:server:test` | — | — | 57 tests, 0 failures |
+| `:app:testDebugUnitTest` | — | — | 184 tests, 0 failures |
+
+The mobile cache persistence rules now have an executable test layer:
+`apps/mobile/npm test` passes 10 tests covering round-trip encoding, legacy entries, corruption
+rejection, workspace/project key isolation, web-storage and modeled native-adapter reload,
+malformed-entry cleanup, atomic replacement, and the failed-storage-write posture. This does not
+replace native-device proof of document-directory persistence, restart recovery, or storage
+failures.
+The separate production API-origin policy has 5 focused tests and a positive/negative Expo export
+check; it refuses an absent or blank origin in production while retaining emulator/localhost
+defaults only for development.
 
 Two denominators, both quoted in places; `05-kmp-portability-audit.md` reconciles them.
 
@@ -121,31 +133,33 @@ scope rather than deleting working code; D2 (the deadline change) accepted and r
 D3/D4/D5/D7 fixed in code. The pattern is the useful part: **every entry was a document and the
 tree disagreeing, and in four of seven the document was what was wrong.**
 
-**Forward work is in `07-roadmap.md`.**
+**Forward work is in `07-roadmap.md`; `05-kmp-portability-audit.md` is the source of truth for
+engine placement.**
 
 ---
 
-## 3. Findings that changed the plan
+## 3. Historical findings that changed the plan
 
-Recorded because each one invalidates something a reasonable person would otherwise assume.
+Recorded because each one invalidated something a reasonable person would otherwise assume at
+the time. The completion state below supersedes any old "blocked" wording in these notes.
 
-**The engine was never `java.time`-based.** All date maths is `java.util.Calendar`,
+**The original engine was not `java.time`-based.** Its date maths used `java.util.Calendar`,
 `TimeZone` and `SimpleDateFormat` across 8 files. These are JVM-only and cannot enter
 `commonMain`. More importantly, `WorkingCalendarTest` **pins `Calendar`'s DST tie-break**: a
 fall-back ambiguous wall time resolves to the *later, standard-time* occurrence.
 `kotlinx-datetime` and `java.time` resolve fall-back to the *earlier* occurrence. A naive port
 silently flips a tested behavioural contract. See §5.
 
-**`commonMain` purity is not enforced by the compiler here, and it fails open.**
-`compileCommonMainKotlinMetadata` exists but is **SKIPPED**: Kotlin only produces a metadata
+**Before the Native target, `commonMain` purity was not enforced by the compiler and failed open.**
+At that time `compileCommonMainKotlinMetadata` was **SKIPPED**: Kotlin only produced a metadata
 compilation once some target needs one, and `jvm` plus `androidTarget` are both JVM-family.
 Verified by planting a file importing `java.util.Calendar` in `commonMain` — the build stayed
 green and said nothing. An earlier commit message in this branch (`3d05da8`) claims the
 compiler catches this; **that claim is wrong**. Enforcement now comes from
 `CommonMainPurityTest`, which reads the sources the way `UiConsistencyTest` reads the UI, and
 which was itself verified by planting a violation and watching it fail with a precise message.
-Adding a non-JVM target — Kotlin/Native is roughly a gigabyte and is not in the pinned
-toolchain — would hand the job back to the compiler.
+The `linuxX64` target now supplies the non-JVM metadata consumer, so the compiler enforces this
+boundary and `CommonMainPurityTest` remains as a faster diagnostic duplicate.
 
 **Every module must compile against SDK 37.1, never bare 37.** The pinned SDK carries
 `platforms;android-37.1` only. `compileSdk = 37` asks for 37.0 and sends Gradle to the network,
@@ -157,10 +171,11 @@ sat for thirteen minutes before this was spotted. Both modules now write
 `if (row.dayOfWeek != null) use(row.dayOfWeek)` no longer compiles in `:app`. Six sites now bind
 a local first. Expect this on every nullable model field the app reads.
 
-**The journal codecs look portable and are not.** `PlanMutationCodec` reaches
+**The journal codecs initially looked portable and were not.** `PlanMutationCodec` reached
 `WorkingScheduleMutationCodec`, which reaches `LegacyPlanCatalogBuilder` inside the Room
 migration file. They were moved, found to break the build, and moved back. Untangling that chain
-is a content change and is queued as Phase 5 work.
+was a content change; the codecs are now separated in `packages/planning-core`, and the failed
+move remains documented as a lesson.
 
 **One online Gradle run was unavoidable, twice.** The `org.jetbrains.kotlin.multiplatform`
 plugin marker and the `-metadata` artifact variants of `room-common`, `androidx.annotation` and
@@ -178,18 +193,12 @@ plugin marker and the `-metadata` artifact variants of `room-common`, `androidx.
 source of truth. It was duplicated here, and a table maintained in two documents plus a test's
 stdout drifts within a day — it did.
 
-Headline as of 2026-08-17: **34.7% of the engine core is portable** (1,784 / 5,148 lines), 32%
-of the whole module. Five files are root blockers — `WorkingCalendar`, `ScheduleAnalysis`,
-`IsoDates`, `GanttLayout` and `LegacyNameKeys`. `CriticalPathEngine` and `DependencyAnalysis`
-have already cleared.
-
-The leverage has not changed: clearing `WorkingCalendar` unblocks `AutoPlan`, `PlanHealth`,
-`MultiSchedulePlanHealth`, `PlanBlockPreview`, `PlanScenarios` and `GanttInteraction`.
-`LegacyNameKeys` is 22 lines and gates 1,530 lines of journal codec — the cheapest unblock left,
-with `java.text.Normalizer` the only real obstacle.
+Headline as of 2026-08-19: **100% of the engine core is in `commonMain`** and the whole module is
+99.9% portable. The only JVM-specific lines are the `LegacyNameKeys` JVM actual; the iOS actual
+and Linux compiler guard are present. See `05-kmp-portability-audit.md` for the measured table.
 
 
-## 5. The DST decision that has to be made deliberately
+## 5. The DST policy retained deliberately
 
 `WorkingCalendarTest` pins two behaviours that come from `java.util.Calendar` rather than from
 anything the product chose:
@@ -200,15 +209,15 @@ anything the product chose:
 `kotlinx-datetime` and `java.time` resolve fall-back to the **earlier** occurrence by default.
 Porting naively flips a tested contract.
 
-**Recommendation:** implement the policy as named code — an explicit
-`AmbiguousLocalTime.LATER_OFFSET` — preserving today's behaviour and leaving the existing tests
-untouched. The choice becomes visible and reviewable rather than an inherited library default.
+**Implemented:** the policy is named in code as `AmbiguousLocalTime.LATER_OFFSET`, preserving
+today's behaviour; the existing tests remain the proof. The choice is visible and reviewable
+rather than an inherited library default.
 This matters more on a server than on a phone, because the server resolves many time zones at
 once and a silent flip would move real working windows for real users.
 
 ---
 
-## 6. Engine defects — four fixed, three open
+## 6. Engine defects — all closed
 
 Four were fixed in `b11ad72`, ahead of the approval this document asked for; see
 `06-scope-deviations.md` D2 for why that is logged and why the change is still worth keeping.
@@ -220,19 +229,19 @@ Four were fixed in `b11ad72`, ahead of the approval this document asked for; see
    behaviour but no longer claims work is ahead of a deadline when it is not. Keeping the old
    semantics reachable is what makes the extraction's "behaviour preserved" claim still checkable.
 2. ✅ **`AutoPlan` ignored `item.startConstraint`.** Fixed in the same commit.
-3. ⬜ **Only `FINISH_TO_START` dependencies are scheduled around.** SS/FF/SF produce an explicit
+3. ✅ **Only `FINISH_TO_START` dependencies are scheduled around.** SS/FF/SF originally produced an explicit
    `UnplacedTask` naming the limitation — disclosed, not silently dropped, which is the right
    failure mode. Consultants with client hand-offs will want the other three. **Fixed** in the
    Stage 4.3 work (`4aac835`): the planner schedules around all four types in
    dependency-topological order.
 4. ✅ **All-day events became full-day hard blocks.** The ViewModel fed every calendar row into
    `fixedCommitments` without filtering, so an all-day marker destroyed a day of capacity. Fixed.
-5. ⬜ **`AutoPlan` is O(tasks × chunks × free × taken).** Fine for one week on one device; a
+5. ✅ **`AutoPlan` is O(tasks × chunks × free × taken).** Fine for one week on one device; a
    concern for a multi-tenant server planning 8 projects over 4 weeks. **Closed** (`df1ef68`):
    `AutoPlanBenchmarkTest` measured 66 ms for 800 tasks / 4 weeks — no optimisation was needed;
    the benchmark stays as the tripwire.
 6. ✅ **Two buffer code paths.** Unified.
-7. ⬜ **Test coverage is inverted against product value.** Improved but not resolved: `AutoPlan`
+7. ✅ **Test coverage is inverted against product value.** It was initially inverted: `AutoPlan`
    is now 282 lines with the contract suite referencing deadlines 20 times, against
    `MultiSchedulePlanHealth`'s 17 tests for an assessment. **Closed** (`df1ef68`): `AutoPlan`
    grew to 17 tests, matching the assessment suite.
@@ -248,47 +257,79 @@ week?" — this is the most commercially valuable code in the repository.
 
 ## 7. Remaining work
 
+The original extraction, multi-tenant schema, frozen contract, server vertical slice, depth
+features, billing seam, and mobile MVP are implemented. The current tail is deliberately smaller:
+
+1. **Mobile cache evidence.** The mobile client now caches Today, projects, boards, and the
+   portfolio strip per workspace; stale reads are labelled and Apply remains server-authoritative.
+   Encoding, corruption, workspace isolation, web reload, modeled native-adapter reload, atomic
+   replacement, and failed-write behavior are covered by 10 focused tests. Physical native
+   persistence, restart, and offline behavior still need a real device. The local production
+   release verifier now also passes after fresh Expo generation and verifies the merged manifest;
+   hosted workflow execution remains separate.
+2. **iOS verification on macOS.** Run `scripts/verify-ios-framework.sh`, which builds both Apple
+   slices and type-checks a Swift import against `PlannerCore`; Linux can review the script but
+   cannot prove Apple toolchain output until the macOS workflow runs.
+3. **Real-account and production evidence.** Walk the Google runbook, verify OAuth refresh and
+   sync failure recovery, configure KMS/Stripe/Gemini/Expo providers, and run
+   `API_BASE=... WEB_ORIGIN=... scripts/production-probe.sh` plus the public-domain probes before
+   calling the SaaS launch-ready. The fixture journey now also has a dedicated CI job; that is
+   still not evidence for a real Google account or deployed provider configuration.
+4. **Product validation.** Test the command-center journey with real consultants. Code coverage
+   does not prove that Today is understandable or that the proposed schedule earns trust.
+5. **Dependency maintenance.** The nested `xcode`/`uuid` moderate findings are closed with a
+   verified `uuid` 11.x override. The current audit reports eight high upstream
+   Expo/React Native/Metro findings; resolving them requires a planned framework upgrade rather
+   than `npm audit fix --force`.
+
+The API24 emulator, physical-device behavior, broad accessibility matrix, and iOS evidence are
+evidence tracks; they are not silently counted as passed by a Linux build.
+
+The real Google calendar adapter was also hardened during the 2026-08-19 residual audit: date-only
+all-day events are converted to a half-open day, `nextPageToken` is followed, and non-2xx provider
+responses fail closed. The focused provider tests, full server suite, and fixture journey pass;
+the reconciliation worker now records provider-fetch failures and retries only transient errors;
+the real-account runbook is still required for provider and timezone evidence.
+
 ### Phases 2–5 — done
 
 Delivered and green; see §2 for commits. The specification set (`01`–`05`) exists, the engine
 contract tests exist, the codecs are untangled and `CriticalPathEngine` is portable.
 
-Carried forward from Phase 4's design notes, because the server work still depends on them:
+The following are retained as historical design notes; the corresponding schema, server, and
+contract work is now implemented and covered by `07-roadmap.md`, `08-work-packages.md`, and the
+server tests.
 
-**Domain model.** `PlanBoard` → `Project` (a client engagement). **`Client` is a new entity the
-current schema lacks entirely** and the ICP requires. Then `PlanColumn` → `WorkflowStage`,
+**Domain model.** `PlanBoard` → `Project` (a client engagement). The original design identified
+**`Client` as a new entity the schema lacked**; the current product uses project/workspace
+boundaries until a dedicated client directory is validated. Then `PlanColumn` → `WorkflowStage`,
 `PlanItem` → `Task`, `PlanBlock` → `ScheduledBlock`, `BriefingEvent` → `ExternalEvent`,
 `WorkSchedule` unchanged (the multi-schedule max-flow becomes "client A hours vs internal
 hours"), `PlanMutation` → `AuditEntry`, plus `User`, `Workspace`, `Membership`,
 `CalendarConnection`, `PlanRun`, `PlanProposal`, `Subscription`.
 
-**Four invariants that need redesign, not translation.**
+**Four invariants that needed redesign, not translation.**
 
-- `BriefingRepository.SCHEDULE_MUTEX` is a **process-wide** `Mutex` holding provider I/O inside
-  the lock. Server-side: a per-tenant advisory lock with the fetch pulled *outside* it — you
+- `BriefingRepository.SCHEDULE_MUTEX` was a **process-wide** `Mutex` holding provider I/O inside
+  the lock. Server-side now uses a per-tenant advisory lock with the fetch pulled *outside* it — you
   cannot hold a DB lock across an outbound HTTP call at scale. Property to preserve:
   reconciliation of a source's rows and a concurrent user edit must not interleave.
-- Undo's staleness check (`matchesMutationState`) is whole-row value equality inside one SQLite
-  transaction on a single-writer database. Postgres needs `SERIALIZABLE` or `SELECT … FOR
-  UPDATE` on the journal row plus the affected entities. The codecs themselves are fully
-  portable once untangled from the migration file.
+- Undo's staleness check (`matchesMutationState`) was whole-row value equality inside one SQLite
+  transaction on a single-writer database. The server uses a claimed journal entry plus row
+  locking on affected entities; the codecs are separated in the planning-core module.
 - `SecretStore` is Android Keystore — replaced by KMS/envelope encryption. Keep its design
   properties: AAD bound to the setting key, never destroy ciphertext on a failed read.
-- Two constraints live only in application code and should become real Postgres constraints:
-  `saved_views` uniqueness on `(boardId, surface, nameKey)` (no index today), and
-  `work_schedules` "exactly one non-archived default" (a partial unique index).
+- Two constraints originally lived only in application code and are now enforced by schema and
+  migration checks: saved-view uniqueness and exactly one non-archived default work schedule.
 
-**Security change for the SaaS.** Today users paste their own Gemini key, encrypted on-device.
-A commercial SaaS uses a platform key with per-tenant quota and server-side OAuth tokens; the
-browser never receives a long-lived secret. This changes `activeGeminiKey()`,
-`parseGeminiKeys`/`encodeGeminiKeys` and the whole Gemini settings surface.
+**Security change for the SaaS.** Today users can paste their own Gemini key on-device. The
+server implementation uses a platform key seam, per-tenant quota, and server-side OAuth tokens;
+the browser never receives a long-lived secret.
 
 ### Everything after this
 
-Moved to **`07-roadmap.md`**, sequenced with entry and exit criteria: finish the portability
-project (the date-time cluster, the journal codecs, compiler-enforced purity), then the
-multi-tenant domain model and a frozen planner contract, then the vertical slice, then depth
-and the paid tier, then mobile.
+The forward tail is now recorded in **`07-roadmap.md`**: mobile cache evidence, Mac-side iOS
+verification, real-account/production evidence, and product validation.
 
 The three engine defects once open (3, 5, 7) were closed with the depth work — see
 `07-roadmap.md`.
@@ -308,8 +349,8 @@ Notes for anyone repeating this work:
 
 - The gate must name `:planning-core:jvmTest` explicitly. A KMP module has no
   `testDebugUnitTest`, so an unqualified task list skips the engine suite **without failing**.
-- `compileCommonMainKotlinMetadata` is SKIPPED and proves nothing (§3). `CommonMainPurityTest`
-  is the guard.
+- `compileCommonMainKotlinMetadata` now executes through the `linuxX64` consumer and is part of
+  the gate; `CommonMainPurityTest` remains the faster diagnostic guard.
 - A `BUILD SUCCESSFUL` from a piped Gradle invocation (`./gradlew … | tail`) reports the exit
   code of `tail`, not of Gradle. Read the output, not the status.
 - Moving files between source sets inside one module leaves `:app` legitimately UP-TO-DATE,
@@ -318,7 +359,8 @@ Notes for anyone repeating this work:
 ## 9. Open questions for the user
 
 All earlier questions are closed — see `06-scope-deviations.md` for how, and `07-roadmap.md`
-for what follows. One judgement call remains, and it does not block any stage:
+for what follows. The command-center shell is now recorded as the product hierarchy; it does
+not change the consultant ICP or delete the existing depth implementation.
 
 1. ~~**Kotlin/Native target**~~ — **resolved**: `linuxX64` landed (WP-7), the compiler enforces
    `commonMain` purity, and `iosArm64`/`iosSimulatorArm64` followed with the mobile MVP.
@@ -328,6 +370,10 @@ for what follows. One judgement call remains, and it does not block any stage:
    unchanged (`:app`, `:server`, `:planning-core`, `:planning-contract`) via
    `projectDir` mappings in `settings.gradle.kts`, so scripts and CI spell the same
    tasks. The full gate plus the WP-13 journey pass after the move.
+
+3. ~~**Command-center shell**~~ — **resolved** (2026-08-19): `11-strategy-reconciliation.md`
+   reconciles the outcome-led Today/Planner/Inbox/Projects shell with the consultant/hybrid
+   wedge. Depth remains progressively disclosed and paid.
 
 And one standing decision, recorded rather than asked: the three Android-only features from D1
 stay. `git revert a5bc8c1 43dea69` remains available if you would rather carry less Android

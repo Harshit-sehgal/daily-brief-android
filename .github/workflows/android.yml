@@ -44,6 +44,9 @@ jobs:
         run: >-
           ./gradlew --no-daemon --stacktrace --continue
           :planning-core:jvmTest
+          :planning-core:compileCommonMainKotlinMetadata
+          :planning-contract:jvmTest
+          :server:test
           testDebugUnitTest
           lintDebug
           assembleDebug
@@ -61,8 +64,70 @@ jobs:
           path: |
             apps/android/build/outputs/apk/
             apps/android/build/reports/
-            app/build/test-results/
-            planning-core/build/test-results/
+            apps/android/build/test-results/
+            packages/planning-core/build/test-results/
+            packages/planning-contract/build/test-results/
+            services/server/build/test-results/
+
+  mobile-release:
+    name: Expo Android release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install mobile SDK packages
+        run: >-
+          sdkmanager
+          "build-tools;36.0.0"
+          "platforms;android-36"
+          "ndk;27.1.12297006"
+          "cmake;3.22.1"
+
+      - name: Install mobile dependencies
+        run: npm ci --prefix apps/mobile
+
+      - name: Run mobile JavaScript gates
+        working-directory: apps/mobile
+        run: |
+          npm test
+          npm run lint
+          npx tsc --noEmit
+
+      - name: Build and verify mobile release
+        run: ./scripts/verify-mobile-release.sh
+
+      - name: Upload mobile release evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: mobile-android-release-evidence
+          if-no-files-found: warn
+          path: |
+            apps/mobile/android/app/build/outputs/apk/release/*.apk
+            apps/mobile/android/app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml
+            apps/mobile/android/build/reports/
 
   instrumentation:
     name: API ${{ matrix.api-level }} instrumentation
@@ -93,7 +158,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install compile SDK
-        run: sdkmanager "build-tools;36.0.0" "platforms;android-37.1"
+        run: sdkmanager "build-tools;36.0.0" "platforms;android-36" "platforms;android-37.1"
 
       - name: Enable KVM access
         run: |
@@ -120,3 +185,86 @@ jobs:
           path: |
             apps/android/build/outputs/androidTest-results/
             apps/android/build/reports/androidTests/
+
+  rendered-api24:
+    name: API 24 rendered capture
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install compile SDK
+        run: sdkmanager "build-tools;36.0.0" "platforms;android-36" "platforms;android-37.1"
+
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Capture API 24 plates
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 24
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: ./scripts/capture-preview.sh
+
+      - name: Upload API 24 rendered evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-rendered-evidence-api-24
+          if-no-files-found: warn
+          path: |
+            build/preview-plates/
+            build/preview-capture.log
+
+  server-journey:
+    name: Server Docker acceptance journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run the Postgres-backed journey
+        run: |
+          set -o pipefail
+          DAILYBRIEF_GRADLE_ONLINE=1 ./scripts/journey.sh | tee server-journey.log
+
+      - name: Upload server journey evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: server-journey-evidence
+          if-no-files-found: warn
+          path: |
+            server-journey.log
+            build/journey-evidence/

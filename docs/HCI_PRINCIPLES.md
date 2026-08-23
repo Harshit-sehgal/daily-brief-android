@@ -805,8 +805,10 @@ after:
   header shows the identifying label alone and the long form goes to the screen reader, where it
   costs no height.
 
-Items 5 and 6 — Home's greeting, and the Settings accordions — are still open, and item 3 was
-withdrawn above.
+Item 5 — Home's greeting — is closed: the root now gives the primary title to the day and keeps
+the time-of-day greeting as secondary context. Item 6 — the Settings accordion default/open model
+— remains a product-evaluation question rather than an unverified implementation defect. Item 3
+was withdrawn above.
 
 ## 5. What this document does not claim
 

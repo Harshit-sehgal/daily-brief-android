@@ -1,6 +1,6 @@
 # Daily Brief premium product plan
 
-Status: Phase 0, the Phase 1A planning foundation, the Phase 1B Plan-native Board/Schedule-map cutover, the Phase 2 direct-manipulation slice, and the Phase 3 Plan Health/capacity slice are locally verified. Saved-view depth, auto-plan and scenarios, change digest, weekly review, and the wider visual/device matrix remain open.
+Status: The implementation slices through Phase 4 are locally verified in the current tree: Plan-native Board/Schedule-map, safe direct manipulation, Plan Health/capacity, saved-view depth, explainable auto-plan and scenarios, change digest, weekly review, baselines, portfolio rollups, and timestamped exports/print. The wider visual/device, provider, accessibility, iOS, and usability evidence remains open and is tracked separately from implementation.
 
 ## Product decision
 
@@ -16,7 +16,7 @@ Settings is global but secondary. Search is global and high-frequency. They ther
 
 ## Signature interaction: the time spine
 
-The distinctive element is a continuous time spine rather than another decorative card treatment. It begins as the selected date in Calendar, becomes the live-now marker in Timeline, and extends through Plan blocks, fixed-commitment outlines, date ticks and today shading in Gantt. Phase 2 adds dependency paths and safe manipulation to the same spine. Switching views preserves the same date whenever that is meaningful.
+The distinctive element is a continuous time spine rather than another decorative card treatment. It begins as the selected date in Calendar, becomes the live-now marker in Timeline, and extends through Plan blocks, fixed-commitment outlines, date ticks and today shading in Gantt. Dependency paths, overview navigation, and safe manipulation use the same spine. Switching views preserves the same date whenever that is meaningful.
 
 The existing warm paper, ink, terracotta, teal and deadline palette remains. Distinctiveness should come from structure, legible information density and an instrument-like time treatment—not gradients, glass effects or extra containers. The target type system is an accessible interface face such as Atkinson Hyperlegible Next plus a tabular/monospaced utility face such as IBM Plex Mono for times, durations and variance. Font assets and licensing need their own QA before replacing the current system typography.
 
@@ -67,11 +67,11 @@ The same three roots move to a rail. Calendar may place Agenda beside Timeline; 
 Current gestures and Phase 2 targets follow the contract below. Items explicitly marked Phase 2 are design requirements, not shipped behavior; every direct-manipulation operation must gain a visible control and accessibility action before release.
 
 - Swipe left/right in Agenda or Timeline changes the selected day. It must never switch the root view, so date navigation and view navigation cannot conflict.
-- Horizontally pan the Gantt canvas with one finger today. Phase 2 adds pinch scaling around the gesture focus while retaining the 7/30/90-day controls.
-- Tap a solid Plan bar to edit its task; tap an outlined commitment to inspect its calendar event. Phase 2 adds long-press move mode only for Plan bars; synced calendar commitments remain non-draggable because their source owns the time.
-- In Phase 2, dragging a plan bar must show the exact proposed date, working-time effect and dependency impact before commit. Release commits once and leaves Undo visible.
-- Before Phase 2 direct manipulation ships, drag handles, keyboard/accessibility increment actions and date fields must provide equivalent non-gesture paths.
-- Destructive gestures show their action label before commit. Local event deletion retains recoverable Undo; provider-owned deletion remains ownership-aware and restores the row when the provider refuses. Phase 2 plan-item destructive gestures must add confirmation or recoverable Undo before shipping.
+- Horizontally pan the Gantt canvas with one finger; pinch scaling lands on the same 7/30/90-day ranges and the overview strip provides a visible Today jump.
+- Tap a solid Plan bar to edit its task; tap an outlined commitment to inspect its calendar event. Move mode is available only for Plan bars; synced calendar commitments remain non-draggable because their source owns the time.
+- Moving a plan bar shows the exact proposed date, working-time effect and dependency impact before commit. Release commits once and leaves Undo visible.
+- Drag handles, keyboard/accessibility increment actions and date fields provide equivalent non-gesture paths.
+- Destructive gestures show their action label before commit. Local event deletion retains recoverable Undo; provider-owned deletion remains ownership-aware and restores the row when the provider refuses. Plan-item destructive gestures use confirmation or recoverable Undo.
 
 ## Premium capability map
 
@@ -104,7 +104,7 @@ Market anchors for this boundary include [Asana’s workload/capacity planning](
 - portfolio rollups across boards
 - print/PDF, image and CSV export with a generated-at timestamp
 
-The current slice renders board-scoped `PlanItem`/`PlanBlock` relations, split-work lanes, milestones, progress, unscheduled/off-range states, partial-day working shading, typed dependencies with a non-drag ledger, critical-path highlighting and a visible add-block form. Calendar commitments use a separate outlined row type and cannot be moved as Plan work. App-owned bars are now draggable in an explicit move mode where only Apply writes; drawn dependency paths, rendered slack, baselines, portfolio rollups and export remain later phases.
+The current slice renders board-scoped `PlanItem`/`PlanBlock` relations, split-work lanes, milestones, progress, unscheduled/off-range states, partial-day working shading, typed dependencies with a non-drag ledger, critical-path highlighting, drawn dependency paths, slack bands, baselines, portfolio rollups, and a visible add-block form. Calendar commitments use a separate outlined row type and cannot be moved as Plan work. App-owned bars are draggable only in an explicit move mode where only Apply writes; PDF, PNG, CSV, and print paths disclose their generated range/source metadata.
 
 ### 2. Fast timeline access
 
@@ -269,7 +269,7 @@ Exit for this slice: a plan item can exist without masquerading as a calendar ev
 - [x] a visible Select action owns multi-select; long-press remains reserved for move mode
 - [x] conflict, slack and critical-path calculations with pure tests
 - [x] Home edit mode for add/remove/reorder with a visible Done action
-- [ ] pinch zoom, minimap, a Timeline/minimap Today jump, and dependency creation on the canvas
+- [x] pinch zoom, minimap/overview strip, a Timeline/minimap Today jump, and dependency creation on the canvas
 
 Exit: gesture and button paths produce the same validated mutation; interrupted or invalid gestures make no data change. The first device run of this phase failed exactly this exit criterion — the panel and handles covered the bar, so the gesture path reached no command at all — and passes it now.
 
@@ -279,23 +279,23 @@ Exit: gesture and button paths produce the same validated mutation; interrupted 
 - [x] capacity across differing per-task schedules, unioned on the absolute time line so overlapping schedules never double-count an hour
 - [x] split effort into `PlanBlock` chunks and lock/freeze controls
 - [x] capacity/workload view, overload explanations and repair suggestions
-- [ ] explainable scheduling engine that proposes placements, scenario comparison, change digest and weekly review
+- [x] explainable scheduling engine that proposes placements, scenario comparison, change digest and weekly review
 
 Exit: suggestions are deterministic for the same inputs, never write before Apply, state which constraints moved each item, and preserve locked/source-owned time.
 
-### Phase 4 — portfolio, history and export
+### Phase 4 — portfolio, history and export (locally implemented)
 
-- cross-board portfolio Gantt and rollups
-- baselines, change log, restore points and audit UI
-- baseline-variance calculations, complete timestamped PDF/image exports and print layouts
-- retain a smaller machine-readable core export before this polished portfolio layer
-- widgets, shortcuts, notification actions and encrypted backup/restore
+- [x] cross-board portfolio Gantt and rollups
+- [x] baselines, change log, restore points and audit UI
+- [x] baseline-variance calculations, complete timestamped PDF/image exports and print layouts
+- [x] retain a smaller machine-readable core export before this polished portfolio layer
+- [x] widgets, shortcuts, notification actions and encrypted backup/restore
 
 Exit: exported and restored plans disclose included ranges and sources; portfolio calculations are covered by scale and partial-data tests.
 
 ## Quality gates for every phase
 
-Pending proof before visual/release sign-off: Plan and Task editor at 200% font size; landscape and tablet Plan rendering; rendered Plan error states; API 24 and API 37.1/16 KB execution; real device-calendar ownership behavior; and historical v3/v4 migration fixtures. The current phone reviews and API 36 matrix do not establish those environments.
+Pending proof before visual/release sign-off: Plan and Task editor at 200% font size; landscape and tablet Plan rendering; rendered Plan error states; API 37.1/16 KB execution; real device-calendar ownership behavior; historical v3/v4 migration fixtures; and the CI artifact run for the newly authored API24 rendered job. The local API24 rendered capture is complete, but the current phone reviews and API36 matrix do not establish those other environments.
 
 - 48 dp minimum targets, screen-reader labels and no gesture-only action
 - 200% font-size and phone/tablet/landscape layout checks

@@ -49,6 +49,10 @@ scripts/verify.sh             # the whole CI gate: tests, both lints, both APKs,
 scripts/verify.sh --journey   # the gate plus the WP-13 acceptance (needs docker)
 scripts/emulator.sh           # boot + unlock + wake an emulator (~10s from a snapshot)
 scripts/verify.sh --device    # the gate plus instrumentation on that emulator
+scripts/web-journey.sh        # web acceptance: docker Postgres, server, next build, a rendered
+                              # browser run, and screenshots of both surfaces into
+                              # build/web-journey-evidence. Set DAILYBRIEF_WEB_PORT /
+                              # DAILYBRIEF_WEB_API_PORT / DAILYBRIEF_WEB_DB_PORT if those are taken.
 scripts/publish-engine-local.sh  # publish planning-core/contract AARs to mavenLocal; --mobile for the mobile build (compileSdk 36)
 scripts/smoke-release.sh      # install and launch the *minified* build — catches R8 damage
 scripts/capture-preview.sh    # recapture preview.html's plates from the running app
@@ -108,6 +112,25 @@ for anything new. Date arithmetic especially: it is where midnight, DST and
 
 ## Invariants worth knowing
 
+- **One design system, mirrored — never re-decided.** `ui/theme/Color.kt` is the source of
+  truth for every surface: unbleached paper over warm charcoal, terracotta the default of six
+  accents in three complementary pairs, brick/honey/sage for status. `apps/web/app/tokens.css`
+  and `apps/mobile/src/constants/palette.ts` are *mirrors* of it, and
+  `apps/web/lib/tokens.test.ts` and `apps/mobile/src/constants/palette.test.ts` parse the Kotlin
+  and fail on drift — so change Color.kt first, then mirror. The web app used to run its own
+  green-on-cream palette and the Expo app stock blue on white; the three read as three products.
+  Two rules carry the meaning and no surface may borrow them for anything else: a solid accent
+  bar is work you own and the planner may move it, a dashed honey outline is a commitment it may
+  not, and deadline red means a clash or an overrun and always appears with words as well as
+  colour. `palette.ts` imports nothing on purpose — that is what lets the drift test load it
+  without react-native. `apps/mobile/src/constants/ui.ts` holds the shared shapes (card, section
+  rule, row, ownership marks, meter, controls) so four screens cannot each invent a card, and
+  `ui-consistency.test.ts` is the mobile answer to `UiConsistencyTest`: it reads the source and
+  fails on a hex literal, a fifth radius, `opacity` standing in for muted ink, or a control under
+  48dp. All three checks were proven by planting a violation. They earn their keep because the
+  API 36 emulator cannot present this app's window, so no rendered test can catch this — the
+  mobile timeline had drawn calendar commitments with the *accent*, the mark that means "yours
+  and movable", and nothing failed.
 - **Every module compiles against SDK 37.1, never bare 37.** The pinned SDK has
   `platforms;android-37.1` and nothing else, so `compileSdk = 37` asks for 37.0 and sends
   Gradle to the network for a platform that is not there. Because the download reports no

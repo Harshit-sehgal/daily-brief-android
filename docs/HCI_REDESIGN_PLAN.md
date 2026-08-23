@@ -1,6 +1,6 @@
 # Daily Brief HCI redesign and delivery plan
 
-Status: adaptive and direct-manipulation tranche reconciled against a green device gate, 2026-08-11 (Asia/Kolkata)
+Status: implementation and adaptive/direct-manipulation tranches reconciled against the current green device gate, 2026-08-19 (Asia/Kolkata)
 
 This document turns the product direction in [PREMIUM_PRODUCT_PLAN.md](PREMIUM_PRODUCT_PLAN.md) into an HCI acceptance contract and dependency-ordered delivery plan. The premium boundary, three-root information architecture, ownership rules, and continuous time-spine concept remain unchanged.
 
@@ -25,7 +25,7 @@ The best organization is:
 
 Do not add Calendar, Timeline, Board, Gantt, Search, or Settings as additional root tabs. Do not add root-changing swipe gestures. Do not make drag, swipe, pinch, color, or an unlabeled icon the only way to understand or perform an action.
 
-The verified current source contains the default and alternate work-schedule lifecycle, per-task assignment, saved-view, import-disclosure, multi-schedule Plan Health, dependency, critical-path, Home Edit, and mutation/Undo journeys, plus this tranche's adaptive Plan ledger, atomic Board batch move with a drag accelerator, Timeline pre-commit preview with Move-to-date and keyboard equivalents, and Gantt move/resize by field, increment, keyboard, and non-overlapping 48 dp targets. The next product tranche is Saved View depth: filters, grouping, sort, columns, collapse, and anchor state, then rename/update/pin/duplicate lifecycle. Dependency paths, rendered slack, pinch, minimap, weekly review, auto-plan, baselines, and export remain behind that work and behind the external evidence in Section 8D.
+The verified current source contains the default and alternate work-schedule lifecycle, per-task assignment, full saved-view depth and lifecycle, import-disclosure, multi-schedule Plan Health, dependency, critical-path, Home Edit, change digest, weekly review, explainable auto-plan/scenarios, baselines, portfolio rollups, timestamped exports/print, and mutation/Undo journeys. It also contains the adaptive Plan ledger, atomic Board batch move with a drag accelerator, Timeline pre-commit preview with Move-to-date and keyboard equivalents, and Gantt move/resize by field, increment, keyboard, pinch, overview strip, and non-overlapping 48 dp targets. Section 8D remains the separate external evidence boundary; it is not an implementation backlog.
 
 ## 1. Product job, audience, and success
 
@@ -322,7 +322,9 @@ The following integrated paths are observable in the current tree and covered by
 
 ### B. Automated/device evidence passed; broader proof still pending
 
-The recorded tree passed diff hygiene, JVM and Android-test compilation, 378 JVM tests, 128 full instrumentation tests, both lints, debug/test/release assembly, R8 analysis, and a minified-release smoke. That evidence is real but bounded:
+The current tree passed diff hygiene, JVM and Android-test compilation, the named suites of
+272 planning-core, 26 contract, 57 server, and 184 app unit tests, 134 full instrumentation
+tests, both lints, debug/test/release assembly, and R8 analysis. That evidence is real but bounded:
 
 - the instrumentation suite covers implemented recreation/journal journeys, but not every process-death moment in the acceptance contract;
 - automated semantics do not substitute for TalkBack, Switch Access, Voice Access, keyboard, or usability proof;
@@ -331,7 +333,7 @@ The recorded tree passed diff hygiene, JVM and Android-test compilation, 378 JVM
 - Saved Views now store the outline order, grouping, visible Board columns, hide-done filter, and folded branches as well as the surface and range;
 - dependency paths, rendered slack, pinch zoom, the overview strip, weekly review, auto-plan, scenarios, baselines with variance and restore, portfolio rollups, and export are built and each carries a named test; none of them has been watched in a real week by a person who did not build it;
 - multi-schedule capacity is proved by unit and device tests over constructed schedules, not by a person planning a real week across two of them;
-- API 37.1/16 KB, physical provider behavior, full manual accessibility, and user studies remain separate evidence requirements; API 24 is covered by the CI instrumentation matrix but not by the recorded local run.
+- API 37.1/16 KB, physical provider behavior, full manual accessibility, and user studies remain separate evidence requirements; API 24 now has a local rendered capture in addition to the CI instrumentation matrix.
 
 ### C. Repository-contained remaining work
 
@@ -344,8 +346,19 @@ that replaced them are now closed too:
 
 What is still repository-local and open:
 
-1. The rendered empty, loading, permission, provider-refusal, conflict and offline states of the *older* screens, which predate this work and have never been inspected as a matrix.
-2. A rendered inspection at API 24 to match the CI instrumentation run there.
+1. ~~The rendered empty, loading, permission, provider-refusal, conflict and offline states of the
+   older screens.~~ The capture harness now covers the Android empty, permission, provider-owned,
+   conflict, baseline, scenario, and wide-screen states in 25 deterministic plates. An Android
+   transport-offline plate is not applicable because the local calendar path is provider-backed;
+   mobile cache serialization, key rules, web-storage reload, modeled native-adapter behavior,
+   corruption cleanup, atomic replacement, and failed-write posture are covered by the three
+   focused mobile cache test files; native file persistence and offline/restart behavior remain
+   device evidence.
+2. ~~A rendered inspection at API 24 to match the CI instrumentation run there.~~ The local
+   `dailybrief_api24_render` AVD produced 25 phone and wide-state plates through
+   `scripts/capture-preview.sh`; representative phone, wide Calendar, and wide Plan artifacts
+   were inspected. API 24 uses the capture harness's bounded `screencap -p` fallback because its
+   framework lacks the PixelCopy overload used by Compose.
 
 Closed since the last revision, each with a named test: saved-view depth, lifecycle, grouping and
 column presets; Outline fold/filter/sort and multi-select; the exact width-boundary matrix;
@@ -361,7 +374,7 @@ scenario comparison; baselines with variance and restore (schema v8); and portfo
 These cannot be honestly completed by source inspection alone:
 
 - rendered phone portrait, phone landscape, foldable, tablet, large tablet, desktop/Chromebook, and split-screen review;
-- API 37.1 with 16 KB page-size execution; the recorded local device run covered API 36, and CI runs the same suite on API 24;
+- API 37.1 with 16 KB page-size execution; the recorded local device run covered API 36, and API 24 now has local rendered evidence; CI still runs the same suite on API 24;
 - physical-device calendar read/write behavior for supported providers and read-only/refused calendars;
 - TalkBack linear navigation and action menu;
 - Switch Access scanning and selection;
@@ -535,12 +548,13 @@ No phase is complete merely because its data class, mock, pure function, or test
 
 Dependencies: none.
 
-Current source position: **automated and API 36 device baseline passed; full visual/manual matrix pending**. Section 12 records 378 JVM tests, 128 full instrumentation tests, both lints, all three APK assemblies, R8 analysis, release smoke, artifact sizes, and the limited inspected screen set.
+Current source position: **automated and API 36 device baseline passed; full visual/manual matrix pending**. The current named test suites are 272 planning-core, 26 contract, 57 server, and 184 app unit tests, with 134/134 API 36 instrumentation tests; the historical ledger below remains separate from this current refresh.
 
 Work:
 
 1. Preserve the recorded source inventory and exact Section 12 command/count/artifact ledger.
-2. Add API 37.1/16 KB execution without reusing API 36 as its evidence, and a rendered inspection at API 24 to go with the CI run there.
+2. Add API 37.1/16 KB execution without reusing API 36 as its evidence; API 24 rendered
+   inspection is now recorded locally, while the CI artifact remains a separate workflow gate.
 3. Complete captures for editors and empty/loading/error/permission/refusal/Undo states at every required viewport.
 4. Run the manual accessibility and task-usability matrix separately from automated gates.
 
@@ -721,7 +735,31 @@ Exit:
 
 ### Current root-owned verification ledger
 
-Recorded on 2026-08-12 after the analysis tranche — baselines, portfolio rollups, scenario comparison, and grouping/column presets. `PASS` applies only to the named command or inspected state. The remaining rows are deliberately still pending.
+Refreshed on 2026-08-20. `PASS` applies only to the named command or inspected state; the
+remaining rows are deliberately still pending.
+
+| Status | Evidence layer | Current command or review |
+| --- | --- | --- |
+| **PASS** | Diff hygiene | `git diff --check` |
+| **PASS** | Current named JVM/app suites | planning-core 272, contract 26, server 57, app unit 184; zero failures |
+| **PASS** | Full API 36 device gate | `scripts/verify.sh --device` — 134/134 instrumentation tests; both lints, APK assemblies, and R8 analysis |
+| **PASS** | Current server acceptance | `scripts/journey.sh` — health/readiness/CORS plus signup through push, 4.237 seconds in the latest local run |
+| **PASS** | Server operational-route tests | `:server:test` — 57/57, including provider failure policy, liveness, fail-closed readiness, and absent-Google OAuth configuration |
+| **PASS** | Mobile cache and workspace-planning rules | `apps/mobile/npm test` — 18/18 focused platform-neutral, web-adapter, modeled native-adapter persistence/key, and multi-project planning-contract tests |
+| **PASS** | Mobile production API policy | `apps/mobile/npm test` — 5/5 `resolveApiBase` cases; production export without `EXPO_PUBLIC_API_BASE` refuses, and a configured production origin exports successfully |
+| **PASS — local API36 release slice** | Mobile rendered/restart/offline journey | Release APK exits the splash, completes fixture signup, renders Today, survives force-stop/relaunch with the saved session, and after the fixture server is stopped renders Today with the explicit offline cached-day label; physical storage-failure coverage remains open |
+| **PASS — generated-project hardening** | Mobile Expo prebuild reproducibility | `npx expo prebuild --platform android --no-install` now re-applies the Kotlin 2.3.20, compileSdk 36, `mavenLocal()`, and emulator network-policy settings through the tracked config plugin; a generated `:app:assembleRelease` passed locally |
+| **PASS — local release verifier** | Mobile production/release packaging | `scripts/verify-mobile-release.sh` sets `NODE_ENV=production` with an explicit emulator API origin, regenerates Expo Android, publishes the local engine AARs, bundles JS, asserts the origin is embedded, assembles all four ABIs, and verifies the merged network manifest; APK size is 105,463,757 bytes |
+| **PASS** | Mobile/web static checks | mobile lint, TypeScript, Expo web export/dependency check, web lint, web TypeScript, web Vitest (4/4), and `apps/web/npm run build` |
+| **PASS — packaging only** | 16 KB APK alignment | `scripts/smoke-release.sh` now aligns and verifies the install artifact with `zipalign -P 16`; this does not prove 16 KB runtime execution |
+| **PENDING — external/device** | Android coverage tail | API 24 rendered capture is complete and representative plates were inspected; API 37.1/16 KB app execution remains open because the local guest reports SDK 37.1 and `PAGESIZE=16384` but cannot complete user-0 boot (`BOOTING`), lacks the `storage` service, and previously crashed `surfaceflinger` under SwiftShader before reliable app execution |
+| **PASS — scoped** | Mobile dependency maintenance | `npm audit --omit=dev` has no moderate findings after the `xcode` → `uuid@11.1.1` override; 8 high upstream Expo/React Native/Metro findings remain pending a planned framework upgrade |
+| **PENDING — external/device** | Native mobile cache runtime tail | physical/reliable-device restart plus direct native-file proof for corruption, workspace isolation, and failed-storage-write behavior; the local API36 release slice now proves session restart and cached Today fallback |
+| **PENDING — CI/external** | Newly authored evidence workflows | The web lint/typecheck/Vitest/build workflow is now locally validated; the API 24 rendered-capture workflow, Postgres journey, macOS PlannerCore/Swift import workflow, Expo mobile-release workflow, and this web workflow still require hosted execution and artifact inspection. Local plates and release verifiers do not substitute for hosted evidence |
+
+### Historical root-owned verification ledger
+
+Recorded on 2026-08-12 after the analysis tranche — baselines, portfolio rollups, scenario comparison, and grouping/column presets. The older counts below are retained as chronology, not current evidence. `PASS` applies only to the named command or inspected state. The remaining rows are deliberately still pending.
 
 | Status | Evidence layer | Command or review |
 | --- | --- | --- |
@@ -749,7 +787,7 @@ Recorded on 2026-08-12 after the analysis tranche — baselines, portfolio rollu
 | **FAILED, then fixed** | Real-device report | A phone showed what one emulator size hid: every phone is `Compact`, so nothing adapted between a 308 dp screen and a 448 dp one. At 360 dp a control chip rendered one letter per line, the health chip wrapped to three lines, Home's bespoke header wrapped to four, and the Schedule map drew its axis and no bars. Fixed with `FlowRow`, one-line status chips, the shared header treatment, and measured-size tokens |
 | **PASS** | Four phone geometries | The capture harness walks every screen at 360×640, 411×914, 448×997 and 308×685 dp; two of those could not complete before |
 | **PASS — limited** | Rendered inspection | `scripts/capture-preview.sh` — portrait Home, Agenda, Timeline, Week, Outline, Board, Schedule map, Gantt move mode, the baseline comparison, Compare approaches, working schedules, Settings, and two dark screens, plus Expanded-width Calendar and Plan, recaptured into `preview.html` |
-| **PENDING** | API/device completion | API 37.1/16 KB execution, physical provider behavior, foldable/hinge, large tablet, desktop/Chromebook, and split-screen. API 24 runs in the CI matrix; the *rendered* inspection at that level is still missing |
+| **PENDING** | API/device completion | API 37.1/16 KB execution, physical provider behavior, foldable/hinge, large tablet, desktop/Chromebook, and split-screen. API 24 instrumentation plus local rendered capture now exist; the API24 CI artifact and the remaining form-factor evidence still require their respective external runs/inspection |
 | **PENDING** | Exact adaptive/state matrix | 599/600, 839/840, 1199/1200, and 1599/1600 dp transitions; 200% text; all loading/empty/error/permission/refusal/Undo states; focus and draft preservation |
 | **PENDING — manual** | Accessibility and input | TalkBack, Switch Access, Voice Access, keyboard, mouse/trackpad, stylus, dark/high-contrast, reduced-motion, RTL, and long-localized-text journeys |
 | **PENDING — manual** | Task usability | T1–T11 task sessions and comprehension findings; no source or automated test can mark this passed |
@@ -773,7 +811,7 @@ For every gate, record four separate evidence layers:
 | Rendered/device matrix | layout, clipping, focus, touch bounds, animations, specific API/device behavior | learnability or correct mental model for real users |
 | Task/user proof | whether people can understand and complete T1–T11 | untested technical edge cases |
 
-A gate may be “repository-complete, external proof pending,” but not “complete” when required external evidence is absent. The green full device suite is not full visual sign-off. The inspected phone and one Expanded landscape state are not tablet/desktop or boundary proof. The API 36 emulator pass is not API 24 or API 37.1/16 KB proof. Automated semantics are not a TalkBack/Switch/Voice pass. Passing WorkingCalendar and schedule journeys do not prove real-user comprehension.
+A gate may be “repository-complete, external proof pending,” but not “complete” when required external evidence is absent. The green full device suite is not full visual sign-off. The inspected API 24/API 36 phone plates and Expanded states are not tablet/desktop or boundary proof. Neither API 36 nor API 24 proves API 37.1/16 KB execution. Automated semantics are not a TalkBack/Switch/Voice pass. Passing WorkingCalendar and schedule journeys do not prove real-user comprehension.
 
 ## 13. Final product decision
 

@@ -1,22 +1,19 @@
 # KMP portability audit
 
 Current state of `:planning-core`: which engine files run in `commonMain`, which still need
-JVM APIs, why, and what unblocks what. Kept current as porting proceeds — last updated with
-the Phase 2 / Phase 5 mechanical work (2026-08-17).
+JVM APIs, why, and what unblocks what. Kept current as porting proceeds — updated after the
+Stage 1 completion and mobile target work (2026-08-19).
 
 ## Method
 
 Each `core/` file is classified by its own JVM imports plus what it is blocked through,
 transitively. Line counts are measured (`wc -l`) on the current tree, not estimates.
 
-**A note on how purity is enforced.** `commonMain` purity is enforced by
-`CommonMainPurityTest` (jvmTest), which reads the sources and fails on a JVM import or
-`Math.` call. It is *not* enforced by the compiler: `compileCommonMainKotlinMetadata` is
-SKIPPED, because Kotlin only produces a metadata compilation once some target needs one, and
-`jvm` plus `androidTarget` are both JVM-family — a file importing `java.util.Calendar` in
-`commonMain` compiles without complaint (confirmed by planting one). The check fails *open*,
-which is worse than absent, which is why the test exists. Adding a non-JVM target (Kotlin/Native
-is roughly a gigabyte, and not in the pinned toolchain) would hand the job back to the compiler.
+**A note on how purity is enforced.** `linuxX64` is a non-JVM metadata consumer, so
+`compileCommonMainKotlinMetadata` now runs and the compiler rejects JVM APIs in `commonMain`.
+`CommonMainPurityTest` remains as a faster duplicate with a better diagnostic and catches source
+patterns beyond imports. The iOS targets configure on Linux but their framework output still
+requires macOS.
 
 ## Stage 1 is complete — the engine is portable
 
@@ -110,41 +107,28 @@ Both were used to produce earlier versions of this table, and each produced a wr
 survived until a file was actually moved. **Move the file, compile, read the error.** The tables
 here are now confirmed that way.
 
-## Classification
+## Classification and remaining portability boundary
 
 - 🟢 **Cleared in this pass.** `DependencyAnalysis` (guarded arithmetic) and
   `CriticalPathEngine` (`MinStringHeap` replacing `PriorityQueue` — determinism preserved
   because the heap order is a lexicographic min-heap of strings, as before). Both were moved
   without changing behaviour; every existing test stayed green.
-- 🟡 **Trivial — arithmetic only, still pending.** `Math.floorMod` → `a.mod(b)` in `AutoPlan`
-  and `PlanBlockPreview`, and `Math.subtractExact` in `PlanGanttLayout`. Nothing else blocks
-  these files except the date-time cluster.
-- 🟠 **Mechanical but real.** `GanttLayout`'s `BigDecimal`/`BigInteger` keep positions stable
-  near `Long` limits. `ScheduleAnalysis.signature` needs a common SHA-256 (or the brief cache
-  key changes, which invalidates every cached brief once).
-- 🔴 **A genuine project — the date-time cluster.** `WorkingCalendar`, `ScheduleAnalysis`,
-  `IsoDates`, `TimelineLayout`, `DayPulse`, `GanttLayout` — 1,291 lines, carrying a behavioural
-  decision (the DST policy below) rather than a mechanical substitution.
+- 🟢 **Arithmetic and geometry substitutions are cleared.** The common implementations preserve
+  the pinned overflow and layout behavior.
+- 🟢 **The date-time cluster is cleared.** `WorkingCalendar`, `ScheduleAnalysis`, `IsoDates`,
+  `TimelineLayout`, `DayPulse`, and `GanttLayout` run in `commonMain`; the named DST policy is
+  covered by the original tests.
 
-**Why the cluster is blocked right now:** the pinned offline toolchain has no
-`kotlinx-datetime` (checked — it is not in the Gradle cache), and kotlinx has no time-zone
-engine anyway (that is the `kotlinx-datetime` + IANA tzdb story). Porting the cluster means
-either adding a time library to the pinned toolchain or writing a small zone-offset engine in
-`commonMain` — the latter is its own project, and the former is a toolchain decision for the
-machine owner, not an offline code change.
+**Current boundary:** no portability blocker remains in the engine core. The remaining JVM
+actual is intentional (`LegacyNameKeys` uses platform normalization to preserve stored IDs), and
+the remaining iOS work is framework compilation and Swift integration on macOS.
 
 ## Leverage
 
-Three files are now *root* blockers: `WorkingCalendar`, `ScheduleAnalysis`, `IsoDates`.
-Clearing `WorkingCalendar` unblocks `AutoPlan`, `GanttInteraction`, `PlanBlockPreview`,
-`MultiSchedulePlanHealth`, `PlanHealth` and `PlanScenarios` — 1,705 lines downstream. Clearing
-`ScheduleAnalysis` unblocks `GanttLayout`, `TimelineLayout`, `DayPulse`, `GanttZoom` and
-`PlanGanttLayout` — 792 lines.
+There are no remaining root blockers in the portable engine. The dependency graph is retained
+above as historical leverage evidence; `core/` is now fully in `commonMain`.
 
-**Fix the date-time cluster plus the arithmetic and BigDecimal substitutions, and essentially
-the whole engine becomes `commonMain`.**
-
-## The DST decision that has to be made deliberately
+## The DST policy retained deliberately
 
 `WorkingCalendarTest` pins two behaviours that come from `java.util.Calendar` rather than from
 anything the product chose:
@@ -155,9 +139,9 @@ anything the product chose:
 `kotlinx-datetime` and `java.time` resolve fall-back to the **earlier** occurrence by default.
 Porting naively flips a tested contract.
 
-**Recommendation:** implement the policy as named code — an explicit
-`AmbiguousLocalTime.LATER_OFFSET` — preserving today's behaviour and leaving the existing tests
-untouched. The choice becomes visible and reviewable rather than an inherited library default.
+**Implemented:** the policy is named in code as `AmbiguousLocalTime.LATER_OFFSET`, preserving
+today's behavior; the existing tests remain the proof. The choice is visible and reviewable
+rather than an inherited library default.
 This matters more on a server than on a phone, because the server resolves many time zones at
 once and a silent flip would move real working windows for real users.
 
@@ -225,5 +209,5 @@ audit:
   `kotlinx-datetime`; the six Gantt geometry files, `GanttInteraction`, `WorkingCalendarMapper`
   and the three journal codecs followed. `LegacyNameKeys` split `expect`/`actual` behind a
   fixture test capturing the shipped JVM outputs. `linuxX64` added, making the purity guard
-  compiler-enforced. Engine core **100%**, whole module **99%**. 243 engine tests, 179 app tests,
-  zero failures.
+  compiler-enforced. Engine core **100%**, whole module **99.9%**. The current baseline is 272
+  engine tests, 26 contract tests, 52 server tests, and 184 app unit tests, zero failures.

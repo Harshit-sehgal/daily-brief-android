@@ -30,10 +30,10 @@ scripts/verify.sh --device    # ...plus instrumentation on the `dailybrief` AVD
 
 `scripts/verify.sh` is the same task list CI runs. **A change is not done until it is green.**
 
-Current baseline, so you can tell whether you broke something: **243 engine tests / 34 suites,
-179 app tests / 40 suites, zero failures.** The engine core is **100% portable** — `core/` has no
-files left in `jvmShared`, and the whole module is **99%** (11 lines remain: the JVM `actual` for
-`LegacyNameKeys`).
+Current baseline, so you can tell whether you broke something: **272 engine tests, 26 contract
+tests, 57 server tests, and 184 app unit tests, zero failures** in the latest `scripts/verify.sh
+--fast` run. The engine core is **100% portable** — `core/` has no files left in `jvmShared`, and
+the whole module is **99.9%** (9 lines remain: the JVM actual for `LegacyNameKeys`).
 
 **Stage 1 is complete.** WP-1 through WP-9 are done. Start at WP-10 unless a package below says
 otherwise.
@@ -66,7 +66,7 @@ otherwise.
 6. **`minSdk` is 24 and the engine's dates are `java.time`-backed.** `:app` therefore has core
    library desugaring enabled. Do not remove it while `minSdk < 26`.
 7. **Some tests read the source tree at runtime.** `CommonMainPurityTest` and
-   `UiConsistencyTest` do. Their Gradle inputs are declared in `packages/packages/planning-core/build.gradle.kts`;
+   `UiConsistencyTest` do. Their Gradle inputs are declared in `packages/planning-core/build.gradle.kts`;
    if you add another such test, declare its inputs or it will silently report stale results.
 
 ### Rules that are not negotiable
@@ -482,8 +482,9 @@ manually against a real Google account (runbook).
   configuration, not shape (documented deviation; KMS is a deployment concern).
 - **Reconciliation worker** — per-tenant advisory lock, provider fetch *outside* the lock
   (invariant 1), `SyncMergePolicy` applied, merged rows written. WP-14's sync worker is
-  consumed by this slice; what remains there is hardening and ops (retries, backoff, metrics,
-  partial failure handling).
+  consumed by this slice. The hardening listed in the original slice note (retries, backoff,
+  sync-ledger failure records, token refresh, and partial-failure handling) shipped on
+  2026-08-19; production metrics and provider operations remain deployment evidence.
 - **Planner endpoint** — `POST /v1/plan`: wire request → engine → wire result. Determinism
   cache by request hash + `data_version` (04). **Apply** — `POST /v1/plan/{id}/apply`: the
   proposal becomes blocks through the journal (one `AuditEntry`, compare-and-set undo per

@@ -8,6 +8,17 @@ stage.
 
 ## What you need
 
+Before opening the browser, run the non-destructive deployment probe against the same public API:
+
+```bash
+API_BASE=https://api.example.com \
+WEB_ORIGIN=https://app.example.com \
+scripts/production-probe.sh
+```
+
+It checks liveness, database readiness, and the exact browser CORS origin. It does not authenticate
+or mutate data, and it does not replace the real-account journey below.
+
 - The server running in **real mode** (no `FIXTURE_PROVIDER`):
 
   ```bash
@@ -16,7 +27,7 @@ stage.
   SESSION_SECRET=<long random string> \
   ENVELOPE_KEY_HEX=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n') \
   GOOGLE_CLIENT_ID=<oauth client id> GOOGLE_CLIENT_SECRET=<oauth client secret> \
-  server/build/install/server/bin/server   # after :server:installDist
+  services/server/build/install/server/bin/server   # after ./gradlew :server:installDist
   ```
 
 - A Google Cloud OAuth client of type "Web application" with the redirect URI
@@ -26,7 +37,7 @@ stage.
 - The web client (fixture off, real mode):
 
   ```bash
-  cd web && npm run dev        # http://localhost:3000, NEXT_PUBLIC_FIXTURE=0
+  cd apps/web && NEXT_PUBLIC_FIXTURE=0 npm run dev        # http://localhost:3000
   ```
 
 - A test calendar with a handful of events over the next week, and your test Google
@@ -56,13 +67,21 @@ journey.
   ~1 hour) is refreshed once through the OAuth endpoint, the fresh pair is stored back in the
   envelope, and the fetch is retried — a long demo no longer needs a fresh sign-in. A refresh
   that is itself refused (revoked consent) still fails the sync; that is the honest answer.
+- **OAuth callback hardening is now shipped.** `/v1/auth/start` accepts only the configured web
+  callback or the mobile callback, returns a ten-minute signed state bound to that redirect, and
+  `/v1/auth/callback` refuses missing, altered, expired, or mismatched state. The same signed
+  nonce derives an S256 PKCE verifier, so the mobile/public-client leg does not send a verifier
+  through the browser or persist another secret. The real-account run must still prove the
+  configured Google client and consent flow.
 - **The consent screen is the one thing outside the server's control** — it is Google's
   page. If the client is in "testing" state, the first sign-in adds a test user step.
   The 20 s budget assumes consent was already granted once.
 - **Reconcile fetches the next 14 days** (the planner's range); events with no
   `dateTime` (all-day) are imported with the day's start/end, never inferred.
-- The planner's working window is Mon–Fri 09:00–17:00 UTC, as the web client sends it;
-  the proposal reasons come straight from the engine (`AutoPlan`), not from the server.
+- The planner's working window is read from the workspace's server-authoritative planning settings;
+  the fixture journey round-trips the saved timezone/windows before planning. The proposal reasons
+  still come straight from the engine (`AutoPlan`), not from the server. A real-account run must
+  verify the configured user's working hours and timezone across the Google event sync.
 
 ## If something breaks
 

@@ -1,0 +1,96 @@
+name: Web verification
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Web checks and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: apps/web
+
+      - name: Run web lint
+        run: npm run lint
+        working-directory: apps/web
+
+      - name: Run web typecheck
+        run: npm run typecheck
+        working-directory: apps/web
+
+      - name: Run web tests
+        run: npm test
+        working-directory: apps/web
+
+      - name: Build in real-account mode
+        run: npm run build
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_FIXTURE: "0"
+          NEXT_PUBLIC_API_BASE: https://api.example.invalid
+
+  rendered-journey:
+    name: Rendered web command-center journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: apps/web
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      - name: Run rendered fixture journey
+        run: DAILYBRIEF_GRADLE_ONLINE=1 ./scripts/web-journey.sh
+
+      - name: Upload rendered journey evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: web-rendered-journey-evidence
+          if-no-files-found: warn
+          path: build/web-journey-evidence/

@@ -307,6 +307,18 @@ API 37.1/16 KB requires a fresh recorded run before it is current evidence. When
 both devices are connected, prefix the install and Gradle commands with the intended
 `adb -s <serial>` or `ANDROID_SERIAL=<serial>` selection.
 
+For a fail-closed release proof on a healthy API 37.1 / 16 KB device, use the checked-in
+verifier. It validates the SDK, page size, unlocked user, package/activity services, release
+launch, and optionally the full instrumentation suite:
+
+```bash
+ANDROID_SERIAL=<serial> scripts/verify-api37-16k.sh
+ANDROID_SERIAL=<serial> scripts/verify-api37-16k.sh --instrumentation
+```
+
+If package or activity services are unstable, the verifier stops without recording a runtime
+pass; APK alignment alone is not sufficient evidence.
+
 ## Signed release
 
 A release is signed only when all four environment variables are non-empty:

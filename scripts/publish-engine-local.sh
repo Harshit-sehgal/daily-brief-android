@@ -5,12 +5,10 @@
 #
 # --mobile: the Expo app compiles with AGP 8.12, which has no minor API levels, so the
 # android AARs are built at compileSdk 36 instead of 37.1 (the gate and :app keep 37.1).
-# Use this flag after regenerating apps/mobile/android (expo prebuild overwrites it) or after
-# any engine change; apps/mobile/android must also carry:
-#   gradle.properties: kotlinVersion=2.3.20  # the engine AAR is Kotlin 2.4.10; 2.3.x reads its metadata
-#   build.gradle: ext.compileSdkVersion = 36 (Int, before the expo-root-project apply; a
-#     gradle.properties value arrives as a String and AGP 8.12 fails "Value is null"),
-#     KGP 2.3.20 on the buildscript classpath, mavenLocal() in allprojects.
+# Use this flag after regenerating apps/mobile/android or after any engine change. The Expo
+# config plugin in apps/mobile/plugins/with-local-emulator-cleartext.js reapplies the mobile
+# Gradle toolchain pins during prebuild: Kotlin 2.3.20, compileSdk 36 as an Int before the
+# Expo root plugin, and mavenLocal().
 # Full rationale: apps/mobile/README.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."

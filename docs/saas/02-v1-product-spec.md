@@ -2,21 +2,26 @@
 
 For the consultant ICP: independent consultants whose time is sold, whose work product is
 scheduled, and whose calendar is not under their control. V1 is web-first (a server runs the
-same `packages/planning-core` engine the app runs) with the Android app kept as the strongest client.
+same `packages/planning-core` engine the app runs) with the Android app kept as the strongest
+client. The command-center hierarchy is defined in
+[`11-strategy-reconciliation.md`](11-strategy-reconciliation.md).
 
 ## Information architecture
 
 ```
 Today        — agenda, clashes, the day's shape (greeting lives here), daily brief
-Planner      — Projects → Tasks / Board / Timeline (Gantt), Schedule Map page
+Planner      — one timeline joining calendar events and planned work; Plan my day/week
 Inbox        — captured-but-unrouted tasks (columnId = null today)
-Capacity     — working schedules, plan health, overload, portfolio rollup, weekly review
-Integrations — calendar connections, Notion, Gemini (platform key), write-back toggle
+Projects     — project detail: Tasks → Board → Timeline (Gantt), progressively disclosed
+Insights     — working schedules, plan health, overload, capacity, portfolio, weekly review
+Integrations — Google calendar connection, Gemini (platform key), write-back toggle;
+  Outlook and Notion are later connector work
 Settings     — account, workspace, tier, export API, danger zone
 ```
 
-This is the existing app's IA minus the fold-ins: `PlanOutline` merges into `Projects → Tasks`,
-`PortfolioRollup` + `WeeklyReview` merge into `Capacity`, `Notion` folds into `Integrations`.
+This is the existing app's IA with the command-center reduction: `PlanOutline` merges into
+`Projects → Tasks`, `PortfolioRollup` + `WeeklyReview` move under `Insights`, and Notion folds
+into `Integrations`. Capacity remains available, but it is not a primary work-loop destination.
 
 ## Progressive disclosure
 
@@ -25,7 +30,7 @@ This is the existing app's IA minus the fold-ins: `PlanOutline` merges into `Pro
 - **Planner → Timeline** keeps the disclosure discipline already enforced by
   `ScheduleMapProportionInstrumentedTest`: explanations behind labelled disclosures, status on
   one line, chrome measured in dp.
-- **Capacity** hides the max-flow machinery; it shows three numbers and one sentence: available
+- **Insights** hides the max-flow machinery; it shows three numbers and one sentence: available
   hours this week, planned hours, and whether the answer to "can I take another client?" is yes,
   no, or "here is what would have to move".
 - A control row wraps or it crushes: `FlowRow` for chip rows, ellipsis on status text — the
@@ -33,14 +38,15 @@ This is the existing app's IA minus the fold-ins: `PlanOutline` merges into `Pro
 
 ## Onboarding and the 90-second magic moment
 
-1. **Connect a calendar** (Google/Outlook; device calendar stays for the app). Real events
+1. **Connect Google Calendar** (the current server connector; Outlook is a later adapter;
+   device calendar stays for the app). Real events
    appear in under 10 seconds.
 2. **Set working hours** — one screen, defaults from the app's `WorkScheduleDefaults`
    ("Default working week", 09:00–17:00 Mon–Fri). DST-safe by construction (`WorkingCalendar`).
 3. **The magic moment (90 seconds in):** Today shows Now, Up next and one clash — the user's
    actual week, already reconciled. The summary line ("3 overlapping meetings today") is
    generated, not templated, and it lands before any plan exists.
-4. **First plan:** import one client project (or Notion board), hit auto-plan, and see blocks
+4. **First plan:** add one client project, hit auto-plan, and see blocks
    land in working time with reasons attached — the proposal UI from `AutoPlan` verbatim.
 
 Onboarding is complete when the user has seen a proposal *and rejected or accepted it*: the
@@ -90,7 +96,7 @@ shipping product and has its own roadmap. Conflating the two was the real defect
   carries over to KMS
 - Multi-window / tablet layout polish
 - Recurring tasks (Notion repeats via connectors only)
-- Slack/Teams connectors (calendar connection is the funnel)
+- Outlook, Notion, Slack, and Teams connectors (Google is the V1 calendar funnel)
 - Anything that edits a user's plan without a visible proposal
 
 ### Shipped on Android, deliberately not ported to web V1
@@ -103,9 +109,9 @@ the web scope, and they do not become launch commitments.
 | Home-screen widget | `widget/TodayWidgetProvider.kt` | No web equivalent — Android only, permanently |
 | PDF export | `export/PdfPlanExporter.kt` | Post-launch, server-rendered |
 | Encrypted backup/restore | `data/backup/`, `SecretStore` | Superseded by server durability |
-| Cross-board portfolio timeline | `core/PortfolioGantt.kt` | **Yes** — folds into Capacity, which the teardown already wanted |
+| Cross-board portfolio timeline | `core/PortfolioGantt.kt` | **Yes** — folds into Insights, which the reconciled hierarchy keeps secondary |
 
-`PortfolioGantt` is the one the teardown asked for; the other three are Android-surface work
+`PortfolioGantt` is the one the teardown asked for; it remains progressive depth. The other three are Android-surface work
 that the web launch neither needs nor inherits.
 
 ### The working agreement this restores

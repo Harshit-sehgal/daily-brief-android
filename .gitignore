@@ -25,3 +25,7 @@ keystore.properties
 
 # per-module build output (root /build only covers the root project)
 **/build
+
+# Design-canvas working files. The canvas itself is a published artifact and
+# these can be recovered from it; the seeded page is a 2 MB build output.
+.design-brief/

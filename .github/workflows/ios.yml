@@ -1,0 +1,42 @@
+name: iOS framework verification
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  framework:
+    name: PlannerCore XCFramework and Swift import
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build and import the framework
+        run: ./scripts/verify-ios-framework.sh
+
+      - name: Upload framework evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: PlannerCore-xcframework
+          if-no-files-found: warn
+          path: packages/planning-core/build/PlannerCore.xcframework

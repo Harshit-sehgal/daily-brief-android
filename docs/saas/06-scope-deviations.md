@@ -148,7 +148,7 @@ moving a file between source sets invalidates it. Moving two files left `jvmTest
 and the guard reported the *previous* layout's percentage — the one number the whole
 portability effort is tracked by.
 
-**Fixed:** `packages/packages/planning-core/build.gradle.kts` now declares `src/commonMain/kotlin` and
+**Fixed:** `packages/planning-core/build.gradle.kts` now declares `src/commonMain/kotlin` and
 `src/jvmShared/kotlin` as inputs of the `jvmTest` task.
 
 ---
