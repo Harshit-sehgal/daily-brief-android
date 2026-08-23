@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import "./globals.css";
+import { Shell } from "./shell";
 
 export const metadata: Metadata = {
   title: "Daily Brief",
@@ -8,15 +8,12 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // data-accent picks one of the six; terracotta is the app's default. The
+  // theme itself is left to the OS unless a data-theme is stamped on.
   return (
-    <html lang="en">
+    <html lang="en" data-accent="terracotta">
       <body>
-        <nav className="nav">
-          <span className="nav-title">Daily Brief</span>
-          <Link href="/">Planner</Link>
-          <Link href="/today">Today</Link>
-        </nav>
-        <main className="main">{children}</main>
+        <Shell>{children}</Shell>
       </body>
     </html>
   );

@@ -1,0 +1,179 @@
+/*
+ * The design system, mirrored from the app.
+ *
+ * SOURCE OF TRUTH: apps/android/src/main/java/com/example/ui/theme/Color.kt,
+ * Theme.kt (Radius) and Layout.kt (Space). Do not invent values here — change
+ * Color.kt and mirror. `apps/web/lib/tokens.test.ts` parses the Kotlin and
+ * fails when these drift, so a one-sided edit is caught rather than shipped.
+ *
+ * The neutrals are not grey: every one carries a low-chroma warm bias around
+ * 30-40 degrees, so light reads as unbleached paper and dark as warm charcoal.
+ * The status colours are drawn from the same family (brick, honey, sage), which
+ * is why they never clash with whichever accent is in use.
+ */
+
+:root {
+  /* Unbleached paper. */
+  --base: #FDFBF8;
+  --surface: #F9F5EF;
+  --surface-high: #F4EFE7;
+  --surface-highest: #EDE6DB;
+  --outline: #DED5C8;
+  --outline-soft: #EFE9DF;
+  --on: #211C16;
+  --on-muted: #6E6255;
+  --pure: #FFFFFF;
+
+  /* A third ink step, between --on and --on-muted, for secondary body copy. */
+  --on-soft: #453D33;
+  /* Quieter still: uppercase micro-labels and disabled text. */
+  --on-faint: #8A7F71;
+
+  /* Status. Brick rather than fire-engine red, honey rather than traffic-cone
+     orange, sage rather than emerald. */
+  --deadline: #B33A2B;
+  --urgent: #8A6100;
+  --positive: #4A7340;
+  --deadline-wash: #FBF1EE;
+  --deadline-edge: #E4B0A8;
+  --urgent-edge: #D8BE8A;
+
+  /* The accent. Six are selectable; terracotta is the default. Overridden by
+     [data-accent] below. */
+  --accent: #A8451F;
+  --on-accent: #FFFFFF;
+  --accent-wash: #F6E4DC;
+
+  --focus: #8A6100;
+
+  /* Project hues — the six accent primaries, used as identity marks beside a
+     project name so it keeps one colour on every surface. Not for status. */
+  --hue-terracotta: #A8451F;
+  --hue-teal: #0E6E68;
+  --hue-sage: #47713C;
+  --hue-plum: #7A3B78;
+  --hue-honey: #8A6100;
+  --hue-indigo: #3C5BA9;
+
+  /* Four radii, and only four. A corner says what kind of thing it belongs to. */
+  --r-mark: 3px;      /* drawn marks: progress dots, rules, milestone diamonds */
+  --r-control: 6px;   /* anything pressed: buttons, chips, schedule bars */
+  --r-block: 10px;    /* blocks of information: cards, lanes, panels */
+  --r-container: 16px;/* layered above the page: dialogs, sheets, the palette */
+
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-xxl: 32px;
+
+  /* Shell metrics — the three columns every page shares. */
+  --rail-w: 248px;
+  --aside-w: 316px;
+
+  color-scheme: light;
+}
+
+/* Warm charcoal, not blue-black. Redefined for the un-stamped OS-dark case … */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --base: #14110E;
+    --surface: #1A1713;
+    --surface-high: #221E18;
+    --surface-highest: #2B251E;
+    --outline: #3B342B;
+    --outline-soft: #241F1A;
+    --on: #F2EBE1;
+    --on-muted: #ABA093;
+    --pure: #1A1713;
+
+    --on-soft: #D6CCBE;
+    --on-faint: #7F7568;
+
+    --deadline: #F2A099;
+    --urgent: #EFC170;
+    --positive: #A6CB9E;
+    --deadline-wash: #241713;
+    --deadline-edge: #6B3830;
+    --urgent-edge: #5C4525;
+
+    --accent: #F0A88C;
+    --on-accent: #46200F;
+    --accent-wash: #2C1D16;
+
+    --focus: #EFC170;
+
+    --hue-terracotta: #F0A88C;
+    --hue-teal: #7FD1CB;
+    --hue-sage: #A8C8A0;
+    --hue-plum: #DDB0DC;
+    --hue-honey: #F2C879;
+    --hue-indigo: #A8BFF5;
+
+    color-scheme: dark;
+  }
+}
+
+/* … and again for an explicit choice, so the toggle wins in both directions. */
+:root[data-theme="dark"] {
+  --base: #14110E;
+  --surface: #1A1713;
+  --surface-high: #221E18;
+  --surface-highest: #2B251E;
+  --outline: #3B342B;
+  --outline-soft: #241F1A;
+  --on: #F2EBE1;
+  --on-muted: #ABA093;
+  --pure: #1A1713;
+
+  --on-soft: #D6CCBE;
+  --on-faint: #7F7568;
+
+  --deadline: #F2A099;
+  --urgent: #EFC170;
+  --positive: #A6CB9E;
+  --deadline-wash: #241713;
+  --deadline-edge: #6B3830;
+  --urgent-edge: #5C4525;
+
+  --accent: #F0A88C;
+  --on-accent: #46200F;
+  --accent-wash: #2C1D16;
+
+  --focus: #EFC170;
+
+  --hue-terracotta: #F0A88C;
+  --hue-teal: #7FD1CB;
+  --hue-sage: #A8C8A0;
+  --hue-plum: #DDB0DC;
+  --hue-honey: #F2C879;
+  --hue-indigo: #A8BFF5;
+
+  color-scheme: dark;
+}
+
+/* ── The six accents, in three complementary pairs ─────────────────────────
+   Earth and water, leaf and bloom, warm light and cool shade. Any accent has a
+   natural counterpart, which is what keeps a multi-project palette coherent. */
+:root[data-accent="terracotta"] { --accent: #A8451F; --on-accent: #FFFFFF; --accent-wash: #F6E4DC; }
+:root[data-accent="teal"]       { --accent: #0E6E68; --on-accent: #FFFFFF; --accent-wash: #DCEDEB; }
+:root[data-accent="sage"]       { --accent: #47713C; --on-accent: #FFFFFF; --accent-wash: #E2EDDF; }
+:root[data-accent="plum"]       { --accent: #7A3B78; --on-accent: #FFFFFF; --accent-wash: #F0E2EF; }
+:root[data-accent="honey"]      { --accent: #8A6100; --on-accent: #FFFFFF; --accent-wash: #F5E9CE; }
+:root[data-accent="indigo"]     { --accent: #3C5BA9; --on-accent: #FFFFFF; --accent-wash: #E0E6F6; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-accent="terracotta"] { --accent: #F0A88C; --on-accent: #46200F; --accent-wash: #2C1D16; }
+  :root:not([data-theme="light"])[data-accent="teal"]       { --accent: #7FD1CB; --on-accent: #00332F; --accent-wash: #142624; }
+  :root:not([data-theme="light"])[data-accent="sage"]       { --accent: #A8C8A0; --on-accent: #1B3517; --accent-wash: #1A2418; }
+  :root:not([data-theme="light"])[data-accent="plum"]       { --accent: #DDB0DC; --on-accent: #3E1B3D; --accent-wash: #261A26; }
+  :root:not([data-theme="light"])[data-accent="honey"]      { --accent: #F2C879; --on-accent: #40300A; --accent-wash: #2A2113; }
+  :root:not([data-theme="light"])[data-accent="indigo"]     { --accent: #A8BFF5; --on-accent: #17264C; --accent-wash: #171C2B; }
+}
+:root[data-theme="dark"][data-accent="terracotta"] { --accent: #F0A88C; --on-accent: #46200F; --accent-wash: #2C1D16; }
+:root[data-theme="dark"][data-accent="teal"]       { --accent: #7FD1CB; --on-accent: #00332F; --accent-wash: #142624; }
+:root[data-theme="dark"][data-accent="sage"]       { --accent: #A8C8A0; --on-accent: #1B3517; --accent-wash: #1A2418; }
+:root[data-theme="dark"][data-accent="plum"]       { --accent: #DDB0DC; --on-accent: #3E1B3D; --accent-wash: #261A26; }
+:root[data-theme="dark"][data-accent="honey"]      { --accent: #F2C879; --on-accent: #40300A; --accent-wash: #2A2113; }
+:root[data-theme="dark"][data-accent="indigo"]     { --accent: #A8BFF5; --on-accent: #17264C; --accent-wash: #171C2B; }

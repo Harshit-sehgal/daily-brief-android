@@ -28,9 +28,12 @@ export interface Interval {
 
 export interface WorkWindow {
   id: string;
-  dayOfWeek: number;
+  kind?: "weekly" | "date_override" | string;
+  dayOfWeek?: number | null;
+  localDate?: string | null;
   startMinute: number;
   endMinute: number;
+  isClosed?: boolean;
   rank: number;
 }
 
@@ -43,6 +46,7 @@ export interface WorkSchedule {
   maximumChunkMinutes: number;
   bufferMinutes: number;
   rank: number;
+  archivedAt?: number | null;
   windows: WorkWindow[];
 }
 
@@ -53,7 +57,7 @@ export interface PlanningRequest {
   rangeEndMs: number;
   nowMs: number;
   items: Task[];
-  blocks: unknown[];
+  blocks: ScheduledBlock[];
   fixedCommitments: Interval[];
   dependencies: Dependency[];
   scheduleIdByTaskId: Record<string, string>;
@@ -132,18 +136,41 @@ export interface ScheduledBlock {
   linkedEventId?: string | null;
 }
 
+export interface PlanBlock {
+  id: string;
+  projectId: string;
+  taskId: string;
+  startAt: number;
+  endAt: number;
+  position: number;
+  locked: boolean;
+  linkedEventId?: string | null;
+}
+
+export interface TodayBlock {
+  id: string;
+  planItemId: string;
+  title: string;
+  projectName?: string | null;
+  startAt: number;
+  endAt: number;
+  position?: number;
+  locked?: boolean;
+  linkedEventId?: string | null;
+}
+
 export interface TodayResponse {
   date: string;
   events: ExternalEvent[];
-  blocks: ScheduledBlock[];
+  blocks: TodayBlock[];
   conflicts: Array<{ first: ExternalEvent; second: ExternalEvent; overlapMs: number }>;
   busyMinutes: number;
   freeMinutes: number;
 }
 
-export interface SessionResponse {
+export interface BrowserSessionResponse {
   workspaceId: string;
-  token: string;
+  csrfToken: string;
 }
 export interface CapacityRequest {
   v: number;

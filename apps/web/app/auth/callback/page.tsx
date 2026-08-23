@@ -1,32 +1,38 @@
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { client, saveSession } from "@/lib/api";
 
 function CallbackInner() {
   const params = useSearchParams();
+  const router = useRouter();
   const [message, setMessage] = useState("Completing sign-in…");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const code = params.get("code");
+    const state = params.get("state");
     if (!code) {
       setError("No code in the callback URL");
       return;
     }
+    if (!state) {
+      setError("No OAuth state in the callback URL");
+      return;
+    }
     const redirectUri = window.location.origin + "/auth/callback";
     client
-      .authCallback(code, redirectUri)
+      .authCallback(code, redirectUri, state)
       .then((s) => {
         saveSession(s);
-        window.location.assign("/");
+        router.replace("/");
       })
       .catch((e: Error) => {
         setError(e.message);
         setMessage("");
       });
-  }, [params]);
+  }, [params, router]);
 
   return (
     <div className="card">

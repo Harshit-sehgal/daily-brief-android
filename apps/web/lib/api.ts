@@ -2,6 +2,7 @@ import type {
   ApplyResponse,
   BaselineComparison,
   BaselineSnapshot,
+  BrowserSessionResponse,
   BillingResponse,
   Board,
   CapacityRequest,
@@ -9,34 +10,48 @@ import type {
   PlanRun,
   PlanningRequest,
   PortfolioResponse,
+  PlanBlock,
   Project,
   ScenarioOrdering,
   ScenarioResponse,
-  SessionResponse,
   SummaryResponse,
   Task,
   TodayResponse,
+  WorkSchedule,
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8090";
-const TOKEN_KEY = "dailybrief.token";
+const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE?.trim();
+if (!configuredApiBase && process.env.NODE_ENV === "production") {
+  throw new Error("NEXT_PUBLIC_API_BASE must be configured for a production web build");
+}
+const API_BASE = configuredApiBase ?? "http://localhost:8090";
 const WORKSPACE_KEY = "dailybrief.workspaceId";
+const CSRF_KEY = "dailybrief.csrf";
 
-export function savedSession(): { token: string; workspaceId: string } | null {
+export function savedSession(): { workspaceId: string } | null {
   if (typeof window === "undefined") return null;
-  const token = window.localStorage.getItem(TOKEN_KEY);
+  // A pre-cookie build left a bearer token beside the workspace id. Do not keep presenting
+  // that stale client state as a signed-in browser session; force a clean cookie login.
+  if (window.localStorage.getItem("dailybrief.token")) {
+    clearSession();
+    return null;
+  }
   const workspaceId = window.localStorage.getItem(WORKSPACE_KEY);
-  return token && workspaceId ? { token, workspaceId } : null;
+  return workspaceId ? { workspaceId } : null;
 }
 
-export function saveSession(s: SessionResponse) {
-  window.localStorage.setItem(TOKEN_KEY, s.token);
+export function saveSession(s: BrowserSessionResponse) {
+  // Remove tokens created by pre-cookie builds. The browser must never retain a bearer
+  // credential that is valid for seven days in script-readable storage.
+  window.localStorage.removeItem("dailybrief.token");
   window.localStorage.setItem(WORKSPACE_KEY, s.workspaceId);
+  window.sessionStorage.setItem(CSRF_KEY, s.csrfToken);
 }
 
 export function clearSession() {
-  window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem("dailybrief.token");
   window.localStorage.removeItem(WORKSPACE_KEY);
+  window.sessionStorage.removeItem(CSRF_KEY);
 }
 
 export class ApiError extends Error {
@@ -46,11 +61,14 @@ export class ApiError extends Error {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const session = savedSession();
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
   if (init?.body) headers["Content-Type"] = "application/json";
-  if (session) headers["Authorization"] = `Bearer ${session.token}`;
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (typeof window !== "undefined" && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const csrf = window.sessionStorage.getItem(CSRF_KEY);
+    if (csrf) headers["X-DailyBrief-CSRF"] = csrf;
+  }
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, credentials: "include" });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {
@@ -65,16 +83,20 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const client = {
-  signup(): Promise<SessionResponse> {
-    return api("/v1/fixture/signup", { method: "POST" });
+  signup(): Promise<BrowserSessionResponse> {
+    return api("/v1/fixture/browser-signup", { method: "POST" });
   },
 
   authStart(): Promise<{ url: string; redirectUri: string }> {
     return api(`/v1/auth/start?redirect_uri=${encodeURIComponent(window.location.origin + "/auth/callback")}`);
   },
 
-  authCallback(code: string, redirectUri: string): Promise<SessionResponse> {
-    return api("/v1/auth/callback", { method: "POST", body: JSON.stringify({ code, redirectUri }) });
+  authCallback(code: string, redirectUri: string, state: string): Promise<BrowserSessionResponse> {
+    return api("/v1/auth/callback", { method: "POST", body: JSON.stringify({ code, redirectUri, state }) });
+  },
+
+  logout(): Promise<{ ok: boolean }> {
+    return api("/v1/auth/logout", { method: "POST" });
   },
 
   addTask(task: Task): Promise<{ ok: boolean }> {
@@ -127,6 +149,10 @@ export const client = {
     return api("/v1/portfolio");
   },
 
+  planBlocks(): Promise<PlanBlock[]> {
+    return api("/v1/plan-blocks");
+  },
+
   billing(): Promise<BillingResponse> {
     return api("/v1/billing");
   },
@@ -143,8 +169,8 @@ export const client = {
     return api("/v1/reconcile", { method: "POST" });
   },
 
-  plan(request: PlanningRequest): Promise<PlanRun> {
-    return api("/v1/plan", { method: "POST", body: JSON.stringify(request) });
+  plan(request: PlanningRequest, replaceExisting = false): Promise<PlanRun> {
+    return api(`/v1/plan${replaceExisting ? "?replan=1" : ""}`, { method: "POST", body: JSON.stringify(request) });
   },
 
   capacity(request: CapacityRequest): Promise<CapacityResponse> {
@@ -165,5 +191,13 @@ export const client = {
 
   today(): Promise<TodayResponse> {
     return api("/v1/today");
+  },
+
+  planningSettings(): Promise<WorkSchedule> {
+    return api("/v1/settings/planning");
+  },
+
+  updatePlanningSettings(schedule: WorkSchedule): Promise<WorkSchedule> {
+    return api("/v1/settings/planning", { method: "PUT", body: JSON.stringify(schedule) });
   },
 };
