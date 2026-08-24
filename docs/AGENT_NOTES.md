@@ -1073,6 +1073,13 @@ These are evidence or operator/device tasks, not safely closable by local source
 - Gate evidence on the landed tree: `scripts/verify.sh --fast` green,
   `scripts/verify.sh --journey` green (**3.315 s**, 11 legs), mobile vitest
   **86/86**, expo lint clean, `tsc --noEmit` clean, `git diff --check` clean.
+- Re-validation pass on the committed tree: full `scripts/verify.sh` green
+  (both lints re-ran, debug + release APKs, R8), and
+  `scripts/verify-mobile-release.sh` green — native release APK built
+  (**3m13s**, 568 tasks) with the embedded JS bundle verified. A bare
+  `npx expo export --platform web` fails closed on the missing
+  `EXPO_PUBLIC_API_BASE`, which is the api-config guard doing its job; the
+  harness supplies it.
 - Remaining register unchanged: hosted CI run for the unpublished branch,
   real Google-account OAuth/calendar evidence, production KMS/Stripe/Gemini/
   Expo/DNS configuration, physical-device cache proof, Mac XCFramework/Swift
