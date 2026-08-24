@@ -14,7 +14,7 @@
 
 import '@/global.css';
 
-import { Platform } from 'react-native';
+import { Appearance, Platform } from 'react-native';
 
 import { Palette, PaletteDark } from './palette';
 
@@ -76,3 +76,13 @@ export const Spacing = {
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+/**
+ * The active scheme's colours, chosen once at launch: `Palette` in light,
+ * `PaletteDark` when the system asks for dark. Every screen's styles are built
+ * from this one value, so the whole app reads as one scheme.
+ *
+ * Live switching would mean rebuilding every StyleSheet on a scheme change; the
+ * app instead starts in the system scheme, which is what a phone session does.
+ */
+export const C = Appearance.getColorScheme() === 'dark' ? PaletteDark : Palette;

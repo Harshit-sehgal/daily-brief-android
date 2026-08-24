@@ -1,12 +1,17 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
+import { DarkTheme, DefaultTheme, Tabs, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
-import { useColorScheme } from "react-native";
+import { ColorValue, Text, useColorScheme } from "react-native";
 
+import { C } from "@/constants/theme";
 import { savedSession } from "@/lib/api";
 import { installNotificationHandler, registerPushToken } from "@/lib/push";
 
 SplashScreen.preventAutoHideAsync();
+
+function TabIcon({ label, color }: { label: string; color: ColorValue }) {
+  return <Text style={{ fontSize: 18, lineHeight: 18, color }}>{label}</Text>;
+}
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -23,15 +28,37 @@ export default function RootLayout() {
   }, []);
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-      <Stack
-        screenOptions={{ headerShown: false }}
+      <Tabs
+        screenOptions={{
+          headerShown: true,
+          tabBarActiveTintColor: C.accent,
+          tabBarInactiveTintColor: C.onFaint,
+          tabBarStyle: { backgroundColor: C.pure, borderTopColor: C.outlineSoft },
+          headerStyle: { backgroundColor: C.base },
+          headerTintColor: C.on,
+        }}
       >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="today" options={{ headerShown: true, title: "Today" }} />
-        <Stack.Screen name="planner" options={{ headerShown: true, title: "Planner" }} />
-        <Stack.Screen name="settings" options={{ headerShown: true, title: "Settings" }} />
-        <Stack.Screen name="auth-callback" />
-      </Stack>
+        <Tabs.Screen
+          name="index"
+          options={{ href: null, headerShown: false, title: "Login", tabBarStyle: { display: "none" } }}
+        />
+        <Tabs.Screen
+          name="today"
+          options={{ title: "Today", tabBarIcon: ({ color }) => <TabIcon label="◐" color={color} /> }}
+        />
+        <Tabs.Screen
+          name="planner"
+          options={{ title: "Planner", tabBarIcon: ({ color }) => <TabIcon label="≡" color={color} /> }}
+        />
+        <Tabs.Screen
+          name="settings"
+          options={{ title: "Settings", tabBarIcon: ({ color }) => <TabIcon label="⚙" color={color} /> }}
+        />
+        <Tabs.Screen
+          name="auth-callback"
+          options={{ href: null, headerShown: false, title: "Auth", tabBarStyle: { display: "none" } }}
+        />
+      </Tabs>
     </ThemeProvider>
   );
 }

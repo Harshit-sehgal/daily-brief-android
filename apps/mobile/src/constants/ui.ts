@@ -1,6 +1,8 @@
 import { StyleSheet } from 'react-native';
 
-import { MinimumTouchTarget, Palette, Radius, Space } from './palette';
+import { MinimumTouchTarget, Radius, Space } from './palette';
+
+import { C } from './theme';
 
 /**
  * The design language's shared shapes, so four screens cannot each invent their
@@ -20,8 +22,8 @@ import { MinimumTouchTarget, Palette, Radius, Space } from './palette';
  * 17 / 15 / 13 title, 15 / 14 / 12 body, 13 / 12 / 11 label.
  */
 export const ui = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Palette.base },
-  content: { padding: Space.lg, paddingBottom: 48, gap: Space.sm },
+  screen: { flex: 1, backgroundColor: C.base },
+  content: { padding: Space.lg, paddingBottom: 96, gap: Space.sm },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space.md, padding: Space.xl },
 
   /** Small uppercase label. Orients a block; never carries the information. */
@@ -31,22 +33,22 @@ export const ui = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
-    color: Palette.onFaint,
+    color: C.onFaint,
   },
-  h1: { fontSize: 28, lineHeight: 34, fontWeight: '600', letterSpacing: -0.6, color: Palette.on },
-  h2: { fontSize: 17, lineHeight: 23, fontWeight: '600', letterSpacing: -0.2, color: Palette.on },
-  body: { fontSize: 15, lineHeight: 22, color: Palette.on },
-  muted: { fontSize: 13, lineHeight: 18, color: Palette.onMuted },
+  h1: { fontSize: 28, lineHeight: 34, fontWeight: '600', letterSpacing: -0.6, color: C.on },
+  h2: { fontSize: 17, lineHeight: 23, fontWeight: '600', letterSpacing: -0.2, color: C.on },
+  body: { fontSize: 15, lineHeight: 22, color: C.on },
+  muted: { fontSize: 13, lineHeight: 18, color: C.onMuted },
   /** A total that cannot be complete must say so, and quietly. */
-  floorNote: { fontSize: 12, lineHeight: 17, color: Palette.onMuted },
-  error: { fontSize: 14, lineHeight: 20, color: Palette.deadline },
-  empty: { fontSize: 14, lineHeight: 20, color: Palette.onFaint, paddingVertical: Space.xs },
+  floorNote: { fontSize: 12, lineHeight: 17, color: C.onMuted },
+  error: { fontSize: 14, lineHeight: 20, color: C.deadline },
+  empty: { fontSize: 14, lineHeight: 20, color: C.onFaint, paddingVertical: Space.xs },
 
   card: {
     borderWidth: 1,
-    borderColor: Palette.outlineSoft,
+    borderColor: C.outlineSoft,
     borderRadius: Radius.block,
-    backgroundColor: Palette.pure,
+    backgroundColor: C.pure,
     padding: 14,
     gap: 6,
   },
@@ -58,48 +60,48 @@ export const ui = StyleSheet.create({
     marginTop: Space.lg,
     marginBottom: Space.xs,
   },
-  rule: { flex: 1, height: 1, backgroundColor: Palette.outlineSoft },
+  rule: { flex: 1, height: 1, backgroundColor: C.outlineSoft },
 
   /** One row of the day. */
   row: { flexDirection: 'row', alignItems: 'center', gap: Space.md, minHeight: 52 },
-  rowTime: { width: 92, fontSize: 12.5, color: Palette.onMuted, fontVariant: ['tabular-nums'] },
+  rowTime: { width: 92, fontSize: 12.5, color: C.onMuted, fontVariant: ['tabular-nums'] },
   rowBody: { flex: 1, minWidth: 0 },
-  rowTitle: { fontSize: 14.5, lineHeight: 20, color: Palette.on },
-  rowTitleOwned: { fontSize: 14.5, lineHeight: 20, fontWeight: '500', color: Palette.on },
-  rowMeta: { fontSize: 12, lineHeight: 16, color: Palette.onMuted, marginTop: 1 },
-  rowMetaFixed: { fontSize: 12, lineHeight: 16, color: Palette.urgent, marginTop: 1 },
-  rowTrail: { fontSize: 12, color: Palette.onMuted, fontVariant: ['tabular-nums'] },
+  rowTitle: { fontSize: 14.5, lineHeight: 20, color: C.on },
+  rowTitleOwned: { fontSize: 14.5, lineHeight: 20, fontWeight: '500', color: C.on },
+  rowMeta: { fontSize: 12, lineHeight: 16, color: C.onMuted, marginTop: 1 },
+  rowMetaFixed: { fontSize: 12, lineHeight: 16, color: C.urgent, marginTop: 1 },
+  rowTrail: { fontSize: 12, color: C.onMuted, fontVariant: ['tabular-nums'] },
 
   /** Ownership. Solid accent = yours. Dashed honey = someone else booked it. */
-  ownPlan: { width: 3, height: 26, borderRadius: Radius.mark, backgroundColor: Palette.accent },
+  ownPlan: { width: 3, height: 26, borderRadius: Radius.mark, backgroundColor: C.accent },
   ownFixed: {
     width: 3,
     height: 22,
     borderRadius: Radius.mark,
     borderLeftWidth: 3,
     borderStyle: 'dashed',
-    borderColor: Palette.urgent,
+    borderColor: C.urgent,
   },
 
   /** A clash states itself in words, with the overlap named, in place. */
   clash: {
     borderWidth: 1,
-    borderColor: Palette.deadlineEdge,
+    borderColor: C.deadlineEdge,
     borderRadius: Radius.block,
-    backgroundColor: Palette.deadlineWash,
+    backgroundColor: C.deadlineWash,
     padding: 13,
     gap: 6,
   },
-  clashHead: { fontSize: 14, lineHeight: 20, fontWeight: '600', color: Palette.deadline },
-  clashBody: { fontSize: 13, lineHeight: 19, color: Palette.deadlineInk },
+  clashHead: { fontSize: 14, lineHeight: 20, fontWeight: '600', color: C.deadline },
+  clashBody: { fontSize: 13, lineHeight: 19, color: C.deadlineInk },
 
   /** Capacity: one bar, parts separated by a 2px gap so they stay countable. */
   meter: { flexDirection: 'row', gap: 2, height: 8, marginVertical: 6 },
-  meterFixed: { backgroundColor: Palette.urgent, borderRadius: Radius.mark },
-  meterPlan: { backgroundColor: Palette.accent, borderRadius: Radius.mark },
-  meterFree: { flex: 1, backgroundColor: Palette.surfaceHighest, borderRadius: Radius.mark },
+  meterFixed: { backgroundColor: C.urgent, borderRadius: Radius.mark },
+  meterPlan: { backgroundColor: C.accent, borderRadius: Radius.mark },
+  meterFree: { flex: 1, backgroundColor: C.surfaceHighest, borderRadius: Radius.mark },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: Space.md },
-  legendItem: { fontSize: 12.5, color: Palette.onSoft },
+  legendItem: { fontSize: 12.5, color: C.onSoft },
 
   /* Controls. Visual density may change what fits; it never changes the hit
      area, so every one of these clears MinimumTouchTarget. */
@@ -108,33 +110,33 @@ export const ui = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: Radius.control,
     borderWidth: 1,
-    borderColor: Palette.outline,
-    backgroundColor: Palette.pure,
+    borderColor: C.outline,
+    backgroundColor: C.pure,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  btnText: { fontSize: 14, fontWeight: '500', color: Palette.on },
+  btnText: { fontSize: 14, fontWeight: '500', color: C.on },
   btnPrimary: {
     minHeight: MinimumTouchTarget,
     paddingHorizontal: 16,
     borderRadius: Radius.control,
-    backgroundColor: Palette.accent,
+    backgroundColor: C.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  btnPrimaryText: { fontSize: 15, fontWeight: '600', color: Palette.onAccent },
+  btnPrimaryText: { fontSize: 15, fontWeight: '600', color: C.onAccent },
   btnQuiet: { minHeight: MinimumTouchTarget, paddingHorizontal: 12, justifyContent: 'center' },
-  btnQuietText: { fontSize: 14, fontWeight: '500', color: Palette.accent },
+  btnQuietText: { fontSize: 14, fontWeight: '500', color: C.accent },
 
   input: {
     minHeight: MinimumTouchTarget,
     paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: Palette.outline,
+    borderColor: C.outline,
     borderRadius: Radius.control,
-    backgroundColor: Palette.pure,
+    backgroundColor: C.pure,
     fontSize: 15,
-    color: Palette.on,
+    color: C.on,
   },
 });
 

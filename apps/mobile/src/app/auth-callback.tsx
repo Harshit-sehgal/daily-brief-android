@@ -2,7 +2,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
-import { Palette } from "@/constants/theme";
+import { C } from "@/constants/theme";
 import { client, saveSession } from "@/lib/api";
 
 /** Inbound leg of the OAuth flow, for the deep link on native and the redirect on web.
@@ -51,5 +51,5 @@ export function makeRedirectUri(): string {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  error: { color: Palette.deadline, fontSize: 14 },
+  error: { color: C.deadline, fontSize: 14 },
 });

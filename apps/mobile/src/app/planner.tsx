@@ -11,7 +11,8 @@ import {
   View,
 } from "react-native";
 
-import { MinimumTouchTarget, Palette, Radius, Space } from "@/constants/palette";
+import { MinimumTouchTarget, Radius, Space } from "@/constants/palette";
+import { C } from "@/constants/theme";
 import { ApiError, client, savedSession } from "@/lib/api";
 import { removeReplaceableBlocks, toPlanningItems, toScheduledBlocks } from "@/lib/planner-contract";
 import type {
@@ -35,6 +36,15 @@ function weekStart(): number {
   const now = new Date();
   const daysSinceMonday = (now.getUTCDay() + 6) % 7;
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - daysSinceMonday * DAY;
+}
+
+/** A block's place on the week axis, as percentages. Clamped into the visible
+ *  week and given a floor width, so a short block at the week's edge stays a
+ *  visible mark rather than vanishing between pixels. */
+function barSpan(startAt: number, endAt: number): { left: number; width: number } {
+  const left = Math.max(0, Math.min(100, ((startAt - weekStart()) / WEEK_MS) * 100));
+  const rawWidth = ((endAt - startAt) / WEEK_MS) * 100;
+  return { left, width: Math.max(1, Math.min(100 - left, rawWidth)) };
 }
 
 /** The native engine bridge runs only where a native module exists; on web the server
@@ -397,8 +407,7 @@ export default function PlannerScreen() {
                 </Text>
                 <View style={styles.portfolioStrip}>
                   {r.weekBlocks.map((b) => {
-                    const left = ((b.startAt - weekStart()) / WEEK_MS) * 100;
-                    const width = ((b.endAt - b.startAt) / WEEK_MS) * 100;
+                    const { left, width } = barSpan(b.startAt, b.endAt);
                     return (
                       <View
                         key={`${b.itemId}-${b.startAt}`}
@@ -427,7 +436,7 @@ export default function PlannerScreen() {
           value={title}
           onChangeText={setTitle}
           placeholder={selectedId ? "Add a task…" : "Pick a project first"}
-          placeholderTextColor={Palette.onFaint}
+          placeholderTextColor={C.onFaint}
           onSubmitEditing={addTask}
           editable={!!selectedId}
         />
@@ -455,22 +464,28 @@ export default function PlannerScreen() {
       {run ? (
         <View style={styles.proposal}>
           <Text style={styles.sectionTitle}>Proposal</Text>
-          {run.result.proposals.map((p) => (
-            <View key={p.itemId} style={styles.card}>
-              <Text style={styles.cardTime}>
-                {formatTime(p.startAt)}–{formatTime(p.endAt)}
-              </Text>
-              <View style={styles.cardBody}>
-                <Text style={styles.cardTitle}>{p.itemId}</Text>
-                <Text style={styles.cardReason}>{p.reason}</Text>
+          {run.result.proposals.map((p) => {
+            const task = tasks?.find((t) => t.id === p.itemId) ?? board?.tasks.find((t) => t.id === p.itemId);
+            return (
+              <View key={p.itemId} style={styles.card}>
+                <Text style={styles.cardTime}>
+                  {formatTime(p.startAt)}–{formatTime(p.endAt)}
+                </Text>
+                <View style={styles.cardBody}>
+                  <Text style={styles.cardTitle}>{task?.title ?? p.itemId}</Text>
+                  <Text style={styles.cardReason}>{p.reason}</Text>
+                </View>
               </View>
-            </View>
-          ))}
-          {run.result.unplaced.map((u) => (
-            <Text key={u.itemId} style={styles.unplaced}>
-              {u.itemId}: {u.reason}
-            </Text>
-          ))}
+            );
+          })}
+          {run.result.unplaced.map((u) => {
+            const task = tasks?.find((t) => t.id === u.itemId) ?? board?.tasks.find((t) => t.id === u.itemId);
+            return (
+              <Text key={u.itemId} style={styles.unplaced}>
+                {task?.title ?? u.itemId}: {u.reason}
+              </Text>
+            );
+          })}
           <Text style={styles.health}>{run.result.health.assessment}</Text>
           <View style={styles.proposalActions}>
             {!isPreview ? (
@@ -492,9 +507,12 @@ export default function PlannerScreen() {
       ) : null}
 
       {entryId ? (
-        <Pressable style={styles.undoButton} onPress={undo} disabled={busy}>
-          <Text style={styles.undoText}>Undo last apply</Text>
-        </Pressable>
+        <View style={styles.applied}>
+          <Text style={styles.appliedNote}>Plan applied to your week.</Text>
+          <Pressable style={styles.undoButton} onPress={undo} disabled={busy}>
+            <Text style={styles.undoText}>Undo last apply</Text>
+          </Pressable>
+        </View>
       ) : null}
 
       <View style={styles.capacity}>
@@ -571,8 +589,7 @@ function WeekGantt({ tasks, blocks, projectName }: { tasks: Task[]; blocks: Port
           </Text>
           <View style={styles.ganttTrack}>
             {byTask.get(t.id)!.map((b) => {
-              const left = ((b.startAt - weekStart()) / WEEK_MS) * 100;
-              const width = ((b.endAt - b.startAt) / WEEK_MS) * 100;
+              const { left, width } = barSpan(b.startAt, b.endAt);
               return (
                 <View
                   key={`${b.itemId}-${b.startAt}`}
@@ -608,8 +625,8 @@ function fmtHours(minutes: number): string {
  */
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: Space.xl },
-  scroll: { flex: 1, backgroundColor: Palette.base },
-  content: { padding: Space.lg, gap: Space.sm, paddingBottom: 48 },
+  scroll: { flex: 1, backgroundColor: C.base },
+  content: { padding: Space.lg, gap: Space.sm, paddingBottom: 96 },
 
   projectRow: { flexGrow: 0, marginBottom: Space.xs },
   projectChip: {
@@ -617,48 +634,48 @@ const styles = StyleSheet.create({
     paddingVertical: Space.sm,
     borderRadius: Radius.control,
     borderWidth: 1,
-    borderColor: Palette.outline,
+    borderColor: C.outline,
     marginRight: Space.sm,
     minHeight: MinimumTouchTarget,
     justifyContent: "center",
   },
-  projectChipActive: { backgroundColor: Palette.accent, borderColor: Palette.accent },
-  projectChipText: { fontSize: 14, fontWeight: "500", color: Palette.on },
-  projectChipTextActive: { color: Palette.onAccent, fontWeight: "600" },
+  projectChipActive: { backgroundColor: C.accent, borderColor: C.accent },
+  projectChipText: { fontSize: 14, fontWeight: "500", color: C.on },
+  projectChipTextActive: { color: C.onAccent, fontWeight: "600" },
 
-  sectionTitle: { fontSize: 15, lineHeight: 20, fontWeight: "600", letterSpacing: -0.1, color: Palette.on, marginTop: Space.sm, marginBottom: Space.xs },
+  sectionTitle: { fontSize: 15, lineHeight: 20, fontWeight: "600", letterSpacing: -0.1, color: C.on, marginTop: Space.sm, marginBottom: Space.xs },
   stageTitle: {
     fontSize: 11,
     lineHeight: 14,
     fontWeight: "600",
     letterSpacing: 0.4,
     textTransform: "uppercase",
-    color: Palette.onFaint,
+    color: C.onFaint,
     marginTop: Space.md,
     marginBottom: 2,
   },
-  previewNote: { fontSize: 13, lineHeight: 18, marginTop: Space.md, color: Palette.urgent },
+  previewNote: { fontSize: 13, lineHeight: 18, marginTop: Space.md, color: C.urgent },
 
   addRow: { flexDirection: "row", gap: Space.sm, alignItems: "center" },
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: Palette.outline,
+    borderColor: C.outline,
     borderRadius: Radius.control,
-    backgroundColor: Palette.pure,
+    backgroundColor: C.pure,
     paddingHorizontal: Space.md,
     fontSize: 15,
-    color: Palette.on,
+    color: C.on,
     minHeight: MinimumTouchTarget,
   },
   addButton: {
-    backgroundColor: Palette.surfaceHighest,
+    backgroundColor: C.surfaceHighest,
     borderRadius: Radius.control,
     paddingHorizontal: Space.lg,
     justifyContent: "center",
     minHeight: MinimumTouchTarget,
   },
-  addButtonText: { fontSize: 15, fontWeight: "600", color: Palette.on },
+  addButtonText: { fontSize: 15, fontWeight: "600", color: C.on },
 
   taskRow: {
     flexDirection: "row",
@@ -667,50 +684,59 @@ const styles = StyleSheet.create({
     gap: Space.md,
     paddingVertical: Space.md,
     borderBottomWidth: 1,
-    borderBottomColor: Palette.outlineSoft,
+    borderBottomColor: C.outlineSoft,
   },
-  taskTitle: { fontSize: 15, lineHeight: 21, flex: 1, fontWeight: "500", color: Palette.on },
-  taskMeta: { fontSize: 13, color: Palette.onMuted, fontVariant: ["tabular-nums"] },
-  empty: { fontSize: 14, lineHeight: 20, color: Palette.onFaint, paddingVertical: 6 },
-  stale: { fontSize: 13, lineHeight: 18, color: Palette.urgent, marginTop: Space.xs },
+  taskTitle: { fontSize: 15, lineHeight: 21, flex: 1, fontWeight: "500", color: C.on },
+  taskMeta: { fontSize: 13, color: C.onMuted, fontVariant: ["tabular-nums"] },
+  empty: { fontSize: 14, lineHeight: 20, color: C.onFaint, paddingVertical: 6 },
+  stale: { fontSize: 13, lineHeight: 18, color: C.urgent, marginTop: Space.xs },
 
   primary: {
     marginTop: Space.xl,
-    backgroundColor: Palette.accent,
+    backgroundColor: C.accent,
     borderRadius: Radius.control,
     alignItems: "center",
     justifyContent: "center",
     minHeight: MinimumTouchTarget,
   },
-  primaryText: { color: Palette.onAccent, fontSize: 15, fontWeight: "600" },
+  primaryText: { color: C.onAccent, fontSize: 15, fontWeight: "600" },
 
   /* Analysis never writes: the proposal is shown, and Apply is the only thing
      that commits it. */
-  proposal: { marginTop: Space.xl, gap: 6 },
-  card: { flexDirection: "row", gap: Space.md, paddingVertical: Space.md, alignItems: "baseline" },
-  cardTime: { fontSize: 12.5, color: Palette.onMuted, minWidth: 92, fontVariant: ["tabular-nums"] },
+  proposal: { marginTop: Space.xl, gap: Space.sm },
+  card: {
+    flexDirection: "row",
+    gap: Space.md,
+    padding: 14,
+    alignItems: "flex-start",
+    borderWidth: 1,
+    borderColor: C.outlineSoft,
+    borderRadius: Radius.block,
+    backgroundColor: C.pure,
+  },
+  cardTime: { fontSize: 12.5, color: C.onMuted, minWidth: 92, fontVariant: ["tabular-nums"], marginTop: 1 },
   cardBody: { flex: 1, minWidth: 0 },
-  cardTitle: { fontSize: 14.5, lineHeight: 20, fontWeight: "500", color: Palette.on },
-  cardReason: { fontSize: 12.5, lineHeight: 18, color: Palette.onMuted, marginTop: 2 },
-  unplaced: { fontSize: 13, lineHeight: 18, color: Palette.deadline, paddingVertical: Space.xs },
-  health: { fontSize: 13, lineHeight: 18, marginTop: Space.sm, color: Palette.onMuted },
+  cardTitle: { fontSize: 14.5, lineHeight: 20, fontWeight: "600", color: C.on },
+  cardReason: { fontSize: 12.5, lineHeight: 18, color: C.onMuted, marginTop: 2 },
+  unplaced: { fontSize: 13, lineHeight: 18, color: C.deadline, paddingVertical: Space.xs },
+  health: { fontSize: 13, lineHeight: 18, marginTop: Space.sm, color: C.onMuted },
 
   proposalActions: { flexDirection: "row", gap: Space.sm, marginTop: Space.md },
   applyButton: {
     flex: 1,
-    backgroundColor: Palette.accent,
+    backgroundColor: C.accent,
     borderRadius: Radius.control,
     alignItems: "center",
     justifyContent: "center",
     minHeight: MinimumTouchTarget,
   },
-  applyText: { color: Palette.onAccent, fontSize: 15, fontWeight: "600" },
+  applyText: { color: C.onAccent, fontSize: 15, fontWeight: "600" },
   rejectButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: Palette.outline,
+    borderColor: C.outline,
     borderRadius: Radius.control,
-    backgroundColor: Palette.pure,
+    backgroundColor: C.pure,
     alignItems: "center",
     justifyContent: "center",
     minHeight: MinimumTouchTarget,
@@ -718,37 +744,38 @@ const styles = StyleSheet.create({
   rejectFull: {
     flex: 1,
     borderWidth: 1,
-    borderColor: Palette.outline,
+    borderColor: C.outline,
     borderRadius: Radius.control,
-    backgroundColor: Palette.pure,
+    backgroundColor: C.pure,
     alignItems: "center",
     justifyContent: "center",
     minHeight: MinimumTouchTarget,
   },
-  rejectText: { fontSize: 15, fontWeight: "500", color: Palette.on },
+  rejectText: { fontSize: 15, fontWeight: "500", color: C.on },
   undoButton: {
-    marginTop: Space.xl,
     borderWidth: 1,
-    borderColor: Palette.accent,
+    borderColor: C.accent,
     borderRadius: Radius.control,
     alignItems: "center",
     justifyContent: "center",
     minHeight: MinimumTouchTarget,
   },
-  undoText: { color: Palette.accent, fontSize: 15, fontWeight: "600" },
+  applied: { marginTop: Space.xl, gap: Space.sm },
+  appliedNote: { fontSize: 14, lineHeight: 20, fontWeight: "600", color: C.positive },
+  undoText: { color: C.accent, fontSize: 15, fontWeight: "600" },
 
   portfolio: { marginTop: Space.xl, gap: 6 },
   portfolioRow: { flexDirection: "row", alignItems: "center", gap: Space.sm },
-  portfolioLabel: { width: 84, fontSize: 13, fontWeight: "500", color: Palette.onSoft },
+  portfolioLabel: { width: 84, fontSize: 13, fontWeight: "500", color: C.onSoft },
   portfolioStrip: {
     flex: 1,
     height: 14,
     borderRadius: Radius.mark,
-    backgroundColor: Palette.surfaceHighest,
+    backgroundColor: C.surfaceHighest,
     overflow: "hidden",
   },
-  portfolioBar: { position: "absolute", top: 0, bottom: 0, borderRadius: Radius.mark, backgroundColor: Palette.accent },
-  portfolioNote: { fontSize: 12, lineHeight: 17, color: Palette.onMuted, marginTop: 2 },
+  portfolioBar: { position: "absolute", top: 0, bottom: 0, borderRadius: Radius.mark, backgroundColor: C.accent },
+  portfolioNote: { fontSize: 12, lineHeight: 17, color: C.onMuted, marginTop: 2 },
 
   gantt: { marginTop: Space.xl, gap: Space.xs },
   ganttTitle: {
@@ -757,46 +784,46 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     letterSpacing: 0.4,
     textTransform: "uppercase",
-    color: Palette.onFaint,
+    color: C.onFaint,
     marginBottom: 2,
   },
   ganttHeader: { height: 16, position: "relative" },
-  ganttDay: { position: "absolute", fontSize: 10, color: Palette.onFaint },
+  ganttDay: { position: "absolute", fontSize: 10, color: C.onFaint },
   ganttRow: { flexDirection: "row", alignItems: "center", gap: Space.sm, minHeight: 28 },
-  ganttTask: { width: 84, fontSize: 12, color: Palette.onSoft, fontWeight: "500" },
-  ganttTrack: { flex: 1, height: 12, borderRadius: Radius.mark, backgroundColor: Palette.surfaceHighest, overflow: "hidden" },
-  ganttBar: { position: "absolute", top: 0, bottom: 0, borderRadius: Radius.mark, backgroundColor: Palette.accent },
+  ganttTask: { width: 84, fontSize: 12, color: C.onSoft, fontWeight: "500" },
+  ganttTrack: { flex: 1, height: 12, borderRadius: Radius.mark, backgroundColor: C.surfaceHighest, overflow: "hidden" },
+  ganttBar: { position: "absolute", top: 0, bottom: 0, borderRadius: Radius.mark, backgroundColor: C.accent },
 
   capacity: { marginTop: Space.xl, gap: 6 },
   capacityRow: { flexDirection: "row", alignItems: "center", gap: Space.sm },
   capacityInput: {
     borderWidth: 1,
-    borderColor: Palette.outline,
+    borderColor: C.outline,
     borderRadius: Radius.control,
-    backgroundColor: Palette.pure,
+    backgroundColor: C.pure,
     paddingHorizontal: Space.md,
     fontSize: 15,
-    color: Palette.on,
+    color: C.on,
     minWidth: 72,
     minHeight: MinimumTouchTarget,
     textAlign: "center",
   },
-  capacityHint: { fontSize: 13, color: Palette.onMuted },
+  capacityHint: { fontSize: 13, color: C.onMuted },
   capacityButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: Palette.accent,
+    borderColor: C.accent,
     borderRadius: Radius.control,
     alignItems: "center",
     justifyContent: "center",
     minHeight: MinimumTouchTarget,
   },
-  capacityButtonText: { color: Palette.accent, fontSize: 15, fontWeight: "600" },
+  capacityButtonText: { color: C.accent, fontSize: 15, fontWeight: "600" },
   capacityResult: { marginTop: Space.sm, gap: Space.xs },
-  capacitySentence: { fontSize: 15, lineHeight: 21, fontWeight: "600", color: Palette.on },
-  capacityNumbers: { fontSize: 13, color: Palette.onMuted, fontVariant: ["tabular-nums"] },
+  capacitySentence: { fontSize: 15, lineHeight: 21, fontWeight: "600", color: C.on },
+  capacityNumbers: { fontSize: 13, color: C.onMuted, fontVariant: ["tabular-nums"] },
   capacityMoves: { marginTop: Space.xs, gap: 2 },
-  capacityMove: { fontSize: 13, lineHeight: 18, color: Palette.onMuted },
+  capacityMove: { fontSize: 13, lineHeight: 18, color: C.onMuted },
 
-  error: { color: Palette.deadline, fontSize: 14, lineHeight: 20, marginTop: Space.md },
+  error: { color: C.deadline, fontSize: 14, lineHeight: 20, marginTop: Space.md },
 });

@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { Palette, Space } from "@/constants/palette";
+import { Space } from "@/constants/palette";
+
+import { C } from "@/constants/theme";
 import { ui } from "@/constants/ui";
 import { makeRedirectUri } from "@/app/auth-callback";
 import { API_BASE, client, savedSession, saveSession } from "@/lib/api";
@@ -81,7 +83,7 @@ export default function LoginScreen() {
   if (checking) {
     return (
       <View style={ui.centre}>
-        <ActivityIndicator color={Palette.accent} />
+        <ActivityIndicator color={C.accent} />
       </View>
     );
   }
@@ -101,7 +103,7 @@ export default function LoginScreen() {
               disabled={busy}
               accessibilityRole="button"
             >
-              {busy ? <ActivityIndicator color={Palette.onAccent} /> : <Text style={ui.btnPrimaryText}>Try the demo</Text>}
+              {busy ? <ActivityIndicator color={C.onAccent} /> : <Text style={ui.btnPrimaryText}>Try the demo</Text>}
             </Pressable>
           ) : null}
           <Pressable
@@ -114,19 +116,19 @@ export default function LoginScreen() {
           </Pressable>
         </View>
         {error ? <Text style={ui.error}>{error}</Text> : null}
-        <Text style={styles.footnote}>Server: {API_BASE}</Text>
+        {__DEV__ ? <Text style={styles.footnote}>Server: {API_BASE}</Text> : null}
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: Palette.base },
+  safeArea: { flex: 1, backgroundColor: C.base },
   body: { flex: 1, padding: Space.xl, justifyContent: "center", gap: Space.md },
   // The one place the app speaks at full size; every other screen tops out at 28.
-  title: { fontSize: 32, lineHeight: 38, fontWeight: "600", letterSpacing: -0.8, color: Palette.on },
-  subtitle: { fontSize: 15, lineHeight: 22, color: Palette.onMuted, maxWidth: 420 },
+  title: { fontSize: 32, lineHeight: 38, fontWeight: "600", letterSpacing: -0.8, color: C.on },
+  subtitle: { fontSize: 15, lineHeight: 22, color: C.onMuted, maxWidth: 420 },
   actions: { marginTop: Space.xl, gap: Space.md },
   pressed: { opacity: 0.8 },
-  footnote: { fontSize: 12, lineHeight: 17, color: Palette.onFaint, marginTop: Space.xl },
+  footnote: { fontSize: 12, lineHeight: 17, color: C.onFaint, marginTop: Space.xl },
 });

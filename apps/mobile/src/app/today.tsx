@@ -2,7 +2,9 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Palette, Radius, Space } from "@/constants/palette";
+import { Radius, Space } from "@/constants/palette";
+
+import { C } from "@/constants/theme";
 import { hm, ui } from "@/constants/ui";
 import { client, savedSession } from "@/lib/api";
 import type { ExternalEvent, SummaryResponse, TodayBlock, TodayResponse } from "@/lib/types";
@@ -135,7 +137,7 @@ export default function TodayScreen() {
   if (!today) {
     return (
       <View style={ui.centre}>
-        <ActivityIndicator color={Palette.accent} />
+        <ActivityIndicator color={C.accent} />
         {error ? <Text style={ui.error}>{error}</Text> : null}
       </View>
     );
@@ -165,7 +167,9 @@ export default function TodayScreen() {
     })),
   ].sort((a, b) => a.start - b.start);
 
-  const total = Math.max(1, today.busyMinutes + today.freeMinutes);
+  const fixedMinutes = events.reduce((s, e) => s + Math.max(0, (e.endTime - e.startTime) / 60_000), 0);
+  const planMinutes = blocks.reduce((s, b) => s + Math.max(0, (b.endAt - b.startAt) / 60_000), 0);
+  const total = Math.max(1, fixedMinutes + planMinutes + today.freeMinutes);
   const quotaSpent = summary !== null && summary.used >= summary.limit;
 
   return (
@@ -191,13 +195,15 @@ export default function TodayScreen() {
         <View
           style={ui.meter}
           accessibilityRole="image"
-          accessibilityLabel={`${today.busyMinutes} minutes busy, ${today.freeMinutes} minutes free.`}
+          accessibilityLabel={`${Math.round(fixedMinutes)} fixed, ${Math.round(planMinutes)} planned, ${today.freeMinutes} free.`}
         >
-          <View style={[ui.meterFixed, { flex: Math.max(0.0001, today.busyMinutes / total) }]} />
+          <View style={[ui.meterFixed, { flex: Math.max(0.0001, fixedMinutes / total) }]} />
+          <View style={[ui.meterPlan, { flex: Math.max(0.0001, planMinutes / total) }]} />
           <View style={[ui.meterFree, { flex: Math.max(0.0001, today.freeMinutes / total) }]} />
         </View>
         <View style={ui.legend}>
-          <Text style={ui.legendItem}>Busy {hm(today.busyMinutes)}</Text>
+          <Text style={ui.legendItem}>Fixed {hm(fixedMinutes)}</Text>
+          <Text style={ui.legendItem}>Planned {hm(planMinutes)}</Text>
           <Text style={ui.legendItem}>Free {hm(today.freeMinutes)}</Text>
         </View>
       </View>
@@ -221,7 +227,12 @@ export default function TodayScreen() {
       </View>
 
       {rows.length === 0 ? (
-        <Text style={ui.empty}>Nothing on the calendar and nothing planned.</Text>
+        <View style={styles.emptyCard}>
+          <Text style={ui.empty}>Nothing on the calendar and nothing planned.</Text>
+          <Pressable style={ui.btnPrimary} onPress={() => router.push("/planner")} accessibilityRole="button">
+            <Text style={ui.btnPrimaryText}>Add your first task</Text>
+          </Pressable>
+        </View>
       ) : (
         rows.map((r) => (
           <View key={r.key} style={ui.row}>
@@ -288,19 +299,20 @@ export default function TodayScreen() {
 const styles = StyleSheet.create({
   head: { flexDirection: "row", alignItems: "flex-start", gap: Space.md, marginBottom: Space.xs },
   headText: { flex: 1, minWidth: 0 },
-  stale: { fontSize: 13, lineHeight: 18, color: Palette.urgent },
+  stale: { fontSize: 13, lineHeight: 18, color: C.urgent },
   spaced: { marginTop: Space.sm },
   spacedWide: { marginTop: Space.xl },
+  emptyCard: { gap: Space.md, paddingVertical: Space.sm },
   timelineScroll: {
     height: 400,
     borderRadius: Radius.block,
     borderWidth: 1,
-    borderColor: Palette.outlineSoft,
-    backgroundColor: Palette.pure,
+    borderColor: C.outlineSoft,
+    backgroundColor: C.pure,
   },
   timeline: { height: 24 * HOUR_DP, position: "relative" },
-  hourLine: { position: "absolute", left: 0, right: 0, borderTopWidth: 1, borderTopColor: Palette.outlineSoft },
-  hourLabel: { position: "absolute", top: 2, right: 8, fontSize: 11, color: Palette.onFaint },
+  hourLine: { position: "absolute", left: 0, right: 0, borderTopWidth: 1, borderTopColor: C.outlineSoft },
+  hourLabel: { position: "absolute", top: 2, right: 8, fontSize: 11, color: C.onFaint },
   tlBar: {
     position: "absolute",
     left: 48,
@@ -314,12 +326,12 @@ const styles = StyleSheet.create({
   tlEvent: {
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: Palette.urgent,
+    borderColor: C.urgent,
     borderLeftWidth: 3,
     backgroundColor: "transparent",
   },
-  tlEventTitle: { fontSize: 12, fontWeight: "500", color: Palette.urgent },
+  tlEventTitle: { fontSize: 12, fontWeight: "500", color: C.urgent },
   /* A block: filled with the accent, because it is yours and can be moved. */
-  tlBlock: { backgroundColor: Palette.accentWash, borderLeftWidth: 3, borderLeftColor: Palette.accent },
-  tlBlockTitle: { fontSize: 12, fontWeight: "600", color: Palette.accent },
+  tlBlock: { backgroundColor: C.accentWash, borderLeftWidth: 3, borderLeftColor: C.accent },
+  tlBlockTitle: { fontSize: 12, fontWeight: "600", color: C.accent },
 });

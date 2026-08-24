@@ -2,7 +2,9 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { Palette, Radius, Space } from "@/constants/palette";
+import { Radius, Space } from "@/constants/palette";
+
+import { C } from "@/constants/theme";
 import { ui } from "@/constants/ui";
 import { API_BASE, clearSession, client, savedSession } from "@/lib/api";
 import { unregisterPushToken } from "@/lib/push";
@@ -65,6 +67,7 @@ export default function SettingsScreen() {
   const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   useEffect(() => {
     (async () => {
@@ -146,6 +149,9 @@ export default function SettingsScreen() {
                 <Text style={ui.btnText}>Use device</Text>
               </Pressable>
             </View>
+            {deviceZone && scheduleDraft.timeZoneId.trim() !== deviceZone ? (
+              <Text style={styles.zoneHint}>This device is in {deviceZone}.</Text>
+            ) : null}
           </View>
 
           {WEEK_DAYS.map(({ dayOfWeek, label }) => {
@@ -159,7 +165,7 @@ export default function SettingsScreen() {
                   value={minutesToTime(window?.startMinute)}
                   onChangeText={(value) => setScheduleDraft(replaceWeeklyWindow(scheduleDraft, dayOfWeek, timeToMinutes(value), window?.endMinute ?? 1020))}
                   placeholder="09:00"
-                  placeholderTextColor={Palette.onFaint}
+                  placeholderTextColor={C.onFaint}
                   keyboardType="numbers-and-punctuation"
                   accessibilityLabel={`${label} start`}
                 />
@@ -169,7 +175,7 @@ export default function SettingsScreen() {
                   value={minutesToTime(window?.endMinute)}
                   onChangeText={(value) => setScheduleDraft(replaceWeeklyWindow(scheduleDraft, dayOfWeek, window?.startMinute ?? 540, timeToMinutes(value)))}
                   placeholder="17:00"
-                  placeholderTextColor={Palette.onFaint}
+                  placeholderTextColor={C.onFaint}
                   keyboardType="numbers-and-punctuation"
                   accessibilityLabel={`${label} end`}
                 />
@@ -222,27 +228,28 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  setting: { paddingVertical: Space.md, borderBottomWidth: 1, borderBottomColor: Palette.outlineSoft, gap: 6 },
-  settingName: { fontSize: 14, lineHeight: 20, fontWeight: "500", color: Palette.on },
+  setting: { paddingVertical: Space.md, borderBottomWidth: 1, borderBottomColor: C.outlineSoft, gap: 6 },
+  settingName: { fontSize: 14, lineHeight: 20, fontWeight: "500", color: C.on },
   controlRow: { flexDirection: "row", alignItems: "center", gap: Space.sm },
   grow: { flex: 1 },
-  mono: { fontSize: 13, color: Palette.onMuted, fontFamily: "monospace" },
+  mono: { fontSize: 13, color: C.onMuted, fontFamily: "monospace" },
   dayRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: Space.sm },
-  dayLabel: { width: 82, fontSize: 14, color: Palette.on },
-  dayLabelClosed: { color: Palette.onFaint },
+  dayLabel: { width: 82, fontSize: 14, color: C.on },
+  dayLabelClosed: { color: C.onFaint },
   timeInput: { width: 82, textAlign: "center" },
-  dash: { fontSize: 15, color: Palette.onFaint },
-  offline: { color: Palette.urgent, fontSize: 13, lineHeight: 18, marginTop: Space.sm },
-  success: { color: Palette.positive, fontSize: 14, marginTop: Space.sm },
+  dash: { fontSize: 15, color: C.onFaint },
+  offline: { color: C.urgent, fontSize: 13, lineHeight: 18, marginTop: Space.sm },
+  zoneHint: { fontSize: 12, lineHeight: 17, color: C.onFaint, marginTop: Space.xs },
+  success: { color: C.positive, fontSize: 14, marginTop: Space.sm },
   spaced: { marginTop: Space.lg },
   signOut: {
     marginTop: Space.xxl,
     borderWidth: 1,
-    borderColor: Palette.deadline,
+    borderColor: C.deadline,
     borderRadius: Radius.control,
     minHeight: 48,
     alignItems: "center",
     justifyContent: "center",
   },
-  signOutText: { color: Palette.deadline, fontSize: 15, fontWeight: "600" },
+  signOutText: { color: C.deadline, fontSize: 15, fontWeight: "600" },
 });
