@@ -1047,3 +1047,36 @@ These are evidence or operator/device tasks, not safely closable by local source
   verification, API 24 rendered inspection, manual accessibility/form-factor/
   process-death coverage, consultant usability sessions, and the eight high
   upstream Expo/Metro audit findings (needs a planned framework upgrade).
+
+### 2026-08-25 (landing the mobile shell + portfolio-week tranche)
+
+- Landed the uncommitted 2026-08-24..25 tranche as two per-layer commits after
+  re-running every repository-local gate on the tree:
+  - **Server** (`Routes.kt` + new `PortfolioWeekTest`): the `/v1/portfolio`
+    week window was computed as midnight-*today* — the inline expression
+    subtracted `DayOfWeek.MONDAY.getValue() - 1`, a constant zero days — so
+    mid-week the window began at today and every earlier weekday's bars fell
+    before its left edge (the same family of weekday-sensitive defect as the
+    2026-08-23 acceptance fix, but on the read side). Extracted
+    `PortfolioWeek.startOf`: Monday 00:00 UTC of the week containing now,
+    matching the Monday-based axis both clients draw. Three-test suite pins
+    all seven days of a known week, mid-week instants, and the exclusive far
+    boundary.
+  - **Mobile**: navigation moved from Stack to bottom Tabs (Today / Planner /
+    Settings; login and auth-callback hidden from the bar), screen styles and
+    `ui.ts` migrated from the raw `Palette` object to `C` (the launch-time
+    scheme constant) so dark mode actually applies to existing screens, the
+    login server footnote is dev-builds-only, Settings shows a hint when the
+    schedule draft's timezone differs from the device's, and the Planner week
+    Gantt clamps bar spans into the visible axis with a 1%-floor width so an
+    edge block stays visible instead of vanishing between pixels.
+- Gate evidence on the landed tree: `scripts/verify.sh --fast` green,
+  `scripts/verify.sh --journey` green (**3.315 s**, 11 legs), mobile vitest
+  **86/86**, expo lint clean, `tsc --noEmit` clean, `git diff --check` clean.
+- Remaining register unchanged: hosted CI run for the unpublished branch,
+  real Google-account OAuth/calendar evidence, production KMS/Stripe/Gemini/
+  Expo/DNS configuration, physical-device cache proof, Mac XCFramework/Swift
+  verification, API 24 rendered inspection, manual accessibility/form-factor/
+  process-death coverage, consultant usability sessions, and the eight high
+  upstream Expo/Metro audit findings (needs a planned framework upgrade).
+
