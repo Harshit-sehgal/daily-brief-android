@@ -839,10 +839,10 @@ fun Application.routes(config: Config) {
         get("/portfolio") {
           val session = sessions.require(call)
           val now = System.currentTimeMillis()
-          val weekStart =
-            java.time.Instant.ofEpochMilli(now).truncatedTo(java.time.temporal.ChronoUnit.DAYS)
-              .minus(java.time.Duration.ofDays(java.time.DayOfWeek.MONDAY.getValue() - 1L))
-              .toEpochMilli()
+          // The week axis the clients draw is Monday 00:00 UTC; the strip and the per-project
+          // Gantt place bars against it, so the window must match or Sunday bars fall outside
+          // every labelled day.
+          val weekStart = PortfolioWeek.startOf(now)
           val weekEnd = weekStart + 7 * 24 * 60 * 60 * 1000L
           val projects =
             Db.dataSource.connection.use { conn ->
@@ -1332,6 +1332,18 @@ fun Sessions.require(call: ApplicationCall): Session =
  * Fixture world: one workspace, one project, one provider — created on demand so the
  * journey test can boot against an empty database and still have everything wired.
  */
+/** The portfolio strip's week window: Monday 00:00 UTC of the week containing [nowMs].
+ *  Pure so the Monday alignment is pinned by test — an earlier inline version shifted by a
+ *  constant zero days, so on a Sunday the window began today and the clients' Monday-based
+ *  axis drew every bar as a sliver past its right edge. */
+object PortfolioWeek {
+  fun startOf(nowMs: Long): Long {
+    val day = java.time.Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+    val daysSinceMonday = (day.dayOfWeek.value - 1).toLong() // ISO: Monday=1 … Sunday=7
+    return day.minusDays(daysSinceMonday).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+  }
+}
+
 object FixtureWorld {
   private const val PROJECT_NAME = "My Plan"
 
