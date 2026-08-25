@@ -37,8 +37,12 @@ import PlannerCore
 let _ = EnginePreview.shared
 EOF
 
+# -sdk is required: without it swiftc resolves the stdlib against the macOS SDK and cannot
+# load the simulator target's library. First hosted run caught both this and the Kotlin
+# compile failure before it.
 xcrun swiftc \
   -typecheck \
+  -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
   -target arm64-apple-ios16.4-simulator \
   -F "$SLICE" \
   "$SMOKE"
