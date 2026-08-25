@@ -3,19 +3,19 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
-    "@expo/ui": "~57.0.11",
-    "expo": "~57.0.14",
+    "@expo/ui": "~57.0.13",
+    "expo": "~57.0.16",
     "expo-constants": "~57.0.12",
     "expo-device": "~57.0.1",
     "expo-file-system": "~57.0.4",
     "expo-font": "~57.0.1",
     "expo-glass-effect": "~57.0.1",
     "expo-image": "~57.0.3",
-    "expo-linking": "~57.0.6",
-    "expo-notifications": "~57.0.12",
-    "expo-router": "~57.0.14",
+    "expo-linking": "~57.0.7",
+    "expo-notifications": "~57.0.14",
+    "expo-router": "~57.0.16",
     "expo-secure-store": "~57.0.1",
-    "expo-splash-screen": "~57.0.7",
+    "expo-splash-screen": "~57.0.8",
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.2",
     "expo-system-ui": "~57.0.2",
@@ -40,7 +40,21 @@
   "overrides": {
     "xcode": {
       "uuid": "11.1.1"
-    }
+    },
+    "metro": "0.84.5",
+    "metro-cache": "0.84.5",
+    "metro-cache-key": "0.84.5",
+    "metro-config": "0.84.5",
+    "metro-core": "0.84.5",
+    "metro-file-map": "0.84.5",
+    "metro-minify-terser": "0.84.5",
+    "metro-resolver": "0.84.5",
+    "metro-runtime": "0.84.5",
+    "metro-source-map": "0.84.5",
+    "metro-symbolicate": "0.84.5",
+    "metro-transform-plugins": "0.84.5",
+    "metro-transform-worker": "0.84.5",
+    "metro-babel-transformer": "0.84.5"
   },
   "scripts": {
     "start": "expo start",
