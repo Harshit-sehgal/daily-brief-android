@@ -25,7 +25,13 @@ echo "mobile: publishing local engine AARs"
 ./scripts/publish-engine-local.sh --mobile
 
 echo "mobile: assembling release APK"
-(cd apps/mobile/android && ./gradlew --offline --no-daemon --stacktrace :app:assembleRelease)
+# Same DAILYBRIEF_GRADLE_ONLINE hatch as publish-engine-local.sh: a fresh CI checkout has a
+# cold Gradle cache and --offline cannot resolve anything from it.
+if [ "${DAILYBRIEF_GRADLE_ONLINE:-0}" = "1" ]; then
+  (cd apps/mobile/android && ./gradlew --no-daemon --stacktrace :app:assembleRelease)
+else
+  (cd apps/mobile/android && ./gradlew --offline --no-daemon --stacktrace :app:assembleRelease)
+fi
 
 APK="$ROOT/apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
 BUNDLE="$ROOT/apps/mobile/android/app/build/generated/assets/react/release/index.android.bundle"

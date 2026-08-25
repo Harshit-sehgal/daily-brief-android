@@ -19,11 +19,22 @@ export PATH="$JAVA_HOME/bin:$PATH"
 MOBILE=""
 if [[ "${1:-}" == "--mobile" ]]; then MOBILE="-PmobileCompileSdk=36"; fi
 
-./gradlew --offline $MOBILE \
-  :planning-contract:publishJvmPublicationToMavenLocal \
-  :planning-contract:publishAndroidPublicationToMavenLocal \
-  :planning-contract:publishKotlinMultiplatformPublicationToMavenLocal \
-  :planning-core:publishAndroidPublicationToMavenLocal \
-  :planning-core:publishKotlinMultiplatformPublicationToMavenLocal
+# --offline is the local default (every dependency is cached); DAILYBRIEF_GRADLE_ONLINE=1
+# opts out for a fresh CI checkout whose Gradle cache is cold — same hatch as journey.sh.
+if [ "${DAILYBRIEF_GRADLE_ONLINE:-0}" = "1" ]; then
+  ./gradlew $MOBILE \
+    :planning-contract:publishJvmPublicationToMavenLocal \
+    :planning-contract:publishAndroidPublicationToMavenLocal \
+    :planning-contract:publishKotlinMultiplatformPublicationToMavenLocal \
+    :planning-core:publishAndroidPublicationToMavenLocal \
+    :planning-core:publishKotlinMultiplatformPublicationToMavenLocal
+else
+  ./gradlew --offline $MOBILE \
+    :planning-contract:publishJvmPublicationToMavenLocal \
+    :planning-contract:publishAndroidPublicationToMavenLocal \
+    :planning-contract:publishKotlinMultiplatformPublicationToMavenLocal \
+    :planning-core:publishAndroidPublicationToMavenLocal \
+    :planning-core:publishKotlinMultiplatformPublicationToMavenLocal
+fi
 
 echo "Published com.example:planning-core-android:0.1.0 (+ planning-contract) to ~/.m2${MOBILE:+ (mobile: compileSdk 36)}"
