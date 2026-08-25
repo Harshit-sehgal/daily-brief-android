@@ -34,7 +34,13 @@ scripts/emulator.sh --check >/dev/null || {
 }
 
 echo "capture: building"
-./gradlew --offline assembleDebug assembleDebugAndroidTest -q
+# --offline is the local default (every dependency is cached), but a fresh CI checkout has a
+# cold Gradle cache and would fail resolution outright — same escape hatch as journey.sh.
+if [ "${DAILYBRIEF_GRADLE_ONLINE:-0}" = "1" ]; then
+  ./gradlew assembleDebug assembleDebugAndroidTest -q
+else
+  ./gradlew --offline assembleDebug assembleDebugAndroidTest -q
+fi
 
 install_apk() {
   local apk="$1"
