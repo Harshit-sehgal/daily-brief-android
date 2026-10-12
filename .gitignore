@@ -23,6 +23,13 @@ keystore.properties
 # local tool scratch
 .commandcode/
 
+# local agent tooling (machine-local, never shared)
+.claude/settings.local.json
+.freebuff/
+
+# IDE
+.idea/
+
 # per-module build output (root /build only covers the root project)
 **/build
 
