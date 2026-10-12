@@ -56,6 +56,8 @@ fun Application.module(config: Config) {
     exposeHeader(CSRF_HEADER)
     allowMethod(HttpMethod.Post)
     allowMethod(HttpMethod.Put)
+    allowMethod(HttpMethod.Patch)
+    allowMethod(HttpMethod.Delete)
     allowMethod(HttpMethod.Get)
     allowMethod(HttpMethod.Options)
     // Browser sessions are HttpOnly cookies. Bearer clients (mobile and scripts) still work

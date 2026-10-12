@@ -1,0 +1,75 @@
+# The whole notebook on one machine: Postgres, the planning server, the web app, and
+# Caddy in front giving both an https origin on the same site (which the session cookie
+# needs). Point two DNS names at the machine, fill in deploy/.env, and:
+#
+#   ./gradlew :server:installDist          # from the repository root, once per release
+#   docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+#
+# Caddy obtains and renews the certificates itself. docs/saas/12-going-public.md is the
+# runbook this belongs to.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dailybrief
+      POSTGRES_USER: dailybrief
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dailybrief -d dailybrief"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  server:
+    build: ../services/server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      DATABASE_URL: jdbc:postgresql://db:5432/dailybrief
+      DATABASE_USER: dailybrief
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET (32+ characters)}
+      ENVELOPE_KEY_HEX: ${ENVELOPE_KEY_HEX:?set ENVELOPE_KEY_HEX (64 hex characters)}
+      WEB_ORIGIN: https://${APP_HOST:?set APP_HOST}${PUBLIC_PORT_SUFFIX:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_ID: ${STRIPE_PRICE_ID:-}
+      EXPO_ACCESS_TOKEN: ${EXPO_ACCESS_TOKEN:-}
+      # Only ever "1" for a rehearsal: it replaces Google with an account anyone can use.
+      FIXTURE_PROVIDER: ${FIXTURE_PROVIDER:-0}
+
+  web:
+    build:
+      context: ../apps/web
+      args:
+        NEXT_PUBLIC_API_BASE: https://${API_HOST:?set API_HOST}${PUBLIC_PORT_SUFFIX:-}
+        NEXT_PUBLIC_CONTACT_EMAIL: ${CONTACT_EMAIL:-}
+        NEXT_PUBLIC_FIXTURE: ${FIXTURE_PROVIDER:-0}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [server, web]
+    environment:
+      APP_HOST: ${APP_HOST}
+      API_HOST: ${API_HOST}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+
+volumes:
+  db:
+  caddy:

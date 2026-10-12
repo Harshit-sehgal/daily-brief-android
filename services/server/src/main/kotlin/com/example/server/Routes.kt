@@ -41,7 +41,10 @@ import com.example.server.db.Envelope
 import com.example.server.key.KeyProviders
 import com.example.server.google.FixtureCalendarProvider
 import com.example.server.google.GoogleCalendarProvider
+import com.example.server.google.GoogleAccount
+import com.example.server.google.GoogleNotConnected
 import com.example.server.google.GoogleOAuth
+import com.example.server.google.GoogleScopes
 import com.example.server.plan.Journal
 import com.example.server.push.ExpoPushProvider
 import com.example.server.push.FixturePushProvider
@@ -187,9 +190,21 @@ fun Application.routes(config: Config) {
             }
           val state = oauthState.issue(redirectUri)
           val codeChallenge = requireNotNull(oauthState.codeVerifier(state)) { "could not derive OAuth PKCE verifier" }
+          // The browser signs in with identity alone and connects the calendar or Drive
+          // later (?connect=). The phone app has one consent screen, so it still asks
+          // for the calendar with sign-in.
+          val connect = call.request.queryParameters["connect"]
+            ?: if (redirectUri == OAuthRedirects.webCallback(config)) null else "calendar"
           call.respond(
             mapOf(
-              "url" to GoogleOAuth.authorizeUrl(config, redirectUri, state, oauthState.codeChallenge(codeChallenge)),
+              "url" to GoogleOAuth.authorizeUrl(
+                config,
+                redirectUri,
+                state,
+                oauthState.codeChallenge(codeChallenge),
+                scope = GoogleScopes.requested(connect),
+                consent = connect != null,
+              ),
               "redirectUri" to redirectUri,
             ),
           )
@@ -207,7 +222,13 @@ fun Application.routes(config: Config) {
           val tokens = GoogleOAuth.exchangeCode(config, body.code, redirectUri, codeVerifier)
           val identity = GoogleOAuth.fetchIdentity(tokens.access_token)
           val workspaceId = FixtureWorld.ensure(call, email = identity.email, name = identity.name ?: identity.email)
-          GoogleOAuth.storeToken(config, workspaceId, "google", "google-account", GoogleOAuth.json.encodeToString(tokens))
+          GoogleAccount.store(config, workspaceId, tokens)
+          // Whatever was just granted is put to work before the page loads, so a newly
+          // connected calendar is already on the week. A provider hiccup must not fail
+          // the sign-in; the client syncs again on its own.
+          runCatching { Notebook.syncCalendar(config, workspaceId) }
+          runCatching { Notebook.copyToDrive(config, workspaceId) }
+          runCatching { Notebook.pushPlan(config, workspaceId) }
           val token = sessions.issue(workspaceId)
           if (redirectUri == OAuthRedirects.webCallback(config)) {
             val csrfToken = call.setBrowserSession(token)
@@ -542,9 +563,12 @@ fun Application.routes(config: Config) {
 
         post("/reconcile") {
           val session = sessions.require(call)
-          val provider = providerFor(config, session.workspaceId)
-          ReconcileWorker.reconcile(session.workspaceId, FixtureWorld.projectId(session.workspaceId), provider)
-          call.respond(mapOf("ok" to true))
+          try {
+            Notebook.syncCalendar(config, session.workspaceId)
+            call.respond(mapOf("ok" to true))
+          } catch (e: GoogleNotConnected) {
+            call.respond(HttpStatusCode.Conflict, mapOf("error" to "Your Google calendar is not connected"))
+          }
         }
 
         post("/plan") {
@@ -1185,6 +1209,8 @@ fun Application.routes(config: Config) {
           }
         }
 
+        notebookRoutes(config, sessions)
+
         // Fixture-only: the WP-14 sync ledger, so the journey can prove a reconcile ran and
         // committed. The ledger itself is written in every mode; only this read is fixture-only.
         if (config.fixtureProvider) {
@@ -1440,45 +1466,16 @@ object DefaultStages {
 
 fun providerFor(config: Config, workspaceId: String): com.example.server.google.CalendarProvider {
   if (config.fixtureProvider) return FixtureCalendarProvider(workspaceId)
-  val connection =
-    Db.dataSource.connection.use { conn ->
-      conn.queryOne(
-        "SELECT id, token_ciphertext FROM calendar_connections WHERE workspace_id = ? AND status = 'connected' LIMIT 1",
-        listOf(workspaceId),
-      ) { rs -> rs.getString("id") to rs.getString("token_ciphertext") }
-    } ?: error("no connected calendar for workspace $workspaceId")
-  val connectionId = connection.first
-  val stored = Envelope.unwrap(KeyProviders.from(config), workspaceId, "calendar_connection_$connectionId", connection.second)
-    ?: error("could not unwrap the stored token for workspace $workspaceId")
-  val token = GoogleOAuth.json.decodeFromString<GoogleOAuth.TokenResponse>(stored)
-  // Refresh is WP-14 hardening: Google access tokens live ~1 hour. When a fetch is refused
-  // with 401/403, the provider refreshes once through the OAuth endpoint, persists the fresh
-  // pair back through the envelope, and retries — so a long demo never needs a re-consent.
-  val storedRefreshToken = token.refresh_token
-  val refresher =
-    storedRefreshToken?.let { refreshToken ->
-      {
-        GoogleOAuth.refreshAccessToken(config, refreshToken)
-      }
-    }
+  val stored = GoogleAccount.load(config, workspaceId)?.takeIf { GoogleScopes.CALENDAR in it.scopes }
+    ?: throw GoogleNotConnected("Google calendar")
+  // Google access tokens live about an hour. When a fetch is refused with 401/403 the
+  // provider refreshes once, GoogleAccount persists the fresh pair through the envelope,
+  // and the fetch is retried — so a long session never needs a re-consent.
   return GoogleCalendarProvider(
     config,
-    connectionId,
-    token.access_token,
-    refresher = refresher,
-    onTokensRefreshed = { fresh ->
-      // A refresh response may or may not rotate the refresh token; keep the stored one when
-      // it does not. The envelope authority is the current KeyProvider, like storeToken.
-      val pair = fresh.copy(refresh_token = fresh.refresh_token ?: storedRefreshToken)
-      val keyProvider = KeyProviders.from(config)
-      val envelope = Envelope.wrap(keyProvider, workspaceId, "calendar_connection_$connectionId", GoogleOAuth.json.encodeToString(pair))
-      Db.dataSource.connection.use { conn ->
-        conn.execute(
-          "UPDATE calendar_connections SET token_ciphertext = ?, token_kms_key_id = ?, updated_at = ? WHERE workspace_id = ? AND id = ?",
-          listOf(envelope, keyProvider.keyId, System.currentTimeMillis(), workspaceId, connectionId),
-        )
-      }
-    },
+    stored.connectionId,
+    stored.tokens.access_token,
+    refresher = stored.tokens.refresh_token?.let { { GoogleAccount.refresh(config, workspaceId, stored) } },
   )
 }
 

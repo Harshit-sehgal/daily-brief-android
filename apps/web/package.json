@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "node e2e/web-journey.mjs"
+    "test:e2e": "node e2e/web-journey.mjs",
+    "test:ui": "node e2e/notebook.mjs",
+    "mock": "node e2e/mock-api.mjs"
   },
   "dependencies": {
     "next": "16.3.1",

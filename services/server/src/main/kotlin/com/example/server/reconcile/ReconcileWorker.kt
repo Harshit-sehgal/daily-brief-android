@@ -36,8 +36,10 @@ object ReconcileWorker {
       // immediately asking again.
       val incoming =
         retry(FETCH_ATTEMPTS, BACKOFF_MS) {
-          val rangeStart = 0L
-          val rangeEnd = startedAt + 30L * 24 * 60 * 60 * 1000
+          // A week back so the open week is whole on a Sunday, two months ahead for planning.
+          // The window used to start at the epoch, which fetched an account's entire history.
+          val rangeStart = startedAt - 8L * 24 * 60 * 60 * 1000
+          val rangeEnd = startedAt + 62L * 24 * 60 * 60 * 1000
           provider.fetchEvents(rangeStart, rangeEnd)
         }
       eventsSeen = incoming.size

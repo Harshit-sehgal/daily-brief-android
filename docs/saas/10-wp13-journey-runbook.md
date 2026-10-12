@@ -31,9 +31,11 @@ or mutate data, and it does not replace the real-account journey below.
   ```
 
 - A Google Cloud OAuth client of type "Web application" with the redirect URI
-  `http://localhost:3000/auth/callback` and the scope
-  `https://www.googleapis.com/auth/calendar.readonly`. The client must be in a
-  **test** publishing state (or the consent screen needs a test user).
+  `http://localhost:3000/auth/callback`, and the scopes `openid email profile`,
+  `https://www.googleapis.com/auth/calendar.readonly` and
+  `https://www.googleapis.com/auth/drive.file` declared on the consent screen
+  (`12-going-public.md` has the full setup). The client must be in a **test**
+  publishing state (or the consent screen needs a test user).
 - The web client (fixture off, real mode):
 
   ```bash
@@ -49,9 +51,9 @@ Start the stopwatch at the moment you click **Sign in with Google**.
 
 | # | Step | What should happen | Budget |
 | --- | --- | --- | --- |
-| 1 | Sign in | Google consent → lands back on the Planner, signed in | ≤ 20 s |
+| 1 | Sign in | Continue with Google (identity only) → lands back on the week, signed in | ≤ 20 s |
 | 2 | Add three tasks | Titles + effort minutes appear in the table | ≤ 10 s |
-| 3 | Connect calendar | The calendar card shows your event count and busy minutes | ≤ 10 s |
+| 3 | Connect calendar | A second, calendar-only consent → back on the week with your events on their days | ≤ 15 s |
 | 4 | Plan my week | Proposal card: ≥ 1 block, each with a reason sentence | ≤ 10 s |
 | 5 | Apply | Blocks land on Today; the card shows them | ≤ 10 s |
 | 6 | Reject leg (optional) | A second proposal, Reject → Today unchanged | ≤ 10 s |

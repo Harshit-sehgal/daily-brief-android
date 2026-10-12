@@ -16,7 +16,7 @@ in the SaaS stages starts until it is stable. `:server` is the SaaS service (WP-
 Postgres, unit-tested (`:server:test` in the gate) and acceptance-tested by
 `scripts/journey.sh`, which runs the whole signup→plan→apply→undo loop against docker
 Postgres in ~1.5 s; `scripts/verify.sh --journey` is the gate plus that acceptance. The
-`apps/web/` client (Next.js, Planner + Today only) talks to it; the server is authoritative
+`apps/web/` client (Next.js: Today, Week, Projects, Settings) talks to it; the server is authoritative
 for Apply. `apps/mobile/` is the Expo app (Login, Today, Planner, Settings) on the same
 server; its `planner-engine` local module runs `packages/planning-core`'s `EnginePreview` on-device
 for preview — the server stays authoritative for Apply. `:planning-contract` is now KMP
@@ -53,6 +53,14 @@ scripts/web-journey.sh        # web acceptance: docker Postgres, server, next bu
                               # browser run, and screenshots of both surfaces into
                               # build/web-journey-evidence. Set DAILYBRIEF_WEB_PORT /
                               # DAILYBRIEF_WEB_API_PORT / DAILYBRIEF_WEB_DB_PORT if those are taken.
+(cd apps/web && node e2e/mock-api.mjs)  # a believable week with no server, for UI work; then
+                              # `next dev` with NEXT_PUBLIC_FIXTURE=1 NEXT_PUBLIC_API_BASE=http://localhost:8097,
+                              # `node e2e/notebook.mjs` (gestures, ~15 s; DAILYBRIEF_BROWSER=firefox|webkit
+                              # for the other engines) and `node e2e/shots.mjs` (screenshots)
+scripts/share-tunnel.sh       # a temporary public link from this machine (Cloudflare quick tunnel,
+                              # fixture sign-in: everyone with the link shares one notebook)
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+                              # the whole stack behind https on one machine (after :server:installDist)
 scripts/publish-engine-local.sh  # publish planning-core/contract AARs to mavenLocal; --mobile for the mobile build (compileSdk 36)
 scripts/smoke-release.sh      # install and launch the *minified* build — catches R8 damage
 scripts/capture-preview.sh    # recapture preview.html's plates from the running app
@@ -131,6 +139,63 @@ for anything new. Date arithmetic especially: it is where midnight, DST and
   API 36 emulator cannot present this app's window, so no rendered test can catch this — the
   mobile timeline had drawn calendar commitments with the *accent*, the mark that means "yours
   and movable", and nothing failed.
+- **The web client is a pen-and-paper notebook, built on the same tokens.** It prints the
+  notebook's structure (dates, hours, labels, explanations) in Literata and writes everything
+  that is the user's (tasks, plans, page titles, buttons) in Kalam; there are no cards, only
+  space and ruled lines. It adds one mark of its own — a dotted pencil outline is a block the
+  planner proposed and the user has not applied — and defaults to the indigo accent as blue
+  ink (a reader can pick any of the six under Settings; the choice stays in their browser).
+  One `PlannerProvider` in the root layout holds the state every page reads, so a proposal or a
+  "waits for" survives moving between pages. Day boundaries are *local* midnight
+  (`lib/format.ts`): the old planner cut its week at UTC midnight and, in India, drew an all-day
+  event on two days.
+  Narrow windows get their own *structure*, not just smaller type: below 1000px the week is a
+  strip of seven days with one open (`useIsOneLeaf`), below 720px Projects is a list and a
+  task's details open on an index card (`useIsPhone`). Each renders one structure, never two
+  with one hidden — `e2e/web-journey.mjs` finds titles with strict `getByText`, and a hidden
+  duplicate fails it. The first phone layout simply stacked the desktop at the same density
+  and read as cluttered; check phone work at 390px with touch emulation.
+  Carrying a task to a day (`app/components/drag.tsx`) is pointer events, not HTML drag-and-drop,
+  because phones give a finger none: a mouse lifts a row after a few pixels, a finger after a
+  ~380 ms press so swipes still scroll. A drop never writes — `placeOnDay` asks the planner
+  for that one task in that one day, with every other placed block passed as fixed time so
+  nothing else can move, and the answer (Apply/Discard, or why it did not fit) is written in
+  the day. Every drag has a twin on the task's card and in the pencil (WCAG 2.5.7). The
+  server has no stage-move route, so there is no drag between board stages; a task's title,
+  estimate, due date, highlight, done and erased state go through `PATCH /v1/tasks/{id}`. `lib/jot.ts` reads a
+  jotted line ("Send invoice 45m fri #north"); effort and dates are read only from the end of
+  the line so "Plan Monday stand-up" stays a title, and a due day means the end of that local
+  day. All-day events are not fixed time for the planner: passing them as 00:00–24:00 made
+  any day with a birthday unplannable.
+- **On the web, the tool in hand is the verb.** `app/components/pencil-case.tsx` holds four:
+  the pen writes and ticks (and a touch opens the task's card), the pencil drafts a task a
+  place in the week, the highlighter marks it (`priority: high`, which the planner's
+  priority ordering reads), the eraser rubs it out (archive, with Undo). `planner.touchTask`
+  is the one entry point every task line calls. A tool is an accelerator, never the only
+  way: every action is also on the one `TaskCard` the pen opens, which is how a keyboard or
+  screen-reader user reaches it. On the Today notes sheet (`day-notes.tsx`, geometry in
+  `lib/ink.ts`) the same tools draw: a stylus or mouse always draws, a finger draws only
+  with pencil, highlighter or eraser in hand — with the pen a finger scrolls, or nobody
+  could move past the sheet on a phone.
+- **A jot never waits on the network.** `planner.jot` and `editTask` change the page first
+  and the server behind it; a refusal puts the page back and says why. The last pages are
+  kept in the browser (`lib/offline.ts`) and shown at once on the next visit, jots made
+  offline queue in an outbox and are sent when the signal returns, and `public/sw.js`
+  caches only the app's own shell — never the API, which is another origin. Signing out
+  clears all of it. `e2e/offline.mjs` proves this against a production build; the worker is
+  not registered in development.
+- **Google is asked for one thing at a time.** Sign-in requests identity only; the calendar
+  and Drive are each their own later consent (`GoogleScopes`, `/v1/auth/start?connect=`),
+  and `GoogleAccount` keeps one connection row per workspace, merging scopes and keeping a
+  refresh token a later consent did not re-issue. Sync is one-way in both directions and the
+  UI says so: the calendar is read (again whenever the notebook is opened and the last read
+  is over ten minutes old), a readable `Daily Brief.md` is written to Drive a few
+  seconds after the last change, and (opt-in) the plan is written to a secondary "Daily
+  Brief" Google calendar the notebook creates itself — never to the reader's own. `docs/saas/12-going-public.md` is the launch runbook.
+- **A plan never reaches into the past.** The web client sends `nowMs` as the next quarter
+  hour and the range from *local* midnight; it used to send UTC midnight for both, which
+  placed work in hours of today that had already gone. All-day events arrive as UTC
+  midnights of their date and are moved onto the reader's own day in `lib/api.ts`.
 - **Every module compiles against SDK 37.1, never bare 37.** The pinned SDK has
   `platforms;android-37.1` and nothing else, so `compileSdk = 37` asks for 37.0 and sends
   Gradle to the network for a platform that is not there. Because the download reports no

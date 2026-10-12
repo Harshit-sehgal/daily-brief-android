@@ -7,6 +7,9 @@ import type {
   Board,
   CapacityRequest,
   CapacityResponse,
+  Connections,
+  DayNote,
+  ExternalEvent,
   PlanRun,
   PlanningRequest,
   PortfolioResponse,
@@ -16,6 +19,7 @@ import type {
   ScenarioResponse,
   SummaryResponse,
   Task,
+  TaskPatch,
   TodayResponse,
   WorkSchedule,
 } from "./types";
@@ -24,7 +28,10 @@ const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE?.trim();
 if (!configuredApiBase && process.env.NODE_ENV === "production") {
   throw new Error("NEXT_PUBLIC_API_BASE must be configured for a production web build");
 }
-const API_BASE = configuredApiBase ?? "http://localhost:8090";
+// "same-origin" means the API answers under this site's own address (/v1/…), put there
+// by the proxy rule in next.config.ts or by a reverse proxy in front. One address needs
+// one host name, and makes the session cookie first-party in every browser.
+const API_BASE = configuredApiBase === "same-origin" ? "" : configuredApiBase ?? "http://localhost:8090";
 const WORKSPACE_KEY = "dailybrief.workspaceId";
 const CSRF_KEY = "dailybrief.csrf";
 
@@ -52,6 +59,33 @@ export function clearSession() {
   window.localStorage.removeItem("dailybrief.token");
   window.localStorage.removeItem(WORKSPACE_KEY);
   window.sessionStorage.removeItem(CSRF_KEY);
+}
+
+const OAUTH_STATE_KEY = "dailybrief.oauth";
+
+/**
+ * Leave for Google's consent screen, remembering which sign-in this browser started.
+ * The callback page finishes only a sign-in it can match (`claimOAuthState`): without
+ * that, a link to /auth/callback carrying someone else's code would sign a reader into
+ * that person's notebook, to write their own tasks where a stranger can read them.
+ */
+export function leaveForGoogle(url: string, returnTo: string) {
+  const state = new URL(url).searchParams.get("state") ?? "";
+  window.sessionStorage.setItem(OAUTH_STATE_KEY, JSON.stringify({ state, returnTo }));
+  window.location.assign(url);
+}
+
+/** The page to return to when `state` is the sign-in this browser started; null when it is not. */
+export function claimOAuthState(state: string): string | null {
+  const raw = window.sessionStorage.getItem(OAUTH_STATE_KEY);
+  window.sessionStorage.removeItem(OAUTH_STATE_KEY);
+  try {
+    const kept = JSON.parse(raw ?? "") as { state: string; returnTo: string };
+    if (!kept.state || kept.state !== state) return null;
+    return /^\/[a-z]*$/.test(kept.returnTo) ? kept.returnTo : "/";
+  } catch {
+    return null;
+  }
 }
 
 export class ApiError extends Error {
@@ -82,13 +116,29 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * An all-day event is a date, not an instant: Google sends "6 October", the server stores
+ * it as 6 October 00:00 UTC, and in India that instant is 05:30 — so the event drew across
+ * two local days. Move it onto local midnight of the same calendar date.
+ */
+export function localAllDay(e: ExternalEvent): ExternalEvent {
+  if (!e.isAllDay) return e;
+  const local = (ms: number) => {
+    const d = new Date(ms);
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()).getTime();
+  };
+  return { ...e, startTime: local(e.startTime), endTime: local(e.endTime) };
+}
+
 export const client = {
   signup(): Promise<BrowserSessionResponse> {
     return api("/v1/fixture/browser-signup", { method: "POST" });
   },
 
-  authStart(): Promise<{ url: string; redirectUri: string }> {
-    return api(`/v1/auth/start?redirect_uri=${encodeURIComponent(window.location.origin + "/auth/callback")}`);
+  /** Sign-in asks Google only who you are; `connect` adds the calendar or Drive by its own consent. */
+  authStart(connect?: "calendar" | "drive" | "plan"): Promise<{ url: string; redirectUri: string }> {
+    const redirect = encodeURIComponent(window.location.origin + "/auth/callback");
+    return api(`/v1/auth/start?redirect_uri=${redirect}${connect ? `&connect=${connect}` : ""}`);
   },
 
   authCallback(code: string, redirectUri: string, state: string): Promise<BrowserSessionResponse> {
@@ -101,6 +151,40 @@ export const client = {
 
   addTask(task: Task): Promise<{ ok: boolean }> {
     return api("/v1/tasks", { method: "POST", body: JSON.stringify(task) });
+  },
+
+  patchTask(id: string, patch: TaskPatch): Promise<Task> {
+    return api(`/v1/tasks/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) });
+  },
+
+  /** Calendar events overlapping a span, with all-day events moved onto the reader's own days. */
+  async events(start: number, end: number): Promise<ExternalEvent[]> {
+    const events = await api<ExternalEvent[]>(`/v1/events?start=${start}&end=${end}`);
+    return events.map(localAllDay);
+  },
+
+  note(day: string): Promise<DayNote> {
+    return api(`/v1/notes/${day}`);
+  },
+
+  saveNote(note: DayNote): Promise<{ ok: boolean }> {
+    return api(`/v1/notes/${note.day}`, { method: "PUT", body: JSON.stringify(note) });
+  },
+
+  connections(): Promise<Connections> {
+    return api("/v1/connections");
+  },
+
+  driveBackup(): Promise<Connections["drive"]> {
+    return api("/v1/drive/backup", { method: "POST", body: "{}" });
+  },
+
+  pushPlan(): Promise<NonNullable<Connections["planCalendar"]>> {
+    return api("/v1/calendar/push", { method: "POST", body: "{}" });
+  },
+
+  deleteAccount(): Promise<{ ok: boolean }> {
+    return api("/v1/account", { method: "DELETE" });
   },
 
   listTasks(): Promise<Task[]> {

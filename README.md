@@ -163,6 +163,30 @@ App data is stored locally with Room. Network requests are limited to the
 Notion and Gemini APIs. API keys are entered at runtime in Settings and are not
 injected into the APK at build time.
 
+## The web notebook
+
+`apps/web` is the same planner as a pen-and-paper notebook in a browser, on the
+server in `services/server`. It installs to a phone, tablet or desktop home screen and
+opens with no signal.
+
+- **Jot** a task on one line (`Send invoice 45m fri #north`), from any page with `N`,
+  from the home-screen shortcut, or by sharing text to the app.
+- **Four tools**: the pen writes and ticks, the pencil drafts a task a place in the
+  week, the highlighter marks what matters, the eraser rubs a line out. On Today's notes
+  sheet the same four draw freehand.
+- **Google**: sign in with identity only; connect the calendar (read only) and Drive
+  (one readable `Daily Brief.md`, kept up to date) each by their own consent.
+
+```bash
+cd apps/web
+node e2e/mock-api.mjs &                       # a believable week, no server needed
+NEXT_PUBLIC_FIXTURE=1 NEXT_PUBLIC_API_BASE=http://localhost:8097 npx next dev -p 3007
+node e2e/notebook.mjs                         # the gestures, in a real browser
+```
+
+`scripts/web-journey.sh` runs the browser against the real server and Postgres.
+Launching it for the public is `docs/saas/12-going-public.md`.
+
 ## Pinned toolchain
 
 | Component | Version |

@@ -1,0 +1,10 @@
+# Two names, one site. Caddy fetches a certificate for each on first request; for a
+# *.localhost name it signs one itself, which is what the rehearsal uses.
+{$APP_HOST} {
+	encode zstd gzip
+	reverse_proxy web:3000
+}
+
+{$API_HOST} {
+	reverse_proxy server:8080
+}

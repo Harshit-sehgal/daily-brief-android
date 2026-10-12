@@ -2,10 +2,6 @@ package com.example.server.google
 
 import com.example.data.model.BriefingEvent
 import com.example.server.Config
-import com.example.server.db.Db
-import com.example.server.db.Db.execute
-import com.example.server.db.Envelope
-import com.example.server.key.KeyProviders
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -233,8 +229,21 @@ object GoogleOAuth {
   val json = Json { ignoreUnknownKeys = true }
   private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
 
-  /** The web client's consent URL: identity + calendar scopes, with a server-bound PKCE challenge. */
-  fun authorizeUrl(config: Config, redirectUri: String, state: String, codeChallenge: String): String {
+  /**
+   * The consent URL, with a server-bound PKCE challenge. [scope] is what this step asks
+   * for; `include_granted_scopes` makes the token Google returns cover everything granted
+   * before as well. [consent] forces the consent screen — the only way Google re-issues a
+   * refresh token — and is used when a reader connects the calendar or Drive; a plain
+   * sign-in only asks which account.
+   */
+  fun authorizeUrl(
+    config: Config,
+    redirectUri: String,
+    state: String,
+    codeChallenge: String,
+    scope: String = "${GoogleScopes.SIGN_IN} ${GoogleScopes.CALENDAR}",
+    consent: Boolean = true,
+  ): String {
     val base = "https://accounts.google.com/o/oauth2/v2/auth"
     val params =
       listOf(
@@ -244,9 +253,10 @@ object GoogleOAuth {
         "code_challenge" to codeChallenge,
         "code_challenge_method" to "S256",
         "response_type" to "code",
-        "scope" to "openid email https://www.googleapis.com/auth/calendar.readonly",
+        "scope" to scope,
         "access_type" to "offline",
-        "prompt" to "consent",
+        "include_granted_scopes" to "true",
+        "prompt" to if (consent) "consent" else "select_account",
       )
     return base + "?" + params.joinToString("&") { (k, v) -> "$k=${v.encodeURL()}" }
   }
@@ -257,6 +267,8 @@ object GoogleOAuth {
     val token_type: String,
     val expires_in: Int,
     val refresh_token: String? = null,
+    /** Space-separated scopes this token carries, as Google reports them. */
+    val scope: String? = null,
   )
 
   @Serializable
@@ -303,17 +315,14 @@ object GoogleOAuth {
     }
   }
 
-  fun storeToken(config: Config, workspaceId: String, provider: String, account: String, tokenJson: String) {
-    val connectionId = java.util.UUID.randomUUID().toString()
-    val keyProvider = KeyProviders.from(config)
-    val envelope = Envelope.wrap(keyProvider, workspaceId, "calendar_connection_$connectionId", tokenJson)
-    Db.inTransaction { conn ->
-      conn.execute(
-        "INSERT INTO calendar_connections (id, workspace_id, provider, external_account, token_ciphertext, token_kms_key_id, status, created_at, updated_at) " +
-          "VALUES (?, ?, ?, ?, ?, ?, 'connected', ?, ?)",
-        listOf(connectionId, workspaceId, provider, account, envelope, keyProvider.keyId, System.currentTimeMillis(), System.currentTimeMillis()),
-      )
-    }
+  /** Withdraws a token (and with a refresh token, the whole grant) at Google. */
+  fun revoke(token: String) {
+    val request =
+      Request.Builder()
+        .url("https://oauth2.googleapis.com/revoke")
+        .post("token=${token.encodeURL()}".toRequestBody("application/x-www-form-urlencoded".toMediaType()))
+        .build()
+    client.newCall(request).execute().close()
   }
 
   /** Exchanges a stored refresh token for a fresh access-token pair (grant_type=refresh_token). */

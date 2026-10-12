@@ -328,3 +328,36 @@ export interface SummaryResponse {
   used: number;
   limit: number;
 }
+
+/** What the reader's Google account is connected to, as Settings and the sync mark read it. */
+export interface Connections {
+  email: string;
+  name: string;
+  calendar: { connected: boolean; lastSyncAt?: number | null };
+  drive: { connected: boolean; lastBackupAt?: number | null; fileUrl?: string | null };
+  /** Planned work written into a "Daily Brief" calendar of its own in Google Calendar. */
+  planCalendar?: { connected: boolean; lastPushAt?: number | null };
+}
+
+/** A partial edit of one task. `null` clears an estimate or a due date. */
+export interface TaskPatch {
+  title?: string;
+  effortMinutes?: number | null;
+  dueAt?: number | null;
+  priority?: "normal" | "high";
+  completed?: boolean;
+  archived?: boolean;
+}
+
+/** One freehand stroke on a notes sheet: the tool that made it and its points, x then y,
+ *  in the sheet's own 1000-wide units so a sketch keeps its shape at any width. */
+export interface Stroke {
+  t: "pen" | "pencil" | "highlighter";
+  p: number[];
+}
+
+export interface DayNote {
+  day: string;
+  text: string;
+  strokes: Stroke[];
+}

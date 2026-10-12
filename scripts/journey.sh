@@ -491,6 +491,97 @@ jq -e '.deliveries | map(.token) | index("journey-token-b") == null and index("t
   || fail "a delivery leaked to a deregistered or foreign token"
 step "11. push               (+$(( $(start_ms) - T )) ms)"
 
+# Step 12: the public notebook's own routes. The calendar across a week (Today answers for
+# one day only), a task reworded, highlighted, ticked and rubbed out, the Google
+# connections as the Settings page reads them, the Drive copy, and deleting an account.
+T=$(start_ms)
+nb() { # nb <method> <path> <json-or-dash> <outfile> [token] — status lands in journey-status.txt
+  local method=$1 path=$2 body=$3 out=$4 token=${5:-$TOKEN}
+  if [ "$body" = "-" ]; then
+    curl -sS -o "$out" -w '%{http_code}' -X "$method" -H "Authorization: Bearer $token" \
+      "http://localhost:$PORT_API$path" > "${JOURNEY_RUN_DIR}"/journey-status.txt
+  else
+    curl -sS -o "$out" -w '%{http_code}' -X "$method" -H "Authorization: Bearer $token" \
+      -H 'Content-Type: application/json' -d "$body" "http://localhost:$PORT_API$path" > "${JOURNEY_RUN_DIR}"/journey-status.txt
+  fi
+}
+status() { cat "${JOURNEY_RUN_DIR}"/journey-status.txt; }
+NB="${JOURNEY_RUN_DIR}"/journey-notebook
+nb GET "/v1/events?start=$NOW&end=$((NOW + 7*86400000))" - "$NB-events.json"
+jq -e '[.[].title] | index("Client stand-up") != null and index("Focus writing") != null' "$NB-events.json" >/dev/null \
+  || fail "the week's events are missing tomorrow's: $(jq -c '[.[].title]' "$NB-events.json")"
+nb GET /v1/events - "$NB-events-unbounded.json"
+[ "$(status)" = "400" ] || fail "an unbounded events read should be refused (got $(status))"
+
+nb PATCH /v1/tasks/t2 '{"title":"  Prep the final slides ","priority":"high","effortMinutes":null}' "$NB-edit.json"
+jq -e '.title == "Prep the final slides" and .priority == "high" and .effortMinutes == null' "$NB-edit.json" >/dev/null \
+  || fail "task edit did not persist: $(cat "$NB-edit.json")"
+nb PATCH /v1/tasks/t2 '{"completed":true}' "$NB-done.json"
+jq -e '.completedAt != null' "$NB-done.json" >/dev/null || fail "task was not completed"
+nb GET /v1/plan-blocks - "$NB-blocks.json"
+jq -e --argjson now "$(date -u +%s%3N)" '[.[] | select(.taskId == "t2" and .startAt >= $now)] | length == 0' "$NB-blocks.json" >/dev/null \
+  || fail "a finished task still has blocks ahead"
+nb PATCH /v1/tasks/t3 '{"archived":true}' "$NB-erase.json"
+nb GET /v1/tasks - "$NB-tasks.json"
+jq -e '[.[] | select(.id == "t3")] | length == 0' "$NB-tasks.json" >/dev/null || fail "a rubbed-out task is still listed"
+nb PATCH /v1/tasks/t3 '{"archived":false}' "$NB-restore.json"
+nb GET /v1/tasks - "$NB-tasks2.json"
+jq -e '[.[] | select(.id == "t3")] | length == 1' "$NB-tasks2.json" >/dev/null || fail "undoing a rub-out did not restore the task"
+nb PATCH /v1/tasks/no-such-task '{"completed":true}' "$NB-missing.json"
+[ "$(status)" = "404" ] || fail "editing a task that does not exist should answer 404 (got $(status))"
+nb PATCH /v1/tasks/t1 '{}' "$NB-empty.json"
+[ "$(status)" = "422" ] || fail "an empty edit should answer 422 (got $(status))"
+nb PATCH /v1/tasks/t1 '{"completed":true}' "$NB-foreign.json" "$TRIAL_TOKEN"
+[ "$(status)" = "404" ] || fail "another workspace could edit this one's task (got $(status))"
+
+nb GET /v1/connections - "$NB-connections.json"
+jq -e '.email == "fixture@dailybrief.dev" and .calendar.connected == true and .calendar.lastSyncAt > 0 and .drive.connected == false' \
+  "$NB-connections.json" >/dev/null || fail "connections read wrong: $(cat "$NB-connections.json")"
+nb POST /v1/drive/backup '{}' "$NB-drive.json"
+jq -e '.connected == true and .lastBackupAt > 0' "$NB-drive.json" >/dev/null || fail "the Drive copy was not written: $(cat "$NB-drive.json")"
+nb GET /v1/fixture/drive-file - "$NB-drive-file.json"
+jq -e '.content | startswith("# Daily Brief") and contains("- [x] Prep the final slides") and contains("## The plan")' \
+  "$NB-drive-file.json" >/dev/null || fail "the Drive copy does not read as the notebook: $(jq -r .content "$NB-drive-file.json" | head -20)"
+
+nb PUT /v1/notes/2026-10-06 '{"day":"ignored","text":"Ask Priya about the venue","strokes":[{"t":"pen","p":[1,2,3,4]}]}' "$NB-note-put.json"
+[ "$(status)" = "200" ] || fail "saving a day note should answer 200 (got $(status): $(cat "$NB-note-put.json"))"
+nb GET /v1/notes/2026-10-06 - "$NB-note.json"
+jq -e '.day == "2026-10-06" and .text == "Ask Priya about the venue" and .strokes[0].p == [1,2,3,4]' "$NB-note.json" >/dev/null \
+  || fail "the day note did not read back: $(cat "$NB-note.json")"
+nb GET /v1/notes/2026-10-07 - "$NB-note-empty.json"
+jq -e '.text == "" and (.strokes | length == 0)' "$NB-note-empty.json" >/dev/null || fail "a day with no note should read as blank"
+nb GET /v1/notes/2026-10-06 - "$NB-note-foreign.json" "$TRIAL_TOKEN"
+jq -e '.text == ""' "$NB-note-foreign.json" >/dev/null || fail "another workspace could read this one's note"
+nb POST /v1/drive/backup '{}' "$NB-drive2.json"
+nb GET /v1/fixture/drive-file - "$NB-drive-file2.json"
+jq -e '.content | contains("## Notes") and contains("Ask Priya about the venue")' "$NB-drive-file2.json" >/dev/null \
+  || fail "the Drive copy is missing the day's typed notes"
+nb PUT /v1/notes/not-a-day '{"day":"x","text":"x"}' "$NB-note-bad.json"
+[ "$(status)" = "422" ] || fail "a note for a day that is not a date should answer 422 (got $(status))"
+
+# The plan, written out to its own calendar: what is planned ahead is there, a finished
+# task's block is not, and a second write changes nothing.
+nb GET /v1/connections - "$NB-connections-before-push.json"
+jq -e '.planCalendar.connected == false' "$NB-connections-before-push.json" >/dev/null || fail "the plan calendar should start unconnected"
+nb POST /v1/calendar/push '{}' "$NB-push.json"
+jq -e '.connected == true and .lastPushAt > 0' "$NB-push.json" >/dev/null || fail "the plan was not written out: $(cat "$NB-push.json")"
+nb GET /v1/fixture/plan-calendar - "$NB-plan-calendar.json"
+nb GET /v1/plan-blocks - "$NB-blocks-now.json"
+WANT=$(jq --argjson from "$(( $(date -u +%s%3N) - 86400000 ))" '[.[] | select(.endAt > $from)] | length' "$NB-blocks-now.json")
+jq -e --argjson want "$WANT" 'length == $want' "$NB-plan-calendar.json" >/dev/null \
+  || fail "the plan calendar holds $(jq length "$NB-plan-calendar.json") events for $WANT blocks"
+nb POST /v1/calendar/push '{}' "$NB-push2.json"
+nb GET /v1/fixture/plan-calendar - "$NB-plan-calendar2.json"
+cmp -s "$NB-plan-calendar.json" "$NB-plan-calendar2.json" || fail "writing the same plan twice changed the calendar"
+
+nb DELETE /v1/account - "$NB-delete.json" "$TRIAL_TOKEN"
+[ "$(status)" = "200" ] || fail "deleting an account should answer 200 (got $(status): $(cat "$NB-delete.json"))"
+nb GET /v1/tasks - "$NB-after-delete.json" "$TRIAL_TOKEN"
+jq -e 'length == 0' "$NB-after-delete.json" >/dev/null || fail "a deleted account still has tasks"
+nb GET /v1/tasks - "$NB-main-intact.json"
+jq -e 'length > 0' "$NB-main-intact.json" >/dev/null || fail "deleting one account touched another"
+step "12. notebook routes    (+$(( $(start_ms) - T )) ms)"
+
 TOTAL=$(( $(start_ms) - T0 ))
 echo "== journey complete in ${TOTAL} ms"
 if [ "$TOTAL" -gt 90000 ]; then

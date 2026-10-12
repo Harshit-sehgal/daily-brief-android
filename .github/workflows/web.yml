@@ -94,3 +94,62 @@ jobs:
           name: web-rendered-journey-evidence
           if-no-files-found: warn
           path: build/web-journey-evidence/
+
+  notebook-gestures:
+    name: Notebook gestures and offline, against the mock API
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: apps/web
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      - name: Build against the mock API
+        run: npm run build
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_FIXTURE: "1"
+          NEXT_PUBLIC_API_BASE: http://localhost:8097
+
+      - name: Run the gesture and offline journeys
+        working-directory: apps/web
+        env:
+          DAILYBRIEF_WEB_BASE: http://localhost:3012
+        run: |
+          node e2e/mock-api.mjs &
+          npx next start --port 3012 &
+          for i in $(seq 1 60); do curl -sf http://localhost:3012/ >/dev/null && break; sleep 0.5; done
+          node e2e/notebook.mjs
+          node e2e/offline.mjs
+
+      - name: Rebuild in real-account mode against the mock
+        run: npm run build
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_FIXTURE: "0"
+          NEXT_PUBLIC_API_BASE: http://localhost:8097
+
+      - name: Run the sign-in and consent journey
+        working-directory: apps/web
+        env:
+          DAILYBRIEF_WEB_BASE: http://localhost:3008
+        run: |
+          curl -sf http://localhost:8097/v1/tasks >/dev/null || node e2e/mock-api.mjs &
+          npx next start --port 3008 &
+          for i in $(seq 1 60); do curl -sf http://localhost:3008/ >/dev/null && break; sleep 0.5; done
+          node e2e/signin.mjs

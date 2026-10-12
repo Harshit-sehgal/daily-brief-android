@@ -44,7 +44,12 @@ done
 SERVER_PID=""
 WEB_PID=""
 cleanup() {
+  # WEB_PID is the subshell around `npm run start`; the server itself is a grandchild
+  # that outlived a plain kill and kept the port for the next run.
+  [ -n "$WEB_PID" ] && pkill -P "$WEB_PID" 2>/dev/null || true
   [ -n "$WEB_PID" ] && kill "$WEB_PID" 2>/dev/null || true
+  WEB_LISTENER=$(ss -tlnp 2>/dev/null | sed -n "s/.*:${PORT_WEB}\\b.*pid=\\([0-9]*\\).*/\\1/p" | head -1)
+  [ -n "$WEB_LISTENER" ] && kill "$WEB_LISTENER" 2>/dev/null || true
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 }

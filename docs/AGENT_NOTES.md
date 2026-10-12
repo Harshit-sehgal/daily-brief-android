@@ -1084,6 +1084,115 @@ These are evidence or operator/device tasks, not safely closable by local source
   real Google-account OAuth/calendar evidence, production KMS/Stripe/Gemini/
   Expo/DNS configuration, physical-device cache proof, Mac XCFramework/Swift
   verification, API 24 rendered inspection, manual accessibility/form-factor/
-  process-death coverage, consultant usability sessions, and the eight high
-  upstream Expo/Metro audit findings (needs a planned framework upgrade).
+  process-death coverage, and consultant usability sessions. The upstream
+  Expo/Metro audit findings are **closed** — see below.
 
+### 2026-08-25 (closing the mobile dependency-audit register item)
+
+- The "eight high upstream Expo/Metro findings, needs a planned framework
+  upgrade" register item was re-scoped before any upgrade: the count had
+  already fallen to five (`image-size` ICNS/JXL/HEIF DoS advisories
+  GHSA-w3rx-r6r6-pgpr / GHSA-5p2g-fcmc-qvqq), and every path to it ran through
+  **metro**, not Expo code. metro 0.84.4 declares `image-size ^1.0.2` (→
+  vulnerable 1.2.1); **metro 0.84.5 drops the dependency outright**, which is
+  why 0.84.5 is excluded from both advisory ranges.
+- So the honest fix was two patch-level moves inside SDK 57, no SDK jump:
+  `npx expo install --fix` took eight packages to their SDK-57 expected
+  patches (expo/expo-router 57.0.16, expo-notifications 57.0.14, @expo/ui
+  57.0.13, splash-screen .8, linking .7; constants/file-system refreshed in
+  the lockfile within their existing `~` ranges), moving `@expo/metro`
+  56.0.0→56.0.2 → metro 0.84.5. That cleared the Expo leg (5→4 findings).
+- The remaining four hung off react-native@0.86.2's own nested copies
+  (`community-cli-plugin`, `react-native-worklets`→`@react-native/metro-config`),
+  whose `^0.84.3` ranges *already admit* 0.84.5 but kept stale lockfile
+  resolutions that `npm update`/`npm dedupe` refused to re-resolve. Pinned the
+  fourteen-package metro family to `0.84.5` via `overrides` — same mechanism
+  as the existing `xcode→uuid` entry, violating no declared range, keeping RN
+  at the Expo-pinned 0.86.2 rather than drifting it. `npm audit` now reports
+  **0 vulnerabilities** (both with and without dev deps).
+- Gate evidence: vitest **86/86**, `expo lint` clean, `tsc --noEmit` clean,
+  `scripts/verify-mobile-release.sh` green (**5m01s**, 568 tasks) — the release
+  APK's embedded JS bundle is metro 0.84.5 output, so the upgraded bundler ran
+  end-to-end, not just in a lockfile.
+- Register after this pass: hosted CI run for the unpublished branch, real
+  Google-account OAuth/calendar evidence, production KMS/Stripe/Gemini/Expo/
+  DNS configuration, physical-device cache proof, Mac XCFramework/Swift
+  verification, API 24 rendered inspection, manual accessibility/form-factor/
+  process-death coverage, and consultant usability sessions.
+
+### 2026-10-06 (the web notebook made public-ready: tools, notes, Google, installable)
+
+- **Server** (`Notebook.kt`, `google/GoogleAccount.kt`, `google/Drive.kt`, V8, V9):
+  `GET /v1/events` (the week's calendar; `/today` answers for one UTC day, so the week
+  had drawn commitments on today only and planned the other six days as if empty),
+  `PATCH /v1/tasks/{id}` (title, estimate, due, priority, done, archived; finishing or
+  erasing removes the task's blocks ahead), `GET /v1/connections`, `POST /v1/drive/backup`,
+  `GET|PUT /v1/notes/{day}` (envelope-encrypted), `DELETE /v1/account` (also revokes at
+  Google). Sign-in now asks for identity only; `?connect=calendar|drive` adds one scope by
+  its own consent. Defects fixed on the way: `storeToken` inserted a new connection row on
+  every sign-in against a unique key, so a **second sign-in failed**; reconcile fetched from
+  the epoch, i.e. an account's whole history. Journey step 12 covers all of it, including
+  cross-workspace refusal and account deletion.
+- **Web**: one `TaskCard` and one `touchTask` entry point; the pencil case; optimistic
+  jot and edit; snapshot + outbox + service worker; manifest with a Jot shortcut and share
+  target; notes sheet with freehand ink; Settings rebuilt around Google, install and
+  account; `/privacy` and `/terms`; cover with Google's branded button. Pages were cut to
+  what needs a decision: the week's standing paragraph, Today's "how the day divides", the
+  proposal's block list (now behind a disclosure) and per-row hover tools are gone.
+- **Plan requests** now send local-midnight ranges and `nowMs` as the next quarter hour.
+  The old UTC-midnight `nowMs` placed work in hours of today already past.
+- Evidence: `:server:test` green; `scripts/journey.sh` green (12 steps, ~4.8 s);
+  `scripts/web-journey.sh` green against the real server; `apps/web` lint, typecheck,
+  vitest 56/56, production build; `e2e/notebook.mjs` and `e2e/offline.mjs` green.
+- Not verifiable here, and why: a real Google consent, calendar fetch and Drive upload
+  (needs the operator's OAuth client); install prompts and stylus drawing on physical
+  iOS/Android hardware; Google's verification of the calendar scope.
+- Later the same day: week navigation (the page turns; planning a week ahead places only
+  unplaced tasks, never replans this week into the next); clashes computed on the local
+  day; `POST /v1/calendar/push` writes the plan to a secondary "Daily Brief" Google
+  calendar under `calendar.app.created` (V10; `PlanCalendarTest` against a local HTTP
+  stand-in). `e2e/signin.mjs` drives the real-mode build against a mock Google and found
+  two defects the fixture path could never show: after the OAuth callback a soft
+  navigation left a signed-in reader on the cover (now a full load), and a callback link
+  carrying someone else's code would have signed a reader into that account (the callback
+  now completes only a sign-in this browser started). `scripts/verify.sh --online` green.
+- Two more defects, both found by the real-server browser journey going flaky rather than
+  by reading code. A jot hint that collapsed when its line lost focus moved the inbox up
+  24px between a click's press and release, so a click on a task while the pen was on
+  the jot line landed on the row above (the hint now keeps its height; `e2e/notebook.mjs`
+  asserts the list does not move on blur). And page reads could answer out of order, an
+  older one overwriting a just-made edit; only the newest read now writes
+  (`reads` in `lib/planner.tsx`). axe (WCAG 2.2 AA + best practice) is clean on every
+  page, signed in and out, phone and desk, light and dark.
+- Cross-engine and topology evidence: `e2e/notebook.mjs` passes in Chromium, Firefox
+  155 and WebKit 26.4 (`DAILYBRIEF_BROWSER=firefox|webkit`; WebKit with iPhone 14
+  emulation, the engine iPhone and iPad use). WebKit on this machine needed `libwoff1`,
+  copied beside its own libraries without root. `deploy/docker-compose.yml` (Postgres,
+  server, web, Caddy) was rehearsed with `*.dailybrief.localhost` names in fixture mode
+  and the browser journey passed through https — the first run with the page and the API
+  on different hosts, which showed the journey script read the session cookie from the
+  wrong host. Over https the cookie is `SameSite=None; Secure`; the same-site rule in the
+  runbook is for browsers that block third-party cookies.
+- A further cut, screen by screen: the load bar under each day (the words beside it said
+  the same), the Done and Stated-effort ledger columns and the floor note they needed,
+  and empty board stages (the web cannot move a task between stages, so three empty
+  columns were furniture; one group now draws as a plain list). The week's clash note
+  sits on the date line, the brief sits above the notes, the sketch is shorter, a long
+  title wraps on a tall timeline block instead of being cut, and on a phone the task
+  card's choices are one swept row each so the whole card fits without scrolling. The
+  browser journey's Today assertion now holds in the last minutes before midnight too.
+- The inbox, reworked on request: it lists only what still needs a place (a booked task
+  is on its day; listing it twice only lengthened the list), highlighted first and then by
+  due date; its count is gone because it restated the list; the jot line is one line with
+  its advice as the placeholder, and what was read from it shows only while typing; and
+  on the desktop spread it heads the right leaf beside Monday instead of sitting under
+  Sunday, below the fold.
+- Sharing: `scripts/share-tunnel.sh` (docker Postgres, server, web, one Cloudflare quick
+  tunnel) and a single-address mode (`NEXT_PUBLIC_API_BASE=same-origin` plus
+  `API_PROXY_TARGET`, a rewrite in `next.config.ts`). Driving the public link showed a
+  race no local run had: a task ticked straight after being jotted sent its PATCH before
+  its own POST had landed and got 404. Edits now wait for a just-jotted task's save
+  (`saving` in `lib/planner.tsx`); the mock delays task creation 250 ms so
+  `e2e/notebook.mjs` catches it.
+- Not built: reading changes back from Google Calendar, restore from the Drive copy, live
+  push between two open devices, and the tools/notes/Drive on the Expo and Android apps.
