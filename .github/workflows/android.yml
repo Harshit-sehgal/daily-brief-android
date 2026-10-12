@@ -34,7 +34,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
         run: sdkmanager "build-tools;36.0.0" "platforms;android-36" "platforms;android-37.1"
@@ -97,7 +97,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install mobile SDK packages
         run: >-
@@ -157,7 +157,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install compile SDK
         run: sdkmanager "build-tools;36.0.0" "platforms;android-36" "platforms;android-37.1"
@@ -207,7 +207,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install compile SDK
         run: sdkmanager "build-tools;36.0.0" "platforms;android-36" "platforms;android-37.1"
